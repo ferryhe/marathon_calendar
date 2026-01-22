@@ -1,7 +1,9 @@
 import express, { type Request, Response, NextFunction } from "express";
+import { createServer } from "http";
+import { log } from "./logger";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
-import { createServer } from "http";
+import { startSyncScheduler } from "./syncScheduler";
 
 const app = express();
 const httpServer = createServer(app);
@@ -21,17 +23,6 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
-
-export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -61,6 +52,7 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+  const stopScheduler = startSyncScheduler();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -100,4 +92,8 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
+
+  httpServer.on("close", () => {
+    stopScheduler();
+  });
 })();
