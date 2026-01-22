@@ -52,46 +52,53 @@ export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
 
               {/* Events List for this month */}
               <div className="space-y-3">
-                {events.map((event, index) => (
-                  <motion.div
-                    key={event.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.03 }}
-                    className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
-                    onClick={() => setSelectedEvent(event)}
-                    data-testid={`row-event-${event.id}`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-secondary/50 font-bold">
-                        <span className="text-[10px] text-muted-foreground uppercase leading-none">{event.month}月</span>
-                        <span className="text-lg leading-none mt-1">{event.day}</span>
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-base line-clamp-1">{event.name}</h3>
-                        <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                          <MapPin className="w-3 h-3" />
-                          <span>{event.location.city}</span>
-                          <span className="opacity-30">|</span>
-                          <span>{event.type}</span>
+                {events.map((event, index) => {
+                  const date = new Date(event.year, event.month - 1, event.day);
+                  const weekDay = ['日', '一', '二', '三', '四', '五', '六'][date.getDay()];
+                  
+                  return (
+                    <motion.div
+                      key={event.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.03 }}
+                      className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
+                      onClick={() => setSelectedEvent(event)}
+                      data-testid={`row-event-${event.id}`}
+                    >
+                      <div className="flex items-center gap-5">
+                        {/* Time Module (Date + Weekday) */}
+                        <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
+                          <span className="text-lg leading-none">{event.day}</span>
+                          <span className="text-[10px] text-muted-foreground uppercase mt-1">周{weekDay}</span>
+                        </div>
+                        
+                        <div>
+                          <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">{event.name}</h3>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
+                            <MapPin className="w-3 h-3" />
+                            <span>{event.location.city}</span>
+                            <span className="opacity-30">|</span>
+                            <span>{event.type}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-3">
-                      {event.registrationStatus === 'Open' && (
-                        <Badge variant="default" className="bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-1.5 h-5 flex items-center gap-1">
-                          <span className="relative flex h-1.5 w-1.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
-                          </span>
-                          报名中
-                        </Badge>
-                      )}
-                      <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
-                    </div>
-                  </motion.div>
-                ))}
+                      
+                      <div className="flex items-center gap-3">
+                        {event.registrationStatus === 'Open' && (
+                          <Badge variant="default" className="bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-2 h-5 flex items-center gap-1.5">
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
+                            </span>
+                            报名中
+                          </Badge>
+                        )}
+                        <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+                      </div>
+                    </motion.div>
+                  );
+                })}
               </div>
             </div>
           ))
