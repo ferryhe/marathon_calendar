@@ -19,6 +19,7 @@ export default function Home() {
       toast({
         title: "日历已更新",
         description: "已从网络获取最新马拉松赛事信息。",
+        duration: 3000,
       });
     }, 1500);
   };
