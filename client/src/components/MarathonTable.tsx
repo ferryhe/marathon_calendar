@@ -55,46 +55,40 @@ export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
                 {events.map((event, index) => (
                   <motion.div
                     key={event.id}
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="group relative flex items-center justify-between p-5 bg-card hover:bg-accent/40 active:scale-[0.99] transition-all rounded-3xl border border-border/50 shadow-sm hover:shadow-md cursor-pointer"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.03 }}
+                    className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
                     onClick={() => setSelectedEvent(event)}
                     data-testid={`row-event-${event.id}`}
                   >
-                    <div className="flex items-center gap-5">
-                      <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary font-bold ring-1 ring-border/50">
-                        <span className="text-lg leading-none">{event.day}</span>
-                        <span className="text-[10px] text-muted-foreground uppercase mt-1">周{['日', '一', '二', '三', '四', '五', '六'][new Date(event.year, event.month - 1, event.day).getDay()]}</span>
+                    <div className="flex items-center gap-4">
+                      <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-secondary/50 font-bold">
+                        <span className="text-[10px] text-muted-foreground uppercase leading-none">{event.month}月</span>
+                        <span className="text-lg leading-none mt-1">{event.day}</span>
                       </div>
-                      <div className="space-y-1">
-                        <h3 className="font-bold text-lg leading-tight group-hover:text-primary transition-colors line-clamp-1">
-                          {event.name}
-                        </h3>
-                        <div className="flex items-center gap-3 text-sm text-muted-foreground font-medium">
-                          <div className="flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-muted-foreground/60" />
-                            <span>{event.location.city}</span>
-                          </div>
-                          <span className="w-1 h-1 rounded-full bg-border" />
-                          <span className="text-xs bg-muted px-2 py-0.5 rounded-full">{event.type}</span>
+                      <div>
+                        <h3 className="font-semibold text-base line-clamp-1">{event.name}</h3>
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                          <MapPin className="w-3 h-3" />
+                          <span>{event.location.city}</span>
+                          <span className="opacity-30">|</span>
+                          <span>{event.type}</span>
                         </div>
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
                       {event.registrationStatus === 'Open' && (
-                        <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 text-blue-500 rounded-full border border-blue-500/20">
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                        <Badge variant="default" className="bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-1.5 h-5 flex items-center gap-1">
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
                           </span>
-                          <span className="text-[11px] font-bold">报名中</span>
-                        </div>
+                          报名中
+                        </Badge>
                       )}
-                      <div className="p-2 rounded-full bg-secondary/50 group-hover:bg-primary group-hover:text-primary-foreground transition-all">
-                        <ChevronRight className="w-4 h-4" />
-                      </div>
+                      <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                     </div>
                   </motion.div>
                 ))}
