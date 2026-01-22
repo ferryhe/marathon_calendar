@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { boolean, integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  date,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -9,34 +18,131 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
 });
 
-export const sourceStrategies = ["RSS", "HTML", "API"] as const;
-export const syncStatuses = ["running", "retrying", "success", "failed"] as const;
+export const marathons = pgTable(
+  "marathons",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    name: text("name").notNull(),
+    canonicalName: text("canonical_name").notNull(),
+    city: text("city"),
+    country: text("country"),
+    description: text("description"),
+    websiteUrl: text("website_url"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    nameUnique: uniqueIndex("marathons_name_unique").on(table.name),
+    canonicalUnique: uniqueIndex("marathons_canonical_unique").on(
+      table.canonicalName,
+    ),
+  }),
+);
 
-export const sources = pgTable("sources", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull(),
-  priority: integer("priority").notNull().default(0),
-  strategy: text("strategy").notNull(),
-  retryMax: integer("retry_max").notNull().default(3),
-  retryBackoffSeconds: integer("retry_backoff_seconds").notNull().default(30),
-  isActive: boolean("is_active").notNull().default(true),
-  lastRunAt: timestamp("last_run_at", { withTimezone: true, mode: "date" }),
-  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
-    .notNull()
-    .default(sql`now()`),
-});
+export const marathonEditions = pgTable(
+  "marathon_editions",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    marathonId: varchar("marathon_id")
+      .references(() => marathons.id)
+      .notNull(),
+    year: integer("year").notNull(),
+    raceDate: date("race_date"),
+    registrationStatus: text("registration_status"),
+    registrationUrl: text("registration_url"),
+    registrationOpenDate: date("registration_open_date"),
+    registrationCloseDate: date("registration_close_date"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    editionUnique: uniqueIndex("marathon_editions_unique").on(
+      table.marathonId,
+      table.year,
+    ),
+  }),
+);
+
+export const sources = pgTable(
+  "sources",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    name: text("name").notNull(),
+    baseUrl: text("base_url"),
+    priority: integer("priority").default(0).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    nameUnique: uniqueIndex("sources_name_unique").on(table.name),
+  }),
+);
+
+export const marathonSources = pgTable(
+  "marathon_sources",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    marathonId: varchar("marathon_id")
+      .references(() => marathons.id)
+      .notNull(),
+    sourceId: varchar("source_id")
+      .references(() => sources.id)
+      .notNull(),
+    sourceUrl: text("source_url").notNull(),
+    isPrimary: boolean("is_primary").default(false).notNull(),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    sourceUnique: uniqueIndex("marathon_sources_unique").on(
+      table.marathonId,
+      table.sourceId,
+    ),
+  }),
+);
 
 export const marathonSyncRuns = pgTable("marathon_sync_runs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  sourceId: varchar("source_id").notNull(),
+  marathonId: varchar("marathon_id")
+    .references(() => marathons.id)
+    .notNull(),
+  sourceId: varchar("source_id").references(() => sources.id),
   status: text("status").notNull(),
-  strategyUsed: text("strategy_used").notNull(),
-  attempt: integer("attempt").notNull().default(1),
-  message: text("message"),
-  startedAt: timestamp("started_at", { withTimezone: true, mode: "date" })
-    .notNull()
-    .default(sql`now()`),
-  finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+  startedAt: timestamp("started_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  errorMessage: text("error_message"),
+});
+
+export const marathonReviews = pgTable("marathon_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  marathonId: varchar("marathon_id")
+    .references(() => marathons.id)
+    .notNull(),
+  marathonEditionId: varchar("marathon_edition_id").references(
+    () => marathonEditions.id,
+  ),
+  userDisplayName: text("user_display_name").notNull(),
+  rating: integer("rating").notNull(),
+  comment: text("comment"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -44,15 +150,32 @@ export const insertUserSchema = createInsertSchema(users).pick({
   password: true,
 });
 
-export const insertSourceSchema = createInsertSchema(sources);
-export const insertMarathonSyncRunSchema = createInsertSchema(marathonSyncRuns);
+export const insertMarathonSchema = createInsertSchema(marathons).pick({
+  name: true,
+  canonicalName: true,
+  city: true,
+  country: true,
+  description: true,
+  websiteUrl: true,
+});
 
-export type SourceStrategy = (typeof sourceStrategies)[number];
-export type SyncStatus = (typeof syncStatuses)[number];
+export const insertReviewSchema = createInsertSchema(marathonReviews)
+  .pick({
+    marathonId: true,
+    marathonEditionId: true,
+    userDisplayName: true,
+    rating: true,
+    comment: true,
+  })
+  .extend({
+    rating: z.number().int().min(1).max(5),
+  });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
-export type InsertSource = z.infer<typeof insertSourceSchema>;
-export type Source = typeof sources.$inferSelect;
-export type InsertMarathonSyncRun = z.infer<typeof insertMarathonSyncRunSchema>;
-export type MarathonSyncRun = typeof marathonSyncRuns.$inferSelect;
+
+export type InsertMarathon = z.infer<typeof insertMarathonSchema>;
+export type Marathon = typeof marathons.$inferSelect;
+
+export type InsertReview = z.infer<typeof insertReviewSchema>;
+export type MarathonReview = typeof marathonReviews.$inferSelect;
