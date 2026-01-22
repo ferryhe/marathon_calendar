@@ -18,6 +18,15 @@ export interface MarathonEvent {
   website?: string;
   description?: string;
   requirements?: string;
+  reviews?: {
+    averageRating: number;
+    count: number;
+    topComments: {
+      user: string;
+      content: string;
+      likes: number;
+    }[];
+  };
 }
 
 export const MOCK_MARATHONS: MarathonEvent[] = [
@@ -34,6 +43,14 @@ export const MOCK_MARATHONS: MarathonEvent[] = [
     registrationDeadline: "2026-02-09",
     requirements: "无",
     description: "美丽的太湖沿岸风景跑",
+    reviews: {
+      averageRating: 4.5,
+      count: 128,
+      topComments: [
+        { user: "跑者小张", content: "赛道风景确实不错，太湖边的风很舒服。", likes: 45 },
+        { user: "马拉松老兵", content: "补给站设置很科学，志愿者非常热情。", likes: 32 }
+      ]
+    }
   },
   {
     id: "cn-2",
@@ -47,6 +64,14 @@ export const MOCK_MARATHONS: MarathonEvent[] = [
     registrationDeadline: "2026-02-09",
     requirements: "限女性",
     website: "https://shanghai-cherry-run.example.com",
+    reviews: {
+      averageRating: 4.8,
+      count: 256,
+      topComments: [
+        { user: "樱花妹", content: "每年的奖牌都超级好看，冲着奖牌也要去！", likes: 88 },
+        { user: "不跑步会死", content: "樱花盛开的时候跑真的太美了，非常有仪式感。", likes: 54 }
+      ]
+    }
   },
   {
     id: "cn-3",

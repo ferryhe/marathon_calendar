@@ -17,7 +17,10 @@ import {
   Mountain,
   Users,
   Timer,
-  Info
+  Info,
+  Star,
+  ThumbsUp,
+  MessageSquare
 } from "lucide-react";
 import type { MarathonEvent } from "@/lib/mockData";
 
@@ -32,8 +35,8 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] gap-0 p-0 overflow-hidden rounded-[2rem] border-0 sm:rounded-[2rem]">
-        <div className="bg-secondary/30 p-8 pb-6">
+      <DialogContent className="sm:max-w-[500px] gap-0 p-0 overflow-hidden rounded-[2rem] border-0 sm:rounded-[2rem] max-h-[90vh] overflow-y-auto">
+        <div className="bg-secondary/30 p-8 pb-6 sticky top-0 z-10 backdrop-blur-md">
           <div className="flex justify-between items-start mb-4">
             <Badge 
               variant={event.registrationStatus === 'Open' ? 'default' : 'secondary'} 
@@ -42,6 +45,14 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
               {event.registrationStatus === 'Open' ? '报名中' : 
                event.registrationStatus === 'Upcoming' ? '即将开始' : '已截止'}
             </Badge>
+            
+            {event.reviews && (
+              <div className="flex items-center gap-1.5 px-3 py-1 bg-background/50 rounded-full border border-border/50 shadow-sm">
+                <Star className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />
+                <span className="text-xs font-bold">{event.reviews.averageRating}</span>
+                <span className="text-[10px] text-muted-foreground">({event.reviews.count}条)</span>
+              </div>
+            )}
           </div>
           <DialogTitle className="text-2xl font-bold tracking-tight leading-tight">
             {event.name}
@@ -58,7 +69,7 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
           </div>
         </div>
 
-        <div className="p-8 pt-6 space-y-6">
+        <div className="p-8 pt-6 space-y-8">
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-2 gap-6">
             <div className="flex items-start gap-3">
@@ -105,7 +116,7 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
           <Separator className="opacity-50" />
 
           {/* Detailed Info */}
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div className="flex items-start gap-3">
               <div className="mt-1">
                 <Users className="w-4 h-4 text-muted-foreground" />
@@ -127,7 +138,43 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
             </div>
           </div>
 
-          <div className="pt-4">
+          {/* User Reviews Section */}
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-blue-500" />
+                <h4 className="text-sm font-bold uppercase tracking-wider">网友点评</h4>
+              </div>
+              <Button variant="ghost" size="sm" className="text-xs h-7 rounded-full font-bold text-blue-500 hover:text-blue-600 hover:bg-blue-500/5">
+                我要评价
+              </Button>
+            </div>
+
+            {event.reviews?.topComments ? (
+              <div className="space-y-3">
+                {event.reviews.topComments.map((comment, idx) => (
+                  <div key={idx} className="p-4 bg-secondary/20 rounded-2xl border border-border/50">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-bold">{comment.user}</span>
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium">
+                        <ThumbsUp className="w-3 h-3" />
+                        <span>{comment.likes}</span>
+                      </div>
+                    </div>
+                    <p className="text-sm text-foreground/70 leading-relaxed">
+                      {comment.content}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-8 text-center bg-secondary/10 rounded-2xl border border-dashed border-border/50">
+                <p className="text-xs text-muted-foreground italic">暂无网友评价，快来抢沙发吧</p>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-4 pb-8">
             <Button asChild className="w-full h-14 rounded-2xl text-base font-semibold shadow-xl shadow-primary/10 transition-transform active:scale-[0.97]">
               <a href={event.website || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2">
                 前往官网报名 <ExternalLink className="w-4 h-4" />
@@ -142,3 +189,4 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
     </Dialog>
   );
 }
+
