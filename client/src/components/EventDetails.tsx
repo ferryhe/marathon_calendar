@@ -3,6 +3,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogClose,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,8 @@ import {
   Info,
   Star,
   ThumbsUp,
-  MessageSquare
+  MessageSquare,
+  X
 } from "lucide-react";
 import type { MarathonEvent } from "@/lib/mockData";
 
@@ -36,6 +38,10 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px] gap-0 p-0 overflow-hidden rounded-[2rem] border-0 sm:rounded-[2rem] max-h-[90vh] overflow-y-auto">
+        <DialogClose className="absolute right-6 top-6 z-20 rounded-full bg-background/50 p-2 text-muted-foreground hover:text-foreground backdrop-blur-sm transition-colors active:scale-95">
+          <X className="h-5 w-5" />
+          <span className="sr-only">Close</span>
+        </DialogClose>
         <div className="bg-secondary/30 p-8 pb-6 sticky top-0 z-10 backdrop-blur-md">
           <div className="flex justify-between items-start mb-4">
             <Badge 
