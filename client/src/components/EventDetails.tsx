@@ -34,6 +34,8 @@ interface EventDetailsProps {
 
 export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
   if (!event) return null;
+  const isOpen = event.registrationStatus === "报名中";
+  const typeLabel = event.type.length ? event.type.join(" / ") : "Various distances";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -45,11 +47,10 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
         <div className="bg-secondary/30 p-8 pb-6 sticky top-0 z-10 backdrop-blur-md">
           <div className="flex justify-between items-start mb-4">
             <Badge 
-              variant={event.registrationStatus === 'Open' ? 'default' : 'secondary'} 
-              className={`rounded-full px-3 ${event.registrationStatus === 'Open' ? 'bg-blue-500 text-white border-0' : ''}`}
+              variant={isOpen ? 'default' : 'secondary'} 
+              className={`rounded-full px-3 ${isOpen ? 'bg-blue-500 text-white border-0' : ''}`}
             >
-              {event.registrationStatus === 'Open' ? '报名中' : 
-               event.registrationStatus === 'Upcoming' ? '即将开始' : '已截止'}
+              {event.registrationStatus}
             </Badge>
             
             {event.reviews && (
@@ -84,7 +85,7 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
               </div>
               <div>
                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">项目类型</p>
-                <p className="text-sm font-semibold">{event.type}</p>
+                <p className="text-sm font-semibold">{typeLabel}</p>
               </div>
             </div>
 

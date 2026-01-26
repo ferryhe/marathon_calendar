@@ -55,6 +55,7 @@ export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
                 {events.map((event, index) => {
                   const date = new Date(event.year, event.month - 1, event.day);
                   const weekDay = ['日', '一', '二', '三', '四', '五', '六'][date.getDay()];
+                  const typeLabel = event.type.length ? event.type.join(" / ") : "Various distances";
                   
                   return (
                     <motion.div
@@ -79,13 +80,13 @@ export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
                             <MapPin className="w-3 h-3" />
                             <span>{event.location.city}</span>
                             <span className="opacity-30">|</span>
-                            <span>{event.type}</span>
+                            <span>{typeLabel}</span>
                           </div>
                         </div>
                       </div>
                       
                       <div className="flex items-center gap-3">
-                        {event.registrationStatus === 'Open' && (
+                        {event.registrationStatus === '报名中' && (
                           <Badge variant="default" className="bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-2 h-5 flex items-center gap-1.5">
                             <span className="relative flex h-1.5 w-1.5">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
