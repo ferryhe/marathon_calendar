@@ -1,42 +1,106 @@
 import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
-import { ChevronRight, MapPin, Calendar } from "lucide-react";
-import { MarathonEvent, MOCK_MARATHONS } from "@/lib/mockData";
+import { ChevronRight, MapPin, Calendar, Loader2 } from "lucide-react";
 import { EventDetails } from "./EventDetails";
 import { motion, AnimatePresence } from "framer-motion";
+import { useMarathons } from "@/hooks/useMarathons";
+import type { Marathon } from "@shared/schema";
 
 interface MarathonTableProps {
   region: "China" | "Overseas";
   searchQuery: string;
 }
 
+interface MarathonWithDate extends Marathon {
+  year?: number;
+  month?: number;
+  day?: number;
+  registrationStatus?: string;
+}
+
 export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
-  const [selectedEvent, setSelectedEvent] = useState<MarathonEvent | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Marathon | null>(null);
 
+  // Determine country filter based on region
+  const country = region === "China" ? "China" : undefined;
+  
+  // Fetch marathons from API
+  const { data, isLoading, error } = useMarathons({
+    country,
+    search: searchQuery || undefined,
+    limit: 100, // Get more results for client-side grouping
+    sortBy: 'name',
+    sortOrder: 'asc',
+  });
+
+  // Group marathons by month (we'll parse dates from edition data when available)
   const groupedEvents = useMemo(() => {
-    const filtered = MOCK_MARATHONS.filter((event) => {
-      const matchesRegion = event.location.country === (region === "China" ? "China" : "Overseas");
-      const matchesSearch = event.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            event.location.city.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesRegion && matchesSearch;
-    }).sort((a, b) => {
-      return new Date(a.year, a.month - 1, a.day).getTime() - new Date(b.year, b.month - 1, b.day).getTime();
-    });
+    if (!data?.data) return {};
 
-    const groups: { [key: string]: MarathonEvent[] } = {};
-    filtered.forEach(event => {
+    // For now, we'll group by creation date since we need to integrate edition data
+    // This is a temporary solution - in a real scenario, we'd join with editions
+    const events = data.data
+      .filter(marathon => {
+        // Additional client-side filtering for overseas events
+        if (region === "Overseas") {
+          return marathon.country !== "China";
+        }
+        return true;
+      })
+      .map(marathon => {
+        // For now, use created date as a fallback
+        // TODO: Join with editions data to get actual race dates
+        const createdDate = new Date(marathon.createdAt);
+        return {
+          ...marathon,
+          year: createdDate.getFullYear(),
+          month: createdDate.getMonth() + 1,
+          day: createdDate.getDate(),
+          registrationStatus: "即将开始", // Default status
+        } as MarathonWithDate;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.year || 2026, (a.month || 1) - 1, a.day || 1);
+        const dateB = new Date(b.year || 2026, (b.month || 1) - 1, b.day || 1);
+        return dateA.getTime() - dateB.getTime();
+      });
+
+    // Group by year-month
+    const groups: { [key: string]: MarathonWithDate[] } = {};
+    events.forEach(event => {
       const key = `${event.year}年${event.month}月`;
       if (!groups[key]) groups[key] = [];
       groups[key].push(event);
     });
+    
     return groups;
-  }, [region, searchQuery]);
+  }, [data, region]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="py-24 text-center">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-destructive/10 mb-4">
+          <Calendar className="w-8 h-8 text-destructive" />
+        </div>
+        <p className="text-destructive font-medium">加载赛事数据失败</p>
+        <p className="text-sm text-muted-foreground mt-2">{(error as Error).message}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-12">
       <AnimatePresence mode="popLayout">
         {Object.keys(groupedEvents).length > 0 ? (
-          Object.entries(groupedEvents).map(([month, events], groupIdx) => (
+          Object.entries(groupedEvents).map(([month, events]) => (
             <div key={month} className="relative grid grid-cols-1 md:grid-cols-[100px_1fr] gap-6">
               {/* Sticky Month Label */}
               <div className="md:sticky md:top-44 h-fit">
@@ -53,9 +117,8 @@ export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
               {/* Events List for this month */}
               <div className="space-y-3">
                 {events.map((event, index) => {
-                  const date = new Date(event.year, event.month - 1, event.day);
+                  const date = new Date(event.year || 2026, (event.month || 1) - 1, event.day || 1);
                   const weekDay = ['日', '一', '二', '三', '四', '五', '六'][date.getDay()];
-                  const typeLabel = event.type.length ? event.type.join(" / ") : "Various distances";
                   
                   return (
                     <motion.div
@@ -74,13 +137,11 @@ export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
                           <span className="text-[10px] text-muted-foreground uppercase mt-1">周{weekDay}</span>
                         </div>
                         
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">{event.name}</h3>
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
-                            <MapPin className="w-3 h-3" />
-                            <span>{event.location.city}</span>
-                            <span className="opacity-30">|</span>
-                            <span>{typeLabel}</span>
+                            <MapPin className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">{event.city || event.country}</span>
                           </div>
                         </div>
                       </div>
@@ -109,6 +170,11 @@ export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
               <Calendar className="w-8 h-8 text-muted-foreground/40" />
             </div>
             <p className="text-muted-foreground font-medium">未找到相关马拉松赛事</p>
+            {searchQuery && (
+              <p className="text-sm text-muted-foreground/60 mt-2">
+                尝试使用不同的搜索关键词
+              </p>
+            )}
           </div>
         )}
       </AnimatePresence>
