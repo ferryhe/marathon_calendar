@@ -1,6 +1,7 @@
 import type { Marathon } from "@shared/schema";
 
-export interface MarathonEdition {
+// DTO types with proper date serialization (dates come as ISO strings from API)
+export interface MarathonEditionDTO {
   id: string;
   marathonId: string;
   year: number;
@@ -9,18 +10,23 @@ export interface MarathonEdition {
   registrationUrl: string | null;
   registrationOpenDate: string | null;
   registrationCloseDate: string | null;
-  lastSyncedAt: Date | null;
-  nextSyncAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
+  lastSyncedAt: string | null;
+  nextSyncAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export interface MarathonWithEdition extends Marathon {
-  nextEdition?: MarathonEdition;
+export interface MarathonDTO extends Omit<Marathon, 'createdAt' | 'updatedAt'> {
+  createdAt: string;
+  updatedAt: string;
 }
 
-export interface MarathonDetail extends Marathon {
-  editions: MarathonEdition[];
+export interface MarathonWithEdition extends MarathonDTO {
+  nextEdition?: MarathonEditionDTO;
+}
+
+export interface MarathonDetail extends MarathonDTO {
+  editions: MarathonEditionDTO[];
   reviews: {
     items: any[];
     averageRating: number;
@@ -44,10 +50,7 @@ export interface MarathonQueryParams {
   search?: string;
   city?: string;
   country?: string;
-  year?: number;
-  month?: number;
-  status?: string;
-  sortBy?: 'raceDate' | 'name' | 'createdAt';
+  sortBy?: 'name' | 'createdAt';
   sortOrder?: 'asc' | 'desc';
 }
 
@@ -65,6 +68,7 @@ class ApiClient {
     const url = `${this.baseUrl}${endpoint}`;
     const response = await fetch(url, {
       ...options,
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         ...options?.headers,
@@ -80,7 +84,7 @@ class ApiClient {
   }
 
   // Marathon APIs
-  async getMarathons(params?: MarathonQueryParams): Promise<PaginatedResponse<Marathon>> {
+  async getMarathons(params?: MarathonQueryParams): Promise<PaginatedResponse<MarathonDTO>> {
     const queryParams = new URLSearchParams();
     
     if (params) {
@@ -94,15 +98,15 @@ class ApiClient {
     const query = queryParams.toString();
     const endpoint = query ? `/marathons?${query}` : '/marathons';
     
-    return this.request<PaginatedResponse<Marathon>>(endpoint);
+    return this.request<PaginatedResponse<MarathonDTO>>(endpoint);
   }
 
   async getMarathonById(id: string): Promise<MarathonDetail> {
     return this.request<MarathonDetail>(`/marathons/${id}`);
   }
 
-  async searchMarathons(query: string): Promise<{ data: Marathon[] }> {
-    return this.request<{ data: Marathon[] }>(`/marathons/search?q=${encodeURIComponent(query)}`);
+  async searchMarathons(query: string): Promise<{ data: MarathonDTO[] }> {
+    return this.request<{ data: MarathonDTO[] }>(`/marathons/search?q=${encodeURIComponent(query)}`);
   }
 
   async getUpcomingMarathons(limit: number = 10): Promise<{ data: MarathonWithEdition[] }> {

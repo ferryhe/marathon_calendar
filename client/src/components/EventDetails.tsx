@@ -12,15 +12,8 @@ import {
   Calendar, 
   MapPin, 
   Award, 
-  CalendarClock, 
   ExternalLink,
-  Thermometer,
-  Mountain,
-  Users,
-  Timer,
   Info,
-  Star,
-  ThumbsUp,
   MessageSquare,
   X
 } from "lucide-react";

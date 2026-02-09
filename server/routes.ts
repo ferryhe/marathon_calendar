@@ -30,11 +30,12 @@ const marathonQuerySchema = z.object({
   search: z.string().optional(),
   city: z.string().optional(),
   country: z.string().optional(),
-  year: z.coerce.number().optional(),
-  month: z.coerce.number().min(1).max(12).optional(),
-  status: z.string().optional(),
-  sortBy: z.enum(['raceDate', 'name', 'createdAt']).default('raceDate'),
+  sortBy: z.enum(['name', 'createdAt']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
+});
+
+const searchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(200),
 });
 
 function ensureDatabase() {
@@ -67,7 +68,8 @@ export async function registerRoutes(
           or(
             like(marathons.name, `%${params.search}%`),
             like(marathons.city, `%${params.search}%`),
-            like(marathons.canonicalName, `%${params.search}%`)
+            like(marathons.canonicalName, `%${params.search}%`),
+            like(marathons.description, `%${params.search}%`)
           )
         );
       }
@@ -92,9 +94,7 @@ export async function registerRoutes(
       
       // Get paginated records with sorting
       const offset = (params.page - 1) * params.limit;
-      const orderColumn = params.sortBy === 'name' ? marathons.name :
-                         params.sortBy === 'createdAt' ? marathons.createdAt :
-                         marathons.name; // default fallback
+      const orderColumn = params.sortBy === 'name' ? marathons.name : marathons.createdAt;
       
       const records = await database
         .select()
@@ -118,7 +118,60 @@ export async function registerRoutes(
     }
   });
 
-  // Get marathon details by ID
+  // Search marathons (simplified search endpoint) - MUST come before /:id
+  app.get("/api/marathons/search", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const { q: searchQuery } = searchQuerySchema.parse(req.query);
+      
+      const records = await database
+        .select()
+        .from(marathons)
+        .where(
+          or(
+            like(marathons.name, `%${searchQuery}%`),
+            like(marathons.city, `%${searchQuery}%`),
+            like(marathons.description, `%${searchQuery}%`)
+          )
+        )
+        .limit(20);
+      
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Get upcoming marathons - MUST come before /:id
+  app.get("/api/marathons/upcoming", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      
+      // Get marathons with editions that have future race dates
+      const records = await database
+        .select({
+          marathon: marathons,
+          edition: marathonEditions,
+        })
+        .from(marathons)
+        .innerJoin(marathonEditions, eq(marathons.id, marathonEditions.marathonId))
+        .where(sql`${marathonEditions.raceDate} >= CURRENT_DATE`)
+        .orderBy(asc(marathonEditions.raceDate))
+        .limit(limit);
+      
+      res.json({ 
+        data: records.map(r => ({
+          ...r.marathon,
+          nextEdition: r.edition,
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Get marathon details by ID - MUST come after /search and /upcoming
   app.get("/api/marathons/:id", async (req, res, next) => {
     try {
       const database = ensureDatabase();
@@ -157,63 +210,6 @@ export async function registerRoutes(
           averageRating: avgRating,
           count: reviews.length,
         },
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // Search marathons (simplified search endpoint)
-  app.get("/api/marathons/search", async (req, res, next) => {
-    try {
-      const database = ensureDatabase();
-      const searchQuery = req.query.q as string;
-      
-      if (!searchQuery) {
-        return res.json({ data: [] });
-      }
-      
-      const records = await database
-        .select()
-        .from(marathons)
-        .where(
-          or(
-            like(marathons.name, `%${searchQuery}%`),
-            like(marathons.city, `%${searchQuery}%`),
-            like(marathons.description, `%${searchQuery}%`)
-          )
-        )
-        .limit(20);
-      
-      res.json({ data: records });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // Get upcoming marathons
-  app.get("/api/marathons/upcoming", async (req, res, next) => {
-    try {
-      const database = ensureDatabase();
-      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
-      
-      // Get marathons with editions that have future race dates
-      const records = await database
-        .select({
-          marathon: marathons,
-          edition: marathonEditions,
-        })
-        .from(marathons)
-        .innerJoin(marathonEditions, eq(marathons.id, marathonEditions.marathonId))
-        .where(sql`${marathonEditions.raceDate} >= CURRENT_DATE`)
-        .orderBy(asc(marathonEditions.raceDate))
-        .limit(limit);
-      
-      res.json({ 
-        data: records.map(r => ({
-          ...r.marathon,
-          nextEdition: r.edition,
-        }))
       });
     } catch (error) {
       next(error);
