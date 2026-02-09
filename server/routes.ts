@@ -1,12 +1,13 @@
 import type { Express } from "express";
 import { type Server } from "http";
-import { eq } from "drizzle-orm";
+import { eq, and, or, like, sql, desc, asc } from "drizzle-orm";
 import { z } from "zod";
 import {
   insertMarathonSchema,
   insertReviewSchema,
   marathonReviews,
   marathons,
+  marathonEditions,
 } from "@shared/schema";
 import { db } from "./db";
 
@@ -20,6 +21,21 @@ const marathonEditionIdSchema = z.union([
 
 const reviewPayloadWithEditionSchema = reviewPayloadSchema.extend({
   marathonEditionId: marathonEditionIdSchema,
+});
+
+// Query parameter schemas
+const marathonQuerySchema = z.object({
+  page: z.coerce.number().min(1).default(1),
+  limit: z.coerce.number().min(1).max(100).default(20),
+  search: z.string().optional(),
+  city: z.string().optional(),
+  country: z.string().optional(),
+  sortBy: z.enum(['name', 'createdAt']).default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
+});
+
+const searchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(200),
 });
 
 function ensureDatabase() {
@@ -38,11 +54,163 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
-  app.get("/api/marathons", async (_req, res, next) => {
+  // Get marathons list with filtering, pagination and search
+  app.get("/api/marathons", async (req, res, next) => {
     try {
       const database = ensureDatabase();
-      const records = await database.select().from(marathons);
-      res.json(records);
+      const params = marathonQuerySchema.parse(req.query);
+      
+      // Build where conditions
+      const conditions = [];
+      
+      if (params.search) {
+        conditions.push(
+          or(
+            like(marathons.name, `%${params.search}%`),
+            like(marathons.city, `%${params.search}%`),
+            like(marathons.canonicalName, `%${params.search}%`),
+            like(marathons.description, `%${params.search}%`)
+          )
+        );
+      }
+      
+      if (params.city) {
+        conditions.push(eq(marathons.city, params.city));
+      }
+      
+      if (params.country) {
+        conditions.push(eq(marathons.country, params.country));
+      }
+      
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      
+      // Get total count
+      const countResult = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(marathons)
+        .where(whereClause);
+      
+      const total = countResult[0]?.count || 0;
+      
+      // Get paginated records with sorting
+      const offset = (params.page - 1) * params.limit;
+      const orderColumn = params.sortBy === 'name' ? marathons.name : marathons.createdAt;
+      
+      const records = await database
+        .select()
+        .from(marathons)
+        .where(whereClause)
+        .orderBy(params.sortOrder === 'desc' ? desc(orderColumn) : asc(orderColumn))
+        .limit(params.limit)
+        .offset(offset);
+      
+      res.json({
+        data: records,
+        pagination: {
+          page: params.page,
+          limit: params.limit,
+          total,
+          totalPages: Math.ceil(total / params.limit),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Search marathons (simplified search endpoint) - MUST come before /:id
+  app.get("/api/marathons/search", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const { q: searchQuery } = searchQuerySchema.parse(req.query);
+      
+      const records = await database
+        .select()
+        .from(marathons)
+        .where(
+          or(
+            like(marathons.name, `%${searchQuery}%`),
+            like(marathons.city, `%${searchQuery}%`),
+            like(marathons.description, `%${searchQuery}%`)
+          )
+        )
+        .limit(20);
+      
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Get upcoming marathons - MUST come before /:id
+  app.get("/api/marathons/upcoming", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      
+      // Get marathons with editions that have future race dates
+      const records = await database
+        .select({
+          marathon: marathons,
+          edition: marathonEditions,
+        })
+        .from(marathons)
+        .innerJoin(marathonEditions, eq(marathons.id, marathonEditions.marathonId))
+        .where(sql`${marathonEditions.raceDate} >= CURRENT_DATE`)
+        .orderBy(asc(marathonEditions.raceDate))
+        .limit(limit);
+      
+      res.json({ 
+        data: records.map(r => ({
+          ...r.marathon,
+          nextEdition: r.edition,
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Get marathon details by ID - MUST come after /search and /upcoming
+  app.get("/api/marathons/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const [record] = await database
+        .select()
+        .from(marathons)
+        .where(eq(marathons.id, req.params.id));
+      
+      if (!record) {
+        return res.status(404).json({ error: "Marathon not found" });
+      }
+      
+      // Get associated editions
+      const editions = await database
+        .select()
+        .from(marathonEditions)
+        .where(eq(marathonEditions.marathonId, req.params.id))
+        .orderBy(desc(marathonEditions.year));
+      
+      // Get reviews with aggregated stats
+      const reviews = await database
+        .select()
+        .from(marathonReviews)
+        .where(eq(marathonReviews.marathonId, req.params.id))
+        .orderBy(desc(marathonReviews.createdAt));
+      
+      const avgRating = reviews.length > 0
+        ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+        : 0;
+      
+      res.json({
+        ...record,
+        editions,
+        reviews: {
+          items: reviews,
+          averageRating: avgRating,
+          count: reviews.length,
+        },
+      });
     } catch (error) {
       next(error);
     }
