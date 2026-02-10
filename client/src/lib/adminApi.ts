@@ -105,6 +105,12 @@ export type AdminRawCrawl = {
   fetchedAt: string;
 };
 
+export type AdminDiscoveryWebResult = {
+  title: string;
+  url: string;
+  description: string | null;
+};
+
 export async function listAdminSources(token: string) {
   return adminRequest<{ data: AdminSource[] }>(token, "/admin/sources");
 }
@@ -166,3 +172,15 @@ export async function listAdminMarathonSources(
   );
 }
 
+export async function adminDiscoveryWebSearch(
+  token: string,
+  params: { q: string; count?: number },
+) {
+  const query = new URLSearchParams();
+  query.set("q", params.q);
+  if (params.count) query.set("count", String(params.count));
+  return adminRequest<{ data: AdminDiscoveryWebResult[] }>(
+    token,
+    `/admin/discovery/web-search?${query.toString()}`,
+  );
+}

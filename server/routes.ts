@@ -25,6 +25,7 @@ import {
 import { db } from "./db";
 import { hashPassword, verifyPassword } from "./auth";
 import { syncMarathonSourceOnce, syncNowOnce } from "./syncScheduler";
+import { braveWebSearch } from "./braveSearch";
 
 const reviewPayloadSchema = insertReviewSchema.omit({
   marathonId: true,
@@ -1595,6 +1596,28 @@ export async function registerRoutes(
         .limit(params.limit);
 
       res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // --- Admin-only: discovery workflow (Stage 1.3) ---
+  app.get("/api/admin/discovery/web-search", async (req, res, next) => {
+    try {
+      requireAdmin(req);
+      const params = z
+        .object({
+          q: z.string().trim().min(1).max(200),
+          count: z.coerce.number().int().min(1).max(20).optional(),
+        })
+        .parse(req.query);
+
+      const results = await braveWebSearch({
+        query: params.q,
+        count: params.count ?? 10,
+      });
+
+      res.json({ data: results });
     } catch (error) {
       next(error);
     }

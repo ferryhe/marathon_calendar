@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { RefreshCw, Shield, Terminal } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  adminDiscoveryWebSearch,
   getAdminToken,
   listAdminMarathonSources,
   listAdminRawCrawl,
@@ -33,6 +34,7 @@ export default function AdminDataPage() {
   const [token, setToken] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [discoveryQ, setDiscoveryQ] = useState("");
   const [configDraftById, setConfigDraftById] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -84,6 +86,18 @@ export default function AdminDataPage() {
     onError: (error) => {
       toast({
         title: "触发失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const discoveryMutation = useMutation({
+    mutationFn: async () =>
+      adminDiscoveryWebSearch(token, { q: discoveryQ.trim(), count: 10 }),
+    onError: (error) => {
+      toast({
+        title: "Search failed",
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -388,6 +402,53 @@ export default function AdminDataPage() {
         </Card>
 
         <Card>
+          <CardHeader>
+            <CardTitle>Discovery (Brave Search)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-col md:flex-row gap-2">
+              <Input
+                placeholder="Search query (admin-only)"
+                value={discoveryQ}
+                onChange={(e) => setDiscoveryQ(e.target.value)}
+              />
+              <Button
+                variant="outline"
+                onClick={() => discoveryMutation.mutate()}
+                disabled={!hasToken || discoveryMutation.isPending || !discoveryQ.trim()}
+              >
+                Search
+              </Button>
+            </div>
+
+            {discoveryMutation.data?.data?.length ? (
+              <div className="space-y-2">
+                {discoveryMutation.data.data.map((r) => (
+                  <div key={r.url} className="rounded-xl border p-3">
+                    <a
+                      href={r.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm font-medium underline underline-offset-2"
+                    >
+                      {r.title}
+                    </a>
+                    {r.description ? (
+                      <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                        {r.description}
+                      </div>
+                    ) : null}
+                    <div className="text-xs text-muted-foreground mt-1 break-all">{r.url}</div>
+                  </div>
+                ))}
+              </div>
+            ) : discoveryMutation.isSuccess ? (
+              <p className="text-sm text-muted-foreground">No results</p>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Raw Crawl</CardTitle>
             <Button variant="outline" size="sm" onClick={() => rawQuery.refetch()} disabled={!hasToken}>
@@ -413,4 +474,3 @@ export default function AdminDataPage() {
     </div>
   );
 }
-
