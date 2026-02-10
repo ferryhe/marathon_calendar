@@ -1,49 +1,66 @@
-import { useRoute, Link } from "wouter";
-import { ArrowLeft, Calendar, MapPin, Star, ThumbsUp, Flag } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Link, useRoute } from "wouter";
 import {
-  useMarathon,
-  useMarathonReviews,
+  ArrowLeft,
+  Calendar,
+  Flag,
+  Heart,
+  MapPin,
+  Star,
+  ThumbsUp,
+} from "lucide-react";
+import {
   useCreateReview,
-  useUpdateReview,
   useDeleteReview,
   useLikeReview,
+  useMarathon,
+  useMarathonReviews,
   useReportReview,
+  useUpdateReview,
 } from "@/hooks/useMarathons";
-import { useCurrentUser, useLogin, useLogout, useRegister } from "@/hooks/useAuth";
-import { Button } from "@/components/ui/button";
+import {
+  useAddFavorite,
+  useCurrentUser,
+  useFavoriteStatus,
+  useLogin,
+  useLogout,
+  useRegister,
+  useRemoveFavorite,
+} from "@/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { useMemo, useState } from "react";
 
 function formatDate(dateValue?: string | null) {
-  if (!dateValue) {
-    return "待更新";
-  }
-
+  if (!dateValue) return "待更新";
   const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) {
-    return "待更新";
-  }
-
+  if (Number.isNaN(date.getTime())) return "待更新";
   return date.toLocaleDateString("zh-CN");
 }
 
 export default function MarathonDetailPage() {
   const [matched, params] = useRoute("/marathons/:id");
   const marathonId = matched ? params.id : "";
+
   const { data, isLoading, error } = useMarathon(marathonId);
   const { data: reviews = [] } = useMarathonReviews(marathonId);
   const { data: currentUser } = useCurrentUser();
+  const { data: favoriteStatus } = useFavoriteStatus(marathonId, !!marathonId);
+
   const loginMutation = useLogin();
   const registerMutation = useRegister();
   const logoutMutation = useLogout();
+  const addFavoriteMutation = useAddFavorite();
+  const removeFavoriteMutation = useRemoveFavorite();
+
   const createReviewMutation = useCreateReview(marathonId);
   const updateReviewMutation = useUpdateReview(marathonId);
   const deleteReviewMutation = useDeleteReview(marathonId);
   const likeReviewMutation = useLikeReview(marathonId);
   const reportReviewMutation = useReportReview(marathonId);
+
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -51,20 +68,16 @@ export default function MarathonDetailPage() {
   const [comment, setComment] = useState("");
   const [editingReviewId, setEditingReviewId] = useState<string | null>(null);
 
-  const reviewStats = useMemo(() => {
-    if (reviews.length === 0) {
-      return { count: 0, average: 0 };
-    }
+  const isFavorited = favoriteStatus?.isFavorited ?? false;
 
+  const reviewStats = useMemo(() => {
+    if (reviews.length === 0) return { count: 0, average: 0 };
     const total = reviews.reduce((sum, item) => sum + item.rating, 0);
     return { count: reviews.length, average: total / reviews.length };
   }, [reviews]);
 
   const submitAuth = async () => {
-    if (!authUsername || !authPassword) {
-      return;
-    }
-
+    if (!authUsername || !authPassword) return;
     if (isRegisterMode) {
       await registerMutation.mutateAsync({
         username: authUsername,
@@ -76,22 +89,25 @@ export default function MarathonDetailPage() {
         password: authPassword,
       });
     }
-
     setAuthPassword("");
   };
 
-  const submitReview = async () => {
-    if (!comment.trim()) {
-      return;
+  const toggleFavorite = async () => {
+    if (!currentUser || !marathonId) return;
+    if (isFavorited) {
+      await removeFavoriteMutation.mutateAsync(marathonId);
+    } else {
+      await addFavoriteMutation.mutateAsync(marathonId);
     }
+  };
+
+  const submitReview = async () => {
+    if (!comment.trim()) return;
 
     if (editingReviewId) {
       await updateReviewMutation.mutateAsync({
         reviewId: editingReviewId,
-        payload: {
-          rating,
-          comment,
-        },
+        payload: { rating, comment },
       });
       setEditingReviewId(null);
     } else {
@@ -106,9 +122,7 @@ export default function MarathonDetailPage() {
     setComment("");
   };
 
-  if (!matched) {
-    return null;
-  }
+  if (!matched) return null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -135,9 +149,7 @@ export default function MarathonDetailPage() {
           <Card>
             <CardContent className="py-16 text-center">
               <p className="text-destructive font-medium">加载赛事详情失败</p>
-              <p className="text-sm text-muted-foreground mt-2">
-                {(error as Error).message}
-              </p>
+              <p className="text-sm text-muted-foreground mt-2">{(error as Error).message}</p>
             </CardContent>
           </Card>
         )}
@@ -162,25 +174,37 @@ export default function MarathonDetailPage() {
                   </span>
                 </div>
               </CardHeader>
+
               <CardContent className="space-y-4">
                 {data.description ? (
-                  <p className="text-sm leading-relaxed text-foreground/90">
-                    {data.description}
-                  </p>
+                  <p className="text-sm leading-relaxed text-foreground/90">{data.description}</p>
                 ) : (
                   <p className="text-sm text-muted-foreground">暂无赛事简介</p>
                 )}
 
-                {data.websiteUrl && (
-                  <a
-                    href={data.websiteUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex"
+                <div className="flex flex-wrap gap-2">
+                  {data.websiteUrl && (
+                    <a href={data.websiteUrl} target="_blank" rel="noopener noreferrer" className="inline-flex">
+                      <Button>前往赛事官网</Button>
+                    </a>
+                  )}
+                  <Button
+                    variant={isFavorited ? "default" : "outline"}
+                    onClick={toggleFavorite}
+                    disabled={
+                      !currentUser ||
+                      addFavoriteMutation.isPending ||
+                      removeFavoriteMutation.isPending
+                    }
                   >
-                    <Button>前往赛事官网</Button>
-                  </a>
-                )}
+                    <Heart className={`w-4 h-4 mr-2 ${isFavorited ? "fill-current" : ""}`} />
+                    {currentUser
+                      ? isFavorited
+                        ? "已收藏，点击取消"
+                        : "收藏赛事"
+                      : "登录后可收藏"}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
 
@@ -204,9 +228,7 @@ export default function MarathonDetailPage() {
                             比赛日期：{formatDate(edition.raceDate)}
                           </p>
                         </div>
-                        <Badge variant="secondary">
-                          {edition.registrationStatus ?? "待更新"}
-                        </Badge>
+                        <Badge variant="secondary">{edition.registrationStatus ?? "待更新"}</Badge>
                       </div>
                     ))}
                   </div>
@@ -247,10 +269,7 @@ export default function MarathonDetailPage() {
                       >
                         {isRegisterMode ? "注册并登录" : "登录"}
                       </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => setIsRegisterMode((value) => !value)}
-                      >
+                      <Button variant="outline" onClick={() => setIsRegisterMode((value) => !value)}>
                         {isRegisterMode ? "切换登录" : "切换注册"}
                       </Button>
                     </div>
@@ -259,14 +278,8 @@ export default function MarathonDetailPage() {
                   <div className="space-y-3">
                     <div className="rounded-xl border p-4 space-y-3 bg-secondary/20">
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">
-                          当前用户：{currentUser.username}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => logoutMutation.mutate()}
-                        >
+                        <span className="text-sm font-medium">当前用户：{currentUser.username}</span>
+                        <Button variant="ghost" size="sm" onClick={() => logoutMutation.mutate()}>
                           退出登录
                         </Button>
                       </div>
@@ -308,9 +321,7 @@ export default function MarathonDetailPage() {
                       </div>
                     </div>
 
-                    {reviews.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">暂无评论</p>
-                    ) : null}
+                    {reviews.length === 0 ? <p className="text-sm text-muted-foreground">暂无评论</p> : null}
 
                     {reviews.slice(0, 20).map((review) => (
                       <div key={review.id} className="rounded-xl border p-4 space-y-2">
