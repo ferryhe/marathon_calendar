@@ -29,8 +29,8 @@ interface MarathonWithDate extends MarathonListItem {
 }
 
 type MarathonTableView =
-  | { mode: "grouped"; groups: Record<string, MarathonWithDate[]> }
-  | { mode: "flat"; events: MarathonWithDate[] };
+  | { mode: "grouped"; groups: Record<string, MarathonWithDate[]>; tbd: MarathonWithDate[] }
+  | { mode: "flat"; events: MarathonWithDate[]; tbd: MarathonWithDate[] };
 
 function getStatusBadgeStyle(status: string) {
   if (status === "报名中") {
@@ -68,9 +68,9 @@ export function MarathonTable({
   });
 
   const view = useMemo<MarathonTableView>(() => {
-    if (!data?.data) return { mode: "grouped", groups: {} };
+    if (!data?.data) return { mode: "grouped", groups: {}, tbd: [] };
 
-    const events = data.data
+    const { dated, tbd } = data.data
       .filter((marathon) => {
         if (region === "Overseas" && marathon.country === "China") {
           return false;
@@ -80,26 +80,42 @@ export function MarathonTable({
         }
         return true;
       })
-      .map((marathon) => {
-        const editionDate = marathon.nextEdition?.raceDate;
-        const displayDate = editionDate ? new Date(editionDate) : new Date(marathon.createdAt);
+      .reduce(
+        (acc, marathon) => {
+          const editionDate = marathon.nextEdition?.raceDate;
+          if (!editionDate) {
+            acc.tbd.push({
+              ...marathon,
+              // Keep a stable date to avoid crashing UI; we render it as TBD.
+              displayDate: new Date(marathon.createdAt),
+              year: filters.year,
+              month: 0,
+              day: 0,
+              registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
+            } as MarathonWithDate);
+            return acc;
+          }
 
-        return {
-          ...marathon,
-          displayDate,
-          year: displayDate.getFullYear(),
-          month: displayDate.getMonth() + 1,
-          day: displayDate.getDate(),
-          registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
-        } as MarathonWithDate;
-      });
+          const displayDate = new Date(editionDate);
+          acc.dated.push({
+            ...marathon,
+            displayDate,
+            year: displayDate.getFullYear(),
+            month: displayDate.getMonth() + 1,
+            day: displayDate.getDate(),
+            registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
+          } as MarathonWithDate);
+          return acc;
+        },
+        { dated: [] as MarathonWithDate[], tbd: [] as MarathonWithDate[] },
+      );
 
     // When the API is sorting by name, preserve the server ordering (avoid reordering paginated results).
     if (filters.sortBy !== "raceDate") {
-      return { mode: "flat", events };
+      return { mode: "flat", events: dated, tbd };
     }
 
-    const sortedByDate = [...events].sort(
+    const sortedByDate = [...dated].sort(
       (a, b) => a.displayDate.getTime() - b.displayDate.getTime(),
     );
 
@@ -110,7 +126,7 @@ export function MarathonTable({
       groups[key].push(event);
     }
 
-    return { mode: "grouped", groups };
+    return { mode: "grouped", groups, tbd };
   }, [data, region, showMineOnly, favoriteMarathonIds, filters.sortBy]);
 
   if (isLoading || (showMineOnly && favoritesLoading)) {
@@ -134,7 +150,9 @@ export function MarathonTable({
   }
 
   const hasData =
-    view.mode === "grouped" ? Object.keys(view.groups).length > 0 : view.events.length > 0;
+    view.mode === "grouped"
+      ? Object.keys(view.groups).length > 0 || view.tbd.length > 0
+      : view.events.length > 0 || view.tbd.length > 0;
   const emptyTitle = showMineOnly ? "你还没有收藏赛事" : "未找到相关马拉松赛事";
   const emptyHint = showMineOnly
     ? "可在赛事详情或弹窗中点击“收藏赛事”后再查看"
@@ -146,104 +164,169 @@ export function MarathonTable({
     <div className="space-y-12">
       <AnimatePresence mode="popLayout">
         {hasData ? (
-          view.mode === "grouped" ? (
-            Object.entries(view.groups).map(([month, events]) => (
-              <div
-                key={month}
-                className="relative grid grid-cols-1 md:grid-cols-[100px_1fr] gap-6"
-              >
-                <div className="md:sticky md:top-44 h-fit">
-                  <div className="flex items-baseline gap-2 md:flex-col md:items-start md:gap-0">
-                    <span className="text-3xl font-black tracking-tighter text-foreground/20 md:text-4xl">
-                      {month.split("年")[1].replace("月", "")}
-                    </span>
-                    <span className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/50 md:mt-1">
-                      {month.split("年")[0]}
-                    </span>
+          <div className="space-y-12">
+            {view.mode === "grouped" ? (
+              Object.entries(view.groups).map(([month, events]) => (
+                <div
+                  key={month}
+                  className="relative grid grid-cols-1 md:grid-cols-[100px_1fr] gap-6"
+                >
+                  <div className="md:sticky md:top-44 h-fit">
+                    <div className="flex items-baseline gap-2 md:flex-col md:items-start md:gap-0">
+                      <span className="text-3xl font-black tracking-tighter text-foreground/20 md:text-4xl">
+                        {month.split("年")[1].replace("月", "")}
+                      </span>
+                      <span className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/50 md:mt-1">
+                        {month.split("年")[0]}
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                <div className="space-y-3">
-                  {events.map((event, index) => {
-                    const weekDay = ["日", "一", "二", "三", "四", "五", "六"][
-                      event.displayDate.getDay()
-                    ];
-                    return (
-                      <motion.div
-                        key={event.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.03 }}
-                        className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
-                        onClick={() => setSelectedEvent(event)}
-                        data-testid={`row-event-${event.id}`}
-                      >
-                        <div className="flex items-center gap-5">
-                          <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
-                            <span className="text-lg leading-none">{event.day}</span>
-                            <span className="text-[10px] text-muted-foreground uppercase mt-1">
-                              周{weekDay}
-                            </span>
-                          </div>
+                  <div className="space-y-3">
+                    {events.map((event, index) => {
+                      const weekDay = ["日", "一", "二", "三", "四", "五", "六"][
+                        event.displayDate.getDay()
+                      ];
+                      return (
+                        <motion.div
+                          key={event.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.03 }}
+                          className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
+                          onClick={() => setSelectedEvent(event)}
+                          data-testid={`row-event-${event.id}`}
+                        >
+                          <div className="flex items-center gap-5">
+                            <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
+                              <span className="text-lg leading-none">{event.day}</span>
+                              <span className="text-[10px] text-muted-foreground uppercase mt-1">
+                                周{weekDay}
+                              </span>
+                            </div>
 
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
-                              {event.name}
-                            </h3>
-                            <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
-                              <MapPin className="w-3 h-3 flex-shrink-0" />
-                              <span className="truncate">{event.city || event.country || "待更新"}</span>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
+                                {event.name}
+                              </h3>
+                              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
+                                <MapPin className="w-3 h-3 flex-shrink-0" />
+                                <span className="truncate">{event.city || event.country || "待更新"}</span>
+                              </div>
                             </div>
                           </div>
+
+                          <div className="flex items-center gap-3">
+                            {event.websiteUrl ? (
+                              <a
+                                href={event.websiteUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
+                                onClick={(e) => e.stopPropagation()}
+                                title="打开官网"
+                              >
+                                <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                              </a>
+                            ) : null}
+                            <Badge
+                              variant="default"
+                              className={getStatusBadgeStyle(event.registrationStatus)}
+                            >
+                              {event.registrationStatus}
+                            </Badge>
+                            <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="space-y-3">
+                {view.events.map((event, index) => {
+                  const weekDay = ["日", "一", "二", "三", "四", "五", "六"][
+                    event.displayDate.getDay()
+                  ];
+                  return (
+                    <motion.div
+                      key={event.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.03 }}
+                      className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
+                      onClick={() => setSelectedEvent(event)}
+                      data-testid={`row-event-${event.id}`}
+                    >
+                      <div className="flex items-center gap-5">
+                        <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
+                          <span className="text-lg leading-none">{event.day}</span>
+                          <span className="text-[10px] text-muted-foreground uppercase mt-1">
+                            周{weekDay}
+                          </span>
                         </div>
 
-                        <div className="flex items-center gap-3">
-                          {event.websiteUrl ? (
-                            <a
-                              href={event.websiteUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
-                              onClick={(e) => e.stopPropagation()}
-                              title="打开官网"
-                            >
-                              <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                            </a>
-                          ) : null}
-                          <Badge
-                            variant="default"
-                            className={getStatusBadgeStyle(event.registrationStatus)}
-                          >
-                            {event.registrationStatus}
-                          </Badge>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
+                            {event.name}
+                          </h3>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
+                            <MapPin className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">{event.city || event.country || "待更新"}</span>
+                          </div>
                         </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        {event.websiteUrl ? (
+                          <a
+                            href={event.websiteUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                            title="打开官网"
+                          >
+                            <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                          </a>
+                        ) : null}
+                        <Badge
+                          variant="default"
+                          className={getStatusBadgeStyle(event.registrationStatus)}
+                        >
+                          {event.registrationStatus}
+                        </Badge>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+                      </div>
+                    </motion.div>
+                  );
+                })}
               </div>
-            ))
-          ) : (
-            <div className="space-y-3">
-              {view.events.map((event, index) => {
-                const weekDay = ["日", "一", "二", "三", "四", "五", "六"][event.displayDate.getDay()];
-                return (
+            )}
+
+            {view.tbd.length > 0 ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold">待确认日期</div>
+                  <div className="text-xs text-muted-foreground">
+                    已收录官网，但具体比赛日期尚未确认
+                  </div>
+                </div>
+                {view.tbd.map((event, index) => (
                   <motion.div
                     key={event.id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.03 }}
+                    transition={{ delay: index * 0.02 }}
                     className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
                     onClick={() => setSelectedEvent(event)}
-                    data-testid={`row-event-${event.id}`}
+                    data-testid={`row-event-tbd-${event.id}`}
                   >
                     <div className="flex items-center gap-5">
-                      <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
-                        <span className="text-lg leading-none">{event.day}</span>
-                        <span className="text-[10px] text-muted-foreground uppercase mt-1">
-                          周{weekDay}
-                        </span>
+                      <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/30 font-bold border border-border/50">
+                        <span className="text-lg leading-none">--</span>
+                        <span className="text-[10px] text-muted-foreground uppercase mt-1">待定</span>
                       </div>
 
                       <div className="flex-1 min-w-0">
@@ -258,31 +341,28 @@ export function MarathonTable({
                     </div>
 
                     <div className="flex items-center gap-3">
-                    {event.websiteUrl ? (
-                      <a
-                        href={event.websiteUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
-                        onClick={(e) => e.stopPropagation()}
-                        title="打开官网"
-                      >
-                        <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                      </a>
-                    ) : null}
-                    <Badge
-                      variant="default"
-                      className={getStatusBadgeStyle(event.registrationStatus)}
-                    >
-                      {event.registrationStatus}
-                    </Badge>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+                      {event.websiteUrl ? (
+                        <a
+                          href={event.websiteUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                          title="打开官网"
+                        >
+                          <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                        </a>
+                      ) : null}
+                      <Badge variant="secondary" className="text-[10px] px-2 h-5">
+                        {event.registrationStatus}
+                      </Badge>
+                      <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                     </div>
                   </motion.div>
-                );
-              })}
-            </div>
-          )
+                ))}
+              </div>
+            ) : null}
+          </div>
         ) : (
           <div className="py-24 text-center">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-secondary mb-4">

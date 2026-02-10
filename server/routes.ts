@@ -899,7 +899,12 @@ export async function registerRoutes(
         .select()
         .from(marathonEditions)
         .where(editionWhereClause)
-        .orderBy(asc(marathonEditions.raceDate), desc(marathonEditions.year));
+        // Null raceDate means "TBD": keep them at the end so upcoming lists remain useful.
+        .orderBy(
+          sql`case when ${marathonEditions.raceDate} is null then 1 else 0 end`,
+          asc(marathonEditions.raceDate),
+          desc(marathonEditions.year),
+        );
 
       const editionsByMarathon = new Map<string, typeof editionRecords>();
       for (const edition of editionRecords) {
