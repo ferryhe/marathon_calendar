@@ -79,18 +79,24 @@ export default function MarathonDetailPage() {
   const submitAuth = async () => {
     if (!authUsername || !authPassword) return;
 
-    if (isRegisterMode) {
-      await registerMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
-      });
-    } else {
-      await loginMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
-      });
+    try {
+      if (isRegisterMode) {
+        await registerMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      } else {
+        await loginMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      }
+      setAuthPassword("");
+    } catch (error) {
+      // Log the error for debugging and show feedback to the user
+      console.error("Authentication failed:", error);
+      alert("认证失败，请稍后重试。");
     }
-    setAuthPassword("");
   };
 
   const toggleFavorite = async () => {

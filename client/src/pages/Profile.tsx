@@ -57,12 +57,20 @@ export default function ProfilePage() {
   const submitAuth = async () => {
     if (!authUsername || !authPassword) return;
 
-    if (isRegisterMode) {
-      await registerMutation.mutateAsync({ username: authUsername, password: authPassword });
-    } else {
-      await loginMutation.mutateAsync({ username: authUsername, password: authPassword });
+    try {
+      if (isRegisterMode) {
+        await registerMutation.mutateAsync({ username: authUsername, password: authPassword });
+      } else {
+        await loginMutation.mutateAsync({ username: authUsername, password: authPassword });
+      }
+      setAuthPassword("");
+    } catch (error: any) {
+      toast({
+        title: "操作失败",
+        description: error?.message || "登录或注册失败，请稍后重试。",
+        variant: "destructive",
+      });
     }
-    setAuthPassword("");
   };
 
   const saveProfile = async () => {

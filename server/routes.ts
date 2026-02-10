@@ -256,6 +256,14 @@ export async function registerRoutes(
         })
         .returning();
 
+      // Regenerate session to prevent session fixation
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+
       req.session.userId = user.id;
       req.session.username = user.username;
       req.session.displayName = user.displayName ?? user.username;
@@ -296,6 +304,14 @@ export async function registerRoutes(
       if (!isValidPassword) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
+
+      // Regenerate session to prevent session fixation
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
 
       req.session.userId = user.id;
       req.session.username = user.username;

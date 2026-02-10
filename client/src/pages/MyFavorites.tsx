@@ -33,19 +33,27 @@ export default function MyFavoritesPage() {
   const submitAuth = async () => {
     if (!authUsername || !authPassword) return;
 
-    if (isRegisterMode) {
-      await registerMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
-      });
-    } else {
-      await loginMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
-      });
+    try {
+      if (isRegisterMode) {
+        await registerMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      } else {
+        await loginMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? `操作失败：${error.message}`
+          : "操作失败，请稍后重试。";
+      window.alert(message);
+    } finally {
+      setAuthPassword("");
     }
-
-    setAuthPassword("");
   };
 
   return (

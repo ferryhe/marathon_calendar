@@ -28,8 +28,23 @@ declare module "express-session" {
   }
 }
 
+const isProduction = process.env.NODE_ENV === "production";
+const sessionSecretEnv = process.env.SESSION_SECRET;
+
+if (!sessionSecretEnv && isProduction) {
+  throw new Error(
+    "SESSION_SECRET environment variable must be set when NODE_ENV=production",
+  );
+}
+
 const sessionSecret =
-  process.env.SESSION_SECRET ?? "marathon-dev-session-secret-change-me";
+  sessionSecretEnv ?? "marathon-dev-session-secret-change-me";
+
+if (!sessionSecretEnv && !isProduction) {
+  console.warn(
+    'Using default development SESSION_SECRET. Do not use this value in production.',
+  );
+}
 
 app.use(
   session({
