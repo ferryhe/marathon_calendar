@@ -227,7 +227,8 @@ async function parseAvatarDataUrl(dataUrl: string) {
   }
 
   const mime = match[1].toLowerCase();
-  if (!AVATAR_ALLOWED_INPUT_MIME.has(mime)) {
+  const claimedMime = mime === "image/jpg" ? "image/jpeg" : mime;
+  if (!AVATAR_ALLOWED_INPUT_MIME.has(claimedMime)) {
     badRequest("Avatar MIME type is not allowed");
   }
 
@@ -257,6 +258,9 @@ async function parseAvatarDataUrl(dataUrl: string) {
   const detectedMime = normalizeDetectedMime(metadata.format);
   if (!detectedMime || !AVATAR_ALLOWED_INPUT_MIME.has(detectedMime)) {
     badRequest("Avatar MIME type is not allowed");
+  }
+  if (detectedMime !== claimedMime) {
+    badRequest("Avatar MIME does not match image content");
   }
 
   const width = metadata.width ?? 0;
