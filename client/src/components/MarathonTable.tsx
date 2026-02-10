@@ -4,75 +4,100 @@ import { ChevronRight, MapPin, Calendar, Loader2 } from "lucide-react";
 import { EventDetails } from "./EventDetails";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMarathons } from "@/hooks/useMarathons";
-import type { Marathon } from "@shared/schema";
+import type { MarathonListItem } from "@/lib/apiClient";
 
 interface MarathonTableProps {
   region: "China" | "Overseas";
   searchQuery: string;
+  filters: {
+    year: number;
+    month?: number;
+    status?: string;
+    sortBy: "raceDate" | "name";
+  };
 }
 
-interface MarathonWithDate extends Marathon {
-  year?: number;
-  month?: number;
-  day?: number;
-  registrationStatus?: string;
+interface MarathonWithDate extends MarathonListItem {
+  displayDate: Date;
+  year: number;
+  month: number;
+  day: number;
+  registrationStatus: string;
 }
 
-export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
-  const [selectedEvent, setSelectedEvent] = useState<Marathon | null>(null);
+function getStatusBadgeStyle(status: string) {
+  if (status === "报名中") {
+    return "bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-2 h-5";
+  }
+
+  if (status === "即将开始") {
+    return "bg-amber-500 hover:bg-amber-600 border-0 text-[10px] px-2 h-5";
+  }
+
+  if (status === "已截止") {
+    return "bg-muted text-muted-foreground border-0 text-[10px] px-2 h-5";
+  }
+
+  return "bg-muted text-muted-foreground border-0 text-[10px] px-2 h-5";
+}
+
+export function MarathonTable({ region, searchQuery, filters }: MarathonTableProps) {
+  const [selectedEvent, setSelectedEvent] = useState<MarathonListItem | null>(null);
 
   // Determine country filter based on region
   const country = region === "China" ? "China" : undefined;
-  
+
   // Fetch marathons from API
   const { data, isLoading, error } = useMarathons({
     country,
     search: searchQuery || undefined,
     limit: 100, // Get more results for client-side grouping
-    sortBy: 'name',
-    sortOrder: 'asc',
+    year: filters.year,
+    month: filters.month,
+    status: filters.status,
+    sortBy: filters.sortBy,
+    sortOrder: "asc",
   });
 
-  // Group marathons by month (we'll parse dates from edition data when available)
+  // Group marathons by month using real race date when available.
   const groupedEvents = useMemo(() => {
     if (!data?.data) return {};
 
-    // For now, we'll group by creation date since we need to integrate edition data
-    // This is a temporary solution - in a real scenario, we'd join with editions
     const events = data.data
-      .filter(marathon => {
+      .filter((marathon) => {
         // Additional client-side filtering for overseas events
         if (region === "Overseas") {
           return marathon.country !== "China";
         }
         return true;
       })
-      .map(marathon => {
-        // For now, use created date as a fallback
-        // TODO: Join with editions data to get actual race dates
-        const createdDate = new Date(marathon.createdAt);
+      .map((marathon) => {
+        const editionDate = marathon.nextEdition?.raceDate;
+        const displayDate = editionDate
+          ? new Date(editionDate)
+          : new Date(marathon.createdAt);
+
         return {
           ...marathon,
-          year: createdDate.getFullYear(),
-          month: createdDate.getMonth() + 1,
-          day: createdDate.getDate(),
-          registrationStatus: "即将开始", // Default status
+          displayDate,
+          year: displayDate.getFullYear(),
+          month: displayDate.getMonth() + 1,
+          day: displayDate.getDate(),
+          registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
         } as MarathonWithDate;
       })
       .sort((a, b) => {
-        const dateA = new Date(a.year || 2026, (a.month || 1) - 1, a.day || 1);
-        const dateB = new Date(b.year || 2026, (b.month || 1) - 1, b.day || 1);
-        return dateA.getTime() - dateB.getTime();
+        return a.displayDate.getTime() - b.displayDate.getTime();
       });
 
     // Group by year-month
     const groups: { [key: string]: MarathonWithDate[] } = {};
-    events.forEach(event => {
+    events.forEach((event) => {
       const key = `${event.year}年${event.month}月`;
       if (!groups[key]) groups[key] = [];
       groups[key].push(event);
     });
-    
+
     return groups;
   }, [data, region]);
 
@@ -117,9 +142,8 @@ export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
               {/* Events List for this month */}
               <div className="space-y-3">
                 {events.map((event, index) => {
-                  const date = new Date(event.year || 2026, (event.month || 1) - 1, event.day || 1);
-                  const weekDay = ['日', '一', '二', '三', '四', '五', '六'][date.getDay()];
-                  
+                  const weekDay = ["日", "一", "二", "三", "四", "五", "六"][event.displayDate.getDay()];
+
                   return (
                     <motion.div
                       key={event.id}
@@ -147,15 +171,9 @@ export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
                       </div>
                       
                       <div className="flex items-center gap-3">
-                        {event.registrationStatus === '报名中' && (
-                          <Badge variant="default" className="bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-2 h-5 flex items-center gap-1.5">
-                            <span className="relative flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
-                            </span>
-                            报名中
-                          </Badge>
-                        )}
+                        <Badge variant="default" className={getStatusBadgeStyle(event.registrationStatus)}>
+                          {event.registrationStatus}
+                        </Badge>
                         <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                       </div>
                     </motion.div>

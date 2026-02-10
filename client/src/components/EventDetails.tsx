@@ -17,10 +17,10 @@ import {
   MessageSquare,
   X
 } from "lucide-react";
-import type { Marathon } from "@shared/schema";
+import type { MarathonListItem } from "@/lib/apiClient";
 
 interface EventDetailsProps {
-  event: Marathon | null;
+  event: MarathonListItem | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -28,11 +28,13 @@ interface EventDetailsProps {
 export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
   if (!event) return null;
 
-  // Parse creation date as fallback for display
-  const createdDate = new Date(event.createdAt);
-  const year = createdDate.getFullYear();
-  const month = createdDate.getMonth() + 1;
-  const day = createdDate.getDate();
+  const displayDate = event.nextEdition?.raceDate
+    ? new Date(event.nextEdition.raceDate)
+    : new Date(event.createdAt);
+  const year = displayDate.getFullYear();
+  const month = displayDate.getMonth() + 1;
+  const day = displayDate.getDate();
+  const status = event.nextEdition?.registrationStatus ?? "待更新";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -47,7 +49,7 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
               variant='secondary'
               className='rounded-full px-3'
             >
-              即将开始
+              {status}
             </Badge>
           </div>
           <DialogTitle className="text-2xl font-bold tracking-tight leading-tight">

@@ -5,12 +5,25 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function Home() {
   const [region, setRegion] = useState<"China" | "Overseas">("China");
   const [searchQuery, setSearchQuery] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [monthFilter, setMonthFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<"raceDate" | "name">("raceDate");
   const { toast } = useToast();
+
+  const currentYear = new Date().getFullYear();
+  const nextYear = currentYear + 1;
 
   const handleUpdate = () => {
     setIsUpdating(true);
@@ -63,12 +76,64 @@ export default function Home() {
                 <TabsTrigger value="Overseas" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">海外赛事</TabsTrigger>
               </TabsList>
             </Tabs>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="bg-secondary/30 rounded-xl h-10 px-3 flex items-center text-sm text-muted-foreground">
+                {currentYear} 年
+              </div>
+
+              <Select value={monthFilter} onValueChange={setMonthFilter}>
+                <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-10">
+                  <SelectValue placeholder="全部月份" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部月份</SelectItem>
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <SelectItem key={i + 1} value={`${i + 1}`}>
+                      {i + 1} 月
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-10">
+                  <SelectValue placeholder="报名状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部状态</SelectItem>
+                  <SelectItem value="报名中">报名中</SelectItem>
+                  <SelectItem value="即将开始">即将开始</SelectItem>
+                  <SelectItem value="已截止">已截止</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={sortBy} onValueChange={(value) => setSortBy(value as "raceDate" | "name")}>
+                <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-10">
+                  <SelectValue placeholder="排序方式" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="raceDate">按时间</SelectItem>
+                  <SelectItem value="name">按名称</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-6">
-        <MarathonTable region={region} searchQuery={searchQuery} />
+        <MarathonTable
+          region={region}
+          searchQuery={searchQuery}
+          filters={{
+            year: currentYear,
+            fallbackYear: nextYear,
+            month: monthFilter === "all" ? undefined : Number(monthFilter),
+            status: statusFilter === "all" ? undefined : statusFilter,
+            sortBy,
+          }}
+        />
       </main>
     </div>
   );

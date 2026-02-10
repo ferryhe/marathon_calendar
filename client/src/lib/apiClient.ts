@@ -25,6 +25,8 @@ export interface MarathonWithEdition extends MarathonDTO {
   nextEdition?: MarathonEditionDTO;
 }
 
+export type MarathonListItem = MarathonWithEdition;
+
 export interface MarathonDetail extends MarathonDTO {
   editions: MarathonEditionDTO[];
   reviews: {
@@ -50,7 +52,10 @@ export interface MarathonQueryParams {
   search?: string;
   city?: string;
   country?: string;
-  sortBy?: 'name' | 'createdAt';
+  year?: number;
+  month?: number;
+  status?: string;
+  sortBy?: 'name' | 'createdAt' | 'raceDate';
   sortOrder?: 'asc' | 'desc';
 }
 
@@ -84,7 +89,7 @@ class ApiClient {
   }
 
   // Marathon APIs
-  async getMarathons(params?: MarathonQueryParams): Promise<PaginatedResponse<MarathonDTO>> {
+  async getMarathons(params?: MarathonQueryParams): Promise<PaginatedResponse<MarathonListItem>> {
     const queryParams = new URLSearchParams();
     
     if (params) {
@@ -98,7 +103,7 @@ class ApiClient {
     const query = queryParams.toString();
     const endpoint = query ? `/marathons?${query}` : '/marathons';
     
-    return this.request<PaginatedResponse<MarathonDTO>>(endpoint);
+    return this.request<PaginatedResponse<MarathonListItem>>(endpoint);
   }
 
   async getMarathonById(id: string): Promise<MarathonDetail> {

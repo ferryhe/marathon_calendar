@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient, type MarathonQueryParams, type MarathonDTO } from '@/lib/apiClient';
+import { apiClient, type MarathonQueryParams } from '@/lib/apiClient';
 
 // Query keys
 export const marathonKeys = {
