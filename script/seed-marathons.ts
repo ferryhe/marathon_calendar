@@ -274,6 +274,20 @@ const sourceSeedData = [
     baseUrl: null,
     priority: 100,
     isActive: true,
+    // A generic extractor that works for many official marathon sites.
+    // Per-site overrides can be added later via sources.config.
+    config: {
+      extract: {
+        raceDate: {
+          selector:
+            ".race-date p, .race-date, .event-date, .simple-date, .component-hero-banner-subheading, .countdown-section-header h3, body",
+          attr: "text",
+          regex:
+            "((January|February|March|April|May|June|July|August|September|October|November|December)\\\\s+\\\\d{1,2},\\\\s+20\\\\d{2})",
+          group: 1,
+        },
+      },
+    },
     notes: "第一层核心数据源；按赛事官网直采，数据权威性最高",
   },
   {
