@@ -1396,6 +1396,78 @@ export async function registerRoutes(
   });
 
   // --- Admin-only: data collection/sync management (Stage 1.3) ---
+  app.get("/api/admin/stats", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+
+      const now = new Date();
+      const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      const [sourceCounts] = await database
+        .select({
+          total: sql<number>`count(*)::int`,
+          active: sql<number>`sum(case when ${sources.isActive} then 1 else 0 end)::int`,
+        })
+        .from(sources);
+
+      const [marathonSourceCounts] = await database
+        .select({
+          total: sql<number>`count(*)::int`,
+        })
+        .from(marathonSources);
+
+      const rawByStatus = await database
+        .select({
+          status: rawCrawlData.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(rawCrawlData)
+        .groupBy(rawCrawlData.status);
+
+      const rawLast24hByStatus = await database
+        .select({
+          status: rawCrawlData.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(rawCrawlData)
+        .where(sql`${rawCrawlData.fetchedAt} >= ${since24h}`)
+        .groupBy(rawCrawlData.status);
+
+      const runsLast24hByStatus = await database
+        .select({
+          status: marathonSyncRuns.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(marathonSyncRuns)
+        .where(sql`${marathonSyncRuns.startedAt} >= ${since24h}`)
+        .groupBy(marathonSyncRuns.status);
+
+      res.json({
+        data: {
+          now: now.toISOString(),
+          since24h: since24h.toISOString(),
+          sources: {
+            total: sourceCounts?.total ?? 0,
+            active: sourceCounts?.active ?? 0,
+          },
+          marathonSources: {
+            total: marathonSourceCounts?.total ?? 0,
+          },
+          raw: {
+            byStatus: rawByStatus,
+            last24hByStatus: rawLast24hByStatus,
+          },
+          runs: {
+            last24hByStatus: runsLast24hByStatus,
+          },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/admin/sources", async (req, res, next) => {
     try {
       const database = ensureDatabase();

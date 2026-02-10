@@ -127,8 +127,26 @@ export type AdminDiscoveryWebResult = {
   description: string | null;
 };
 
+export type AdminStats = {
+  now: string;
+  since24h: string;
+  sources: { total: number; active: number };
+  marathonSources: { total: number };
+  raw: {
+    byStatus: Array<{ status: string; count: number }>;
+    last24hByStatus: Array<{ status: string; count: number }>;
+  };
+  runs: {
+    last24hByStatus: Array<{ status: string; count: number }>;
+  };
+};
+
 export async function listAdminSources(token: string) {
   return adminRequest<{ data: AdminSource[] }>(token, "/admin/sources");
+}
+
+export async function getAdminStats(token: string) {
+  return adminRequest<{ data: AdminStats }>(token, "/admin/stats");
 }
 
 export async function updateAdminSource(
