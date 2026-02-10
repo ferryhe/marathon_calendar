@@ -90,11 +90,24 @@ export default function ProfilePage() {
     }
 
     try {
-      await updateProfileMutation.mutateAsync({
+      const payload: {
+        displayName: string;
+        avatarUrl?: string | null;
+        avatarSource?: "manual" | "upload" | "wechat";
+      } = {
         displayName: displayName.trim(),
-        avatarUrl: avatarUrl.trim() ? avatarUrl.trim() : null,
-        avatarSource: "manual",
-      });
+      };
+
+      // Only update avatar fields when the user actually changes the avatar URL input.
+      // This avoids overwriting sources set by upload/WeChat flows.
+      const desiredAvatarUrl = avatarUrl.trim() ? avatarUrl.trim() : null;
+      const currentAvatarUrl = currentUser?.avatarUrl ?? null;
+      if (desiredAvatarUrl !== currentAvatarUrl) {
+        payload.avatarUrl = desiredAvatarUrl;
+        payload.avatarSource = "manual";
+      }
+
+      await updateProfileMutation.mutateAsync(payload);
       toast({ title: "个人资料已更新" });
     } catch (error) {
       toast({
