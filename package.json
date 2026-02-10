@@ -11,7 +11,8 @@
     "check": "tsc",
     "db:ensure": "tsx script/db-ensure-pr6-schema.ts && tsx script/db-ensure-stage1-3-schema.ts",
     "db:push": "drizzle-kit push",
-    "db:seed": "tsx script/seed-marathons.ts"
+    "db:seed": "tsx script/seed-marathons.ts",
+    "config:import": "tsx script/import-sources-yaml.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -79,6 +80,7 @@
     "vaul": "^1.1.2",
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
+    "yaml": "^2.8.2",
     "zod": "^3.25.76",
     "zod-validation-error": "^3.4.0"
   },
