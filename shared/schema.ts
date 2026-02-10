@@ -3,6 +3,7 @@ import {
   boolean,
   date,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -90,10 +91,22 @@ export const sources = pgTable(
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     name: text("name").notNull(),
+    type: text("type").default("official").notNull(),
+    strategy: text("strategy").default("HTML").notNull(),
     baseUrl: text("base_url"),
     priority: integer("priority").default(0).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    retryMax: integer("retry_max").default(3).notNull(),
+    retryBackoffSeconds: integer("retry_backoff_seconds").default(30).notNull(),
+    requestTimeoutMs: integer("request_timeout_ms").default(15000).notNull(),
+    minIntervalSeconds: integer("min_interval_seconds").default(0).notNull(),
     notes: text("notes"),
+    config: jsonb("config").$type<Record<string, unknown> | null>(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
@@ -115,6 +128,10 @@ export const marathonSources = pgTable(
     sourceUrl: text("source_url").notNull(),
     isPrimary: boolean("is_primary").default(false).notNull(),
     lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    lastHash: text("last_hash"),
+    lastHttpStatus: integer("last_http_status"),
+    lastError: text("last_error"),
+    nextCheckAt: timestamp("next_check_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -132,13 +149,42 @@ export const marathonSyncRuns = pgTable("marathon_sync_runs", {
   marathonId: varchar("marathon_id")
     .references(() => marathons.id)
     .notNull(),
-  sourceId: varchar("source_id").references(() => sources.id),
+  sourceId: varchar("source_id")
+    .references(() => sources.id)
+    .notNull(),
   status: text("status").notNull(),
+  strategyUsed: text("strategy_used"),
+  attempt: integer("attempt").default(1).notNull(),
+  message: text("message"),
+  newCount: integer("new_count").default(0).notNull(),
+  updatedCount: integer("updated_count").default(0).notNull(),
+  unchangedCount: integer("unchanged_count").default(0).notNull(),
   startedAt: timestamp("started_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   errorMessage: text("error_message"),
+});
+
+export const rawCrawlData = pgTable("raw_crawl_data", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  marathonId: varchar("marathon_id")
+    .references(() => marathons.id)
+    .notNull(),
+  sourceId: varchar("source_id")
+    .references(() => sources.id)
+    .notNull(),
+  sourceUrl: text("source_url").notNull(),
+  contentType: text("content_type"),
+  httpStatus: integer("http_status"),
+  rawContent: text("raw_content"),
+  contentHash: text("content_hash"),
+  metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+  status: text("status").default("pending").notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
 });
 
 export const marathonReviews = pgTable("marathon_reviews", {
@@ -225,6 +271,21 @@ export const insertUserSchema = createInsertSchema(users).pick({
   password: true,
 });
 
+export const insertSourceSchema = createInsertSchema(sources).pick({
+  name: true,
+  type: true,
+  strategy: true,
+  baseUrl: true,
+  priority: true,
+  isActive: true,
+  retryMax: true,
+  retryBackoffSeconds: true,
+  requestTimeoutMs: true,
+  minIntervalSeconds: true,
+  notes: true,
+  config: true,
+});
+
 export const insertMarathonSchema = createInsertSchema(marathons).pick({
   name: true,
   canonicalName: true,
@@ -254,8 +315,46 @@ export const insertUserFavoriteMarathonSchema = createInsertSchema(
   marathonId: true,
 });
 
+export const insertMarathonSourceSchema = createInsertSchema(marathonSources).pick({
+  marathonId: true,
+  sourceId: true,
+  sourceUrl: true,
+  isPrimary: true,
+});
+
+export const insertMarathonSyncRunSchema = createInsertSchema(marathonSyncRuns).pick({
+  marathonId: true,
+  sourceId: true,
+  status: true,
+  strategyUsed: true,
+  attempt: true,
+  message: true,
+  newCount: true,
+  updatedCount: true,
+  unchangedCount: true,
+  startedAt: true,
+  finishedAt: true,
+  errorMessage: true,
+});
+
+export const insertRawCrawlDataSchema = createInsertSchema(rawCrawlData).pick({
+  marathonId: true,
+  sourceId: true,
+  sourceUrl: true,
+  contentType: true,
+  httpStatus: true,
+  rawContent: true,
+  contentHash: true,
+  metadata: true,
+  status: true,
+  processedAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+export type InsertSource = z.infer<typeof insertSourceSchema>;
+export type Source = typeof sources.$inferSelect;
 
 export type InsertMarathon = z.infer<typeof insertMarathonSchema>;
 export type Marathon = typeof marathons.$inferSelect;
@@ -267,3 +366,12 @@ export type InsertUserFavoriteMarathon = z.infer<
   typeof insertUserFavoriteMarathonSchema
 >;
 export type UserFavoriteMarathon = typeof userFavoriteMarathons.$inferSelect;
+
+export type InsertMarathonSource = z.infer<typeof insertMarathonSourceSchema>;
+export type MarathonSource = typeof marathonSources.$inferSelect;
+
+export type InsertMarathonSyncRun = z.infer<typeof insertMarathonSyncRunSchema>;
+export type MarathonSyncRun = typeof marathonSyncRuns.$inferSelect;
+
+export type InsertRawCrawlData = z.infer<typeof insertRawCrawlDataSchema>;
+export type RawCrawlData = typeof rawCrawlData.$inferSelect;
