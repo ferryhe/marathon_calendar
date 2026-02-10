@@ -62,6 +62,10 @@ SESSION_SECRET=replace-with-a-random-string
 AI_API_KEY=your-ai-api-key
 ```
 
+说明：
+- 开发环境未设置 `SESSION_SECRET` 会使用默认值并打印警告；生产环境必须设置 `SESSION_SECRET`（否则服务将拒绝启动）。
+- `NODE_ENV=production` 时会话存储使用 PostgreSQL（`connect-pg-simple`），启动时会自动创建 `mc_sessions` 表。
+
 4. 安装依赖并初始化数据库：
 
 ```bash
@@ -98,6 +102,10 @@ REDIS_URL=redis://localhost:6379
 SESSION_SECRET=replace-with-a-random-string
 AI_API_KEY=your-ai-api-key
 ```
+
+说明：
+- 开发环境未设置 `SESSION_SECRET` 会使用默认值并打印警告；生产环境必须设置 `SESSION_SECRET`（否则服务将拒绝启动）。
+- `NODE_ENV=production` 时会话存储使用 PostgreSQL（`connect-pg-simple`），启动时会自动创建 `mc_sessions` 表。
 
 4. 安装依赖并初始化数据库：
 
