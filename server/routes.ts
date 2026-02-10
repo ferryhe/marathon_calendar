@@ -480,6 +480,7 @@ export async function registerRoutes(
       const payload = bindWechatPayloadSchema.parse(req.body);
 
       // Check if wechatOpenId or wechatUnionId is already bound to another user
+      // This prevents binding conflicts - requires at least one condition to check
       const conditions = [];
       if (payload.wechatOpenId) {
         conditions.push(eq(users.wechatOpenId, payload.wechatOpenId));

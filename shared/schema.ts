@@ -226,7 +226,6 @@ export const reviewReports = pgTable(
   }),
 );
 
-
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,

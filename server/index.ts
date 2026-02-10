@@ -60,7 +60,7 @@ if (isProduction && process.env.DATABASE_URL) {
   sessionStore = new PgStore({
     pool: pgPool,
     createTableIfMissing: true,
-    tableName: 'user_sessions',
+    tableName: "user_sessions",
   });
   console.log('Using PostgreSQL session store for production');
 } else {

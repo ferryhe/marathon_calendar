@@ -9,6 +9,7 @@ import {
   Star,
   ThumbsUp,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import {
   useCreateReview,
   useDeleteReview,
@@ -43,6 +44,7 @@ function formatDate(dateValue?: string | null) {
 export default function MarathonDetailPage() {
   const [matched, params] = useRoute("/marathons/:id");
   const marathonId = matched ? params.id : "";
+  const { toast } = useToast();
 
   const { data, isLoading, error } = useMarathon(marathonId);
   const { data: reviews = [] } = useMarathonReviews(marathonId);
@@ -95,7 +97,11 @@ export default function MarathonDetailPage() {
     } catch (error) {
       // Log the error for debugging and show feedback to the user
       console.error("Authentication failed:", error);
-      alert("认证失败，请稍后重试。");
+      toast({
+        title: "认证失败",
+        description: "请稍后重试",
+        variant: "destructive",
+      });
     }
   };
 

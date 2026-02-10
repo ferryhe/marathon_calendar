@@ -79,7 +79,7 @@ export default function ProfilePage() {
       return;
     }
 
-    // Only send displayName, don't send avatar fields to preserve existing avatarSource
+    // Only send displayName to avoid overwriting avatar fields
     await updateProfileMutation.mutateAsync({
       displayName: displayName.trim(),
     });
