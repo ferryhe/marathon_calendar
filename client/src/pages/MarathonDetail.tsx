@@ -115,8 +115,7 @@ export default function MarathonDetailPage() {
   };
 
   const submitReview = async () => {
-    const trimmedComment = comment.trim();
-    const commentPayload = trimmedComment === "" ? undefined : trimmedComment;
+    const commentPayload = comment.trim() || undefined;
 
     if (editingReviewId) {
       await updateReviewMutation.mutateAsync({

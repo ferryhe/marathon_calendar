@@ -3,7 +3,7 @@ import { type Server } from "http";
 import path from "path";
 import { promises as fs } from "fs";
 import COS from "cos-nodejs-sdk-v5";
-import { eq, and, or, like, sql, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, or, like, sql, desc, asc, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import {
   users,
@@ -495,7 +495,7 @@ export async function registerRoutes(
           .from(users)
           .where(and(
             or(...conditions),
-            sql`${users.id} != ${req.session.userId}`
+            ne(users.id, req.session.userId!)
           ));
 
         if (existingBinding) {

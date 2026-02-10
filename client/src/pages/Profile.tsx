@@ -66,8 +66,8 @@ export default function ProfilePage() {
       setAuthPassword("");
     } catch (error: any) {
       toast({
-        title: "操作失败",
-        description: error?.message || "登录或注册失败，请稍后重试。",
+        title: isRegisterMode ? "注册失败" : "登录失败",
+        description: error?.message || "请稍后重试",
         variant: "destructive",
       });
     }
