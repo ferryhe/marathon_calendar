@@ -113,6 +113,18 @@ function coerceDateString(value: unknown): string | null {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function isValidYmd(yyyy: number, mm: number, dd: number) {
+  if (!Number.isInteger(yyyy) || yyyy < 2000 || yyyy > 2100) return false;
+  if (!Number.isInteger(mm) || mm < 1 || mm > 12) return false;
+  if (!Number.isInteger(dd) || dd < 1 || dd > 31) return false;
+  const date = new Date(Date.UTC(yyyy, mm - 1, dd));
+  return (
+    date.getUTCFullYear() === yyyy &&
+    date.getUTCMonth() === mm - 1 &&
+    date.getUTCDate() === dd
+  );
+}
+
 function extractEditionFromHtml(html: string) {
   const jsonLdEvents = extractJsonLdEvents(html);
   for (const event of jsonLdEvents) {
@@ -130,9 +142,15 @@ function extractEditionFromHtml(html: string) {
     html.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/) ??
     html.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
   if (dateMatch) {
-    const yyyy = dateMatch[1];
-    const mm = String(dateMatch[2]).padStart(2, "0");
-    const dd = String(dateMatch[3]).padStart(2, "0");
+    const yyyyN = Number(dateMatch[1]);
+    const mmN = Number(dateMatch[2]);
+    const ddN = Number(dateMatch[3]);
+    if (!isValidYmd(yyyyN, mmN, ddN)) {
+      return null;
+    }
+    const yyyy = String(yyyyN);
+    const mm = String(mmN).padStart(2, "0");
+    const dd = String(ddN).padStart(2, "0");
     return {
       raceDate: `${yyyy}-${mm}-${dd}`,
       registrationStatus: null as string | null,
@@ -225,24 +243,26 @@ function extractEditionFromHtmlWithConfig(params: {
   pageUrl: string;
   source: Source;
 }) {
-  const base = extractEditionFromHtml(params.html);
-  if (base?.raceDate) return base;
-
   const config = (params.source.config ?? null) as Record<string, unknown> | null;
   const raceDateRule = readRule(config, "raceDate");
   const statusRule = readRule(config, "registrationStatus");
   const regUrlRule = readRule(config, "registrationUrl");
-  if (!raceDateRule && !statusRule && !regUrlRule) return null;
+  const hasRules = Boolean(raceDateRule || statusRule || regUrlRule);
 
-  const $ = load(params.html);
-  const rawRaceDate = raceDateRule ? applyRule($, raceDateRule) : null;
-  const raceDate = rawRaceDate ? normalizeDateString(rawRaceDate) : null;
-  const registrationStatus = statusRule ? applyRule($, statusRule) : null;
-  const rawRegUrl = regUrlRule ? applyRule($, regUrlRule) : null;
-  const registrationUrl = rawRegUrl ? resolveUrlMaybe(rawRegUrl, params.pageUrl) : null;
+  if (hasRules) {
+    const $ = load(params.html);
+    const rawRaceDate = raceDateRule ? applyRule($, raceDateRule) : null;
+    const raceDate = rawRaceDate ? normalizeDateString(rawRaceDate) : null;
+    const registrationStatus = statusRule ? applyRule($, statusRule) : null;
+    const rawRegUrl = regUrlRule ? applyRule($, regUrlRule) : null;
+    const registrationUrl = rawRegUrl ? resolveUrlMaybe(rawRegUrl, params.pageUrl) : null;
 
-  if (!raceDate && !registrationStatus && !registrationUrl) return null;
-  return { raceDate, registrationStatus, registrationUrl };
+    if (raceDate || registrationStatus || registrationUrl) {
+      return { raceDate, registrationStatus, registrationUrl };
+    }
+  }
+
+  return extractEditionFromHtml(params.html);
 }
 
 export async function syncMarathonSourceOnce(params: {
