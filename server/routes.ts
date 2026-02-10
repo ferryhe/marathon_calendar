@@ -1,5 +1,7 @@
 import type { Express, Request } from "express";
 import { type Server } from "http";
+import path from "path";
+import { promises as fs } from "fs";
 import { eq, and, or, like, sql, desc, asc, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -64,6 +66,23 @@ const updateReviewPayloadSchema = z.object({
   comment: z.string().max(1000).nullable().optional(),
 });
 
+const updateProfilePayloadSchema = z.object({
+  displayName: z.string().trim().min(1).max(50),
+  avatarUrl: z.string().url().nullable().optional(),
+  avatarSource: z.enum(["manual", "upload", "wechat"]).optional(),
+});
+
+const avatarUploadPayloadSchema = z.object({
+  dataUrl: z.string().min(32).max(6 * 1024 * 1024),
+});
+
+const bindWechatPayloadSchema = z.object({
+  wechatOpenId: z.string().trim().min(6).max(128),
+  wechatUnionId: z.string().trim().min(6).max(128).optional(),
+  wechatNickname: z.string().trim().min(1).max(50),
+  wechatAvatarUrl: z.string().url().optional(),
+});
+
 function requireAuth(req: Request) {
   if (!req.session?.userId) {
     const error = new Error("Authentication required");
@@ -82,6 +101,52 @@ function ensureDatabase() {
 
 function canonicalizeName(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function toAuthUser(user: {
+  id: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  avatarSource: string;
+  isWechatBound: boolean;
+  wechatNickname: string | null;
+  wechatAvatarUrl: string | null;
+}) {
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    avatarSource: user.avatarSource,
+    isWechatBound: user.isWechatBound,
+    wechatNickname: user.wechatNickname,
+    wechatAvatarUrl: user.wechatAvatarUrl,
+  };
+}
+
+function parseAvatarDataUrl(dataUrl: string) {
+  const match = dataUrl.match(
+    /^data:(image\/(png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)$/i,
+  );
+  if (!match) {
+    const error = new Error("Invalid image data");
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+
+  const mime = match[1].toLowerCase();
+  const base64Body = match[3];
+  const buffer = Buffer.from(base64Body, "base64");
+
+  if (buffer.length > 2 * 1024 * 1024) {
+    const error = new Error("Avatar image exceeds 2MB");
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+
+  const ext = mime === "image/jpeg" || mime === "image/jpg" ? "jpg" : mime.split("/")[1];
+  return { buffer, ext };
 }
 
 export async function registerRoutes(
@@ -108,17 +173,17 @@ export async function registerRoutes(
         .values({
           username: payload.username,
           password: hashedPassword,
+          displayName: payload.username,
+          avatarSource: "manual",
         })
         .returning();
 
       req.session.userId = user.id;
       req.session.username = user.username;
+      req.session.displayName = user.displayName ?? user.username;
 
       res.json({
-        user: {
-          id: user.id,
-          username: user.username,
-        },
+        user: toAuthUser(user),
       });
     } catch (error) {
       next(error);
@@ -131,7 +196,17 @@ export async function registerRoutes(
       const payload = loginPayloadSchema.parse(req.body);
 
       const [user] = await database
-        .select()
+        .select({
+          id: users.id,
+          username: users.username,
+          password: users.password,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        })
         .from(users)
         .where(eq(users.username, payload.username));
 
@@ -146,12 +221,10 @@ export async function registerRoutes(
 
       req.session.userId = user.id;
       req.session.username = user.username;
+      req.session.displayName = user.displayName ?? user.username;
 
       res.json({
-        user: {
-          id: user.id,
-          username: user.username,
-        },
+        user: toAuthUser(user),
       });
     } catch (error) {
       next(error);
@@ -188,6 +261,12 @@ export async function registerRoutes(
         .select({
           id: users.id,
           username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
         })
         .from(users)
         .where(eq(users.id, req.session.userId));
@@ -196,7 +275,158 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Not authenticated" });
       }
 
-      res.json({ user });
+      res.json({ user: toAuthUser(user) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/users/me", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+      const payload = updateProfilePayloadSchema.parse(req.body);
+
+      const [updated] = await database
+        .update(users)
+        .set({
+          displayName: payload.displayName,
+          avatarUrl: payload.avatarUrl ?? null,
+          avatarSource: payload.avatarSource ?? "manual",
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, req.session.userId!))
+        .returning({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        });
+
+      if (!updated) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      req.session.displayName = updated.displayName ?? updated.username;
+      res.json({ user: toAuthUser(updated) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/users/me/avatar/upload", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+      const payload = avatarUploadPayloadSchema.parse(req.body);
+      const { buffer, ext } = parseAvatarDataUrl(payload.dataUrl);
+
+      const relativeDir = path.join("uploads", "avatars");
+      const absoluteDir = path.resolve(process.cwd(), relativeDir);
+      await fs.mkdir(absoluteDir, { recursive: true });
+
+      const fileName = `${req.session.userId}-${Date.now()}.${ext}`;
+      await fs.writeFile(path.join(absoluteDir, fileName), buffer);
+      const avatarUrl = `/uploads/avatars/${fileName}`;
+
+      const [updated] = await database
+        .update(users)
+        .set({
+          avatarUrl,
+          avatarSource: "upload",
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, req.session.userId!))
+        .returning({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        });
+
+      res.json({
+        avatarUrl,
+        user: updated ? toAuthUser(updated) : null,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Backend-oriented operation: in production this should be called after server-side
+  // verification with WeChat OAuth data, not directly by arbitrary clients.
+  app.post("/api/users/me/wechat/bind", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+      const payload = bindWechatPayloadSchema.parse(req.body);
+
+      const [updated] = await database
+        .update(users)
+        .set({
+          wechatOpenId: payload.wechatOpenId,
+          wechatUnionId: payload.wechatUnionId ?? null,
+          wechatNickname: payload.wechatNickname,
+          wechatAvatarUrl: payload.wechatAvatarUrl ?? null,
+          isWechatBound: true,
+          wechatBoundAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, req.session.userId!))
+        .returning({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        });
+
+      res.json({ user: updated ? toAuthUser(updated) : null });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/users/me/wechat/unbind", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const [updated] = await database
+        .update(users)
+        .set({
+          wechatOpenId: null,
+          wechatUnionId: null,
+          wechatNickname: null,
+          wechatAvatarUrl: null,
+          isWechatBound: false,
+          wechatBoundAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, req.session.userId!))
+        .returning({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        });
+
+      res.json({ user: updated ? toAuthUser(updated) : null });
     } catch (error) {
       next(error);
     }
@@ -213,7 +443,8 @@ export async function registerRoutes(
           marathonId: marathonReviews.marathonId,
           userId: marathonReviews.userId,
           marathonEditionId: marathonReviews.marathonEditionId,
-          userDisplayName: marathonReviews.userDisplayName,
+          userDisplayName: sql<string>`coalesce(${users.displayName}, ${marathonReviews.userDisplayName})`,
+          userAvatarUrl: users.avatarUrl,
           rating: marathonReviews.rating,
           comment: marathonReviews.comment,
           likesCount: marathonReviews.likesCount,
@@ -227,6 +458,7 @@ export async function registerRoutes(
           },
         })
         .from(marathonReviews)
+        .leftJoin(users, eq(users.id, marathonReviews.userId))
         .innerJoin(marathons, eq(marathons.id, marathonReviews.marathonId))
         .where(eq(marathonReviews.userId, req.session.userId!))
         .orderBy(desc(marathonReviews.createdAt));
@@ -593,10 +825,23 @@ export async function registerRoutes(
         .where(eq(marathonEditions.marathonId, req.params.id))
         .orderBy(desc(marathonEditions.year));
       
-      // Get reviews with aggregated stats
+      // Get reviews with user profile data for avatar/display name rendering.
       const reviews = await database
-        .select()
+        .select({
+          id: marathonReviews.id,
+          marathonId: marathonReviews.marathonId,
+          userId: marathonReviews.userId,
+          marathonEditionId: marathonReviews.marathonEditionId,
+          userDisplayName: sql<string>`coalesce(${users.displayName}, ${marathonReviews.userDisplayName})`,
+          userAvatarUrl: users.avatarUrl,
+          rating: marathonReviews.rating,
+          comment: marathonReviews.comment,
+          likesCount: marathonReviews.likesCount,
+          reportCount: marathonReviews.reportCount,
+          createdAt: marathonReviews.createdAt,
+        })
         .from(marathonReviews)
+        .leftJoin(users, eq(users.id, marathonReviews.userId))
         .where(eq(marathonReviews.marathonId, req.params.id))
         .orderBy(desc(marathonReviews.createdAt));
       
@@ -652,8 +897,21 @@ export async function registerRoutes(
     try {
       const database = ensureDatabase();
       const records = await database
-        .select()
+        .select({
+          id: marathonReviews.id,
+          marathonId: marathonReviews.marathonId,
+          userId: marathonReviews.userId,
+          marathonEditionId: marathonReviews.marathonEditionId,
+          userDisplayName: sql<string>`coalesce(${users.displayName}, ${marathonReviews.userDisplayName})`,
+          userAvatarUrl: users.avatarUrl,
+          rating: marathonReviews.rating,
+          comment: marathonReviews.comment,
+          likesCount: marathonReviews.likesCount,
+          reportCount: marathonReviews.reportCount,
+          createdAt: marathonReviews.createdAt,
+        })
         .from(marathonReviews)
+        .leftJoin(users, eq(users.id, marathonReviews.userId))
         .where(eq(marathonReviews.marathonId, req.params.marathonId))
         .orderBy(desc(marathonReviews.createdAt));
       res.json(records);
@@ -667,14 +925,27 @@ export async function registerRoutes(
       const database = ensureDatabase();
       requireAuth(req);
       const parsed = reviewPayloadWithEditionSchema.parse(req.body);
-      const username = req.session.username ?? "匿名用户";
+      const [author] = await database
+        .select({
+          username: users.username,
+          displayName: users.displayName,
+        })
+        .from(users)
+        .where(eq(users.id, req.session.userId!));
+
+      const displayName =
+        author?.displayName ??
+        author?.username ??
+        req.session.displayName ??
+        req.session.username ??
+        "匿名用户";
       const [record] = await database
         .insert(marathonReviews)
         .values({
           ...parsed,
           marathonId: req.params.marathonId,
           userId: req.session.userId!,
-          userDisplayName: username,
+          userDisplayName: displayName,
         })
         .returning();
 

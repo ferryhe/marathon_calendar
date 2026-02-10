@@ -1,6 +1,8 @@
 import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
+import path from "path";
+import { mkdirSync } from "fs";
 import session from "express-session";
 import createMemoryStore from "memorystore";
 import { log } from "./logger";
@@ -22,6 +24,7 @@ declare module "express-session" {
   interface SessionData {
     userId?: string;
     username?: string;
+    displayName?: string;
   }
 }
 
@@ -55,6 +58,11 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+const uploadsRoot = path.resolve(process.cwd(), "uploads");
+const avatarDir = path.join(uploadsRoot, "avatars");
+mkdirSync(avatarDir, { recursive: true });
+app.use("/uploads", express.static(uploadsRoot));
 
 app.use((req, res, next) => {
   const start = Date.now();

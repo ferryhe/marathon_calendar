@@ -16,6 +16,18 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  displayName: text("display_name"),
+  avatarUrl: text("avatar_url"),
+  avatarSource: text("avatar_source").default("manual").notNull(),
+  wechatOpenId: text("wechat_openid").unique(),
+  wechatUnionId: text("wechat_unionid").unique(),
+  wechatNickname: text("wechat_nickname"),
+  wechatAvatarUrl: text("wechat_avatar_url"),
+  isWechatBound: boolean("is_wechat_bound").default(false).notNull(),
+  wechatBoundAt: timestamp("wechat_bound_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 export const marathons = pgTable(
