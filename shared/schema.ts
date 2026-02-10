@@ -134,12 +134,15 @@ export const marathonReviews = pgTable("marathon_reviews", {
   marathonId: varchar("marathon_id")
     .references(() => marathons.id)
     .notNull(),
+  userId: varchar("user_id").references(() => users.id),
   marathonEditionId: varchar("marathon_edition_id").references(
     () => marathonEditions.id,
   ),
   userDisplayName: text("user_display_name").notNull(),
   rating: integer("rating").notNull(),
   comment: text("comment"),
+  likesCount: integer("likes_count").default(0).notNull(),
+  reportCount: integer("report_count").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -162,6 +165,7 @@ export const insertMarathonSchema = createInsertSchema(marathons).pick({
 export const insertReviewSchema = createInsertSchema(marathonReviews)
   .pick({
     marathonId: true,
+    userId: true,
     marathonEditionId: true,
     userDisplayName: true,
     rating: true,

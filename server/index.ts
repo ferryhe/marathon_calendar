@@ -1,5 +1,8 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
+import session from "express-session";
+import createMemoryStore from "memorystore";
 import { log } from "./logger";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -7,12 +10,41 @@ import { startSyncScheduler } from "./syncScheduler";
 
 const app = express();
 const httpServer = createServer(app);
+const MemoryStore = createMemoryStore(session);
 
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
   }
 }
+
+declare module "express-session" {
+  interface SessionData {
+    userId?: string;
+    username?: string;
+  }
+}
+
+const sessionSecret =
+  process.env.SESSION_SECRET ?? "marathon-dev-session-secret-change-me";
+
+app.use(
+  session({
+    name: "mc.sid",
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    },
+    store: new MemoryStore({
+      checkPeriod: 24 * 60 * 60 * 1000,
+    }),
+  }),
+);
 
 app.use(
   express.json({

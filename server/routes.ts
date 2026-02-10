@@ -1,8 +1,10 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { type Server } from "http";
 import { eq, and, or, like, sql, desc, asc, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
+  users,
+  insertUserSchema,
   insertMarathonSchema,
   insertReviewSchema,
   marathonReviews,
@@ -10,8 +12,13 @@ import {
   marathonEditions,
 } from "@shared/schema";
 import { db } from "./db";
+import { hashPassword, verifyPassword } from "./auth";
 
-const reviewPayloadSchema = insertReviewSchema.omit({ marathonId: true });
+const reviewPayloadSchema = insertReviewSchema.omit({
+  marathonId: true,
+  userId: true,
+  userDisplayName: true,
+});
 
 const marathonEditionIdSchema = z.union([
   z.string().uuid(),
@@ -41,6 +48,29 @@ const searchQuerySchema = z.object({
   q: z.string().trim().min(1).max(200),
 });
 
+const registerPayloadSchema = insertUserSchema.extend({
+  username: z.string().trim().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/),
+  password: z.string().min(6).max(128),
+});
+
+const loginPayloadSchema = z.object({
+  username: z.string().trim().min(3).max(30),
+  password: z.string().min(6).max(128),
+});
+
+const updateReviewPayloadSchema = z.object({
+  rating: z.number().int().min(1).max(5).optional(),
+  comment: z.string().max(1000).nullable().optional(),
+});
+
+function requireAuth(req: Request) {
+  if (!req.session?.userId) {
+    const error = new Error("Authentication required");
+    (error as Error & { status?: number }).status = 401;
+    throw error;
+  }
+}
+
 function ensureDatabase() {
   if (!db) {
     throw new Error("Database unavailable: DATABASE_URL is not configured");
@@ -57,6 +87,137 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
+  app.post("/api/auth/register", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const payload = registerPayloadSchema.parse(req.body);
+
+      const [existingUser] = await database
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.username, payload.username));
+
+      if (existingUser) {
+        return res.status(409).json({ message: "Username already exists" });
+      }
+
+      const hashedPassword = await hashPassword(payload.password);
+      const [user] = await database
+        .insert(users)
+        .values({
+          username: payload.username,
+          password: hashedPassword,
+        })
+        .returning();
+
+      req.session.userId = user.id;
+      req.session.username = user.username;
+
+      res.json({
+        user: {
+          id: user.id,
+          username: user.username,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const payload = loginPayloadSchema.parse(req.body);
+
+      const [user] = await database
+        .select()
+        .from(users)
+        .where(eq(users.username, payload.username));
+
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const isValidPassword = await verifyPassword(payload.password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      req.session.userId = user.id;
+      req.session.username = user.username;
+
+      res.json({
+        user: {
+          id: user.id,
+          username: user.username,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/auth/logout", async (req, res, next) => {
+    try {
+      if (!req.session) {
+        return res.json({ success: true });
+      }
+
+      req.session.destroy((err) => {
+        if (err) {
+          return next(err);
+        }
+
+        res.clearCookie("mc.sid");
+        return res.json({ success: true });
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/users/me", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      if (!req.session.userId) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const [user] = await database
+        .select({
+          id: users.id,
+          username: users.username,
+        })
+        .from(users)
+        .where(eq(users.id, req.session.userId));
+
+      if (!user) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      res.json({ user });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/users/me/reviews", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const records = await database
+        .select()
+        .from(marathonReviews)
+        .where(eq(marathonReviews.userId, req.session.userId!))
+        .orderBy(desc(marathonReviews.createdAt));
+
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Get marathons list with filtering, pagination and search
   app.get("/api/marathons", async (req, res, next) => {
     try {
@@ -367,7 +528,8 @@ export async function registerRoutes(
       const records = await database
         .select()
         .from(marathonReviews)
-        .where(eq(marathonReviews.marathonId, req.params.marathonId));
+        .where(eq(marathonReviews.marathonId, req.params.marathonId))
+        .orderBy(desc(marathonReviews.createdAt));
       res.json(records);
     } catch (error) {
       next(error);
@@ -377,16 +539,121 @@ export async function registerRoutes(
   app.post("/api/marathons/:marathonId/reviews", async (req, res, next) => {
     try {
       const database = ensureDatabase();
+      requireAuth(req);
       const parsed = reviewPayloadWithEditionSchema.parse(req.body);
+      const username = req.session.username ?? "匿名用户";
       const [record] = await database
         .insert(marathonReviews)
         .values({
           ...parsed,
           marathonId: req.params.marathonId,
+          userId: req.session.userId!,
+          userDisplayName: username,
         })
         .returning();
 
       res.json(record);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/reviews/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+      const payload = updateReviewPayloadSchema.parse(req.body);
+
+      const [existing] = await database
+        .select()
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, req.params.id));
+
+      if (!existing) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      if (existing.userId !== req.session.userId) {
+        return res.status(403).json({ message: "Permission denied" });
+      }
+
+      const [updated] = await database
+        .update(marathonReviews)
+        .set({
+          ...(payload.rating !== undefined ? { rating: payload.rating } : {}),
+          ...(payload.comment !== undefined ? { comment: payload.comment } : {}),
+        })
+        .where(eq(marathonReviews.id, req.params.id))
+        .returning();
+
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/reviews/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const [existing] = await database
+        .select()
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, req.params.id));
+
+      if (!existing) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      if (existing.userId !== req.session.userId) {
+        return res.status(403).json({ message: "Permission denied" });
+      }
+
+      await database.delete(marathonReviews).where(eq(marathonReviews.id, req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/reviews/:id/like", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const [updated] = await database
+        .update(marathonReviews)
+        .set({
+          likesCount: sql`${marathonReviews.likesCount} + 1`,
+        })
+        .where(eq(marathonReviews.id, req.params.id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/reviews/:id/report", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const [updated] = await database
+        .update(marathonReviews)
+        .set({
+          reportCount: sql`${marathonReviews.reportCount} + 1`,
+        })
+        .where(eq(marathonReviews.id, req.params.id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      res.json(updated);
     } catch (error) {
       next(error);
     }
