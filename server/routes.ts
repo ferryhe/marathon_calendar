@@ -207,8 +207,26 @@ export async function registerRoutes(
       requireAuth(req);
 
       const records = await database
-        .select()
+        .select({
+          id: marathonReviews.id,
+          marathonId: marathonReviews.marathonId,
+          userId: marathonReviews.userId,
+          marathonEditionId: marathonReviews.marathonEditionId,
+          userDisplayName: marathonReviews.userDisplayName,
+          rating: marathonReviews.rating,
+          comment: marathonReviews.comment,
+          likesCount: marathonReviews.likesCount,
+          reportCount: marathonReviews.reportCount,
+          createdAt: marathonReviews.createdAt,
+          marathon: {
+            id: marathons.id,
+            name: marathons.name,
+            city: marathons.city,
+            country: marathons.country,
+          },
+        })
         .from(marathonReviews)
+        .innerJoin(marathons, eq(marathons.id, marathonReviews.marathonId))
         .where(eq(marathonReviews.userId, req.session.userId!))
         .orderBy(desc(marathonReviews.createdAt));
 

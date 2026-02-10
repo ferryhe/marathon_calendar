@@ -49,6 +49,15 @@ export interface ReviewDTO {
   createdAt: string;
 }
 
+export interface MyReviewDTO extends ReviewDTO {
+  marathon: {
+    id: string;
+    name: string;
+    city: string | null;
+    country: string | null;
+  };
+}
+
 export interface AuthUser {
   id: string;
   username: string;
@@ -210,8 +219,8 @@ class ApiClient {
     return this.request<{ user: AuthUser }>(`/users/me`);
   }
 
-  async getMyReviews(): Promise<{ data: ReviewDTO[] }> {
-    return this.request<{ data: ReviewDTO[] }>(`/users/me/reviews`);
+  async getMyReviews(): Promise<{ data: MyReviewDTO[] }> {
+    return this.request<{ data: MyReviewDTO[] }>(`/users/me/reviews`);
   }
 }
 
