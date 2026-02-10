@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
+import { RefreshCw, Search } from "lucide-react";
 import { MarathonTable } from "@/components/MarathonTable";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useCurrentUser, useMyFavorites } from "@/hooks/useAuth";
 import {
   Select,
   SelectContent,
@@ -21,9 +22,24 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [monthFilter, setMonthFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"raceDate" | "name">("raceDate");
+  const [viewMode, setViewMode] = useState<"all" | "mine">("all");
   const { toast } = useToast();
 
+  const { data: currentUser } = useCurrentUser();
+  const { data: favorites = [], isLoading: isFavoritesLoading } = useMyFavorites(!!currentUser);
+
+  const favoriteMarathonIds = useMemo(
+    () => new Set(favorites.map((item) => item.marathon.id)),
+    [favorites],
+  );
+
   const currentYear = new Date().getFullYear();
+
+  useEffect(() => {
+    if (!currentUser && viewMode === "mine") {
+      setViewMode("all");
+    }
+  }, [currentUser, viewMode]);
 
   const handleUpdate = () => {
     setIsUpdating(true);
@@ -35,6 +51,19 @@ export default function Home() {
         duration: 3000,
       });
     }, 1500);
+  };
+
+  const handleMineMode = () => {
+    if (!currentUser) {
+      toast({
+        title: "请先登录",
+        description: "登录后可查看“我的比赛”（收藏赛事）。",
+        duration: 2500,
+      });
+      return;
+    }
+
+    setViewMode("mine");
   };
 
   return (
@@ -82,13 +111,32 @@ export default function Home() {
                 placeholder="搜索赛事名称或城市..."
                 className="pl-9 bg-secondary/30 border-0 rounded-xl h-11 focus-visible:ring-1 focus-visible:ring-primary/20"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(event) => setSearchQuery(event.target.value)}
               />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant={viewMode === "all" ? "default" : "outline"}
+                onClick={() => setViewMode("all")}
+                className="rounded-full"
+              >
+                全部比赛
+              </Button>
+              <Button
+                size="sm"
+                variant={viewMode === "mine" ? "default" : "outline"}
+                onClick={handleMineMode}
+                className="rounded-full"
+              >
+                我的比赛{viewMode === "mine" ? ` (${favoriteMarathonIds.size})` : ""}
+              </Button>
             </div>
 
             <Tabs
               value={region}
-              onValueChange={(v) => setRegion(v as "China" | "Overseas")}
+              onValueChange={(value) => setRegion(value as "China" | "Overseas")}
               className="w-full"
             >
               <TabsList className="grid w-full grid-cols-2 bg-secondary/50 rounded-xl p-1">
@@ -162,6 +210,9 @@ export default function Home() {
             status: statusFilter === "all" ? undefined : statusFilter,
             sortBy,
           }}
+          showMineOnly={viewMode === "mine"}
+          favoriteMarathonIds={favoriteMarathonIds}
+          favoritesLoading={isFavoritesLoading}
         />
       </main>
     </div>
