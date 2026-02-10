@@ -128,7 +128,18 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
-  const stopScheduler = startSyncScheduler();
+  const schedulerEnabled =
+    process.env.SYNC_SCHEDULER_ENABLED === "true" ||
+    process.env.NODE_ENV === "production";
+  const intervalMsEnv = process.env.SYNC_SCHEDULER_INTERVAL_MS;
+  const intervalMs = intervalMsEnv ? Number(intervalMsEnv) : undefined;
+  const stopScheduler = schedulerEnabled
+    ? startSyncScheduler(
+        Number.isFinite(intervalMs) && intervalMs && intervalMs > 0
+          ? intervalMs
+          : undefined,
+      )
+    : null;
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const isZodError = err instanceof ZodError;
@@ -187,6 +198,6 @@ app.use((req, res, next) => {
   );
 
   httpServer.on("close", () => {
-    stopScheduler();
+    stopScheduler?.();
   });
 })();
