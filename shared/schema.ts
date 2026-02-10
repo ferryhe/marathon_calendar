@@ -148,6 +148,28 @@ export const marathonReviews = pgTable("marathon_reviews", {
     .notNull(),
 });
 
+export const userFavoriteMarathons = pgTable(
+  "user_favorite_marathons",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id")
+      .references(() => users.id)
+      .notNull(),
+    marathonId: varchar("marathon_id")
+      .references(() => marathons.id)
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userMarathonUnique: uniqueIndex("user_favorite_marathons_unique").on(
+      table.userId,
+      table.marathonId,
+    ),
+  }),
+);
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -175,6 +197,13 @@ export const insertReviewSchema = createInsertSchema(marathonReviews)
     rating: z.number().int().min(1).max(5),
   });
 
+export const insertUserFavoriteMarathonSchema = createInsertSchema(
+  userFavoriteMarathons,
+).pick({
+  userId: true,
+  marathonId: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
@@ -183,3 +212,8 @@ export type Marathon = typeof marathons.$inferSelect;
 
 export type InsertReview = z.infer<typeof insertReviewSchema>;
 export type MarathonReview = typeof marathonReviews.$inferSelect;
+
+export type InsertUserFavoriteMarathon = z.infer<
+  typeof insertUserFavoriteMarathonSchema
+>;
+export type UserFavoriteMarathon = typeof userFavoriteMarathons.$inferSelect;

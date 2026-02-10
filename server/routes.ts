@@ -7,6 +7,7 @@ import {
   insertUserSchema,
   insertMarathonSchema,
   insertReviewSchema,
+  userFavoriteMarathons,
   marathonReviews,
   marathons,
   marathonEditions,
@@ -236,6 +237,88 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/users/me/favorites", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const records = await database
+        .select({
+          id: userFavoriteMarathons.id,
+          favoritedAt: userFavoriteMarathons.createdAt,
+          marathon: {
+            id: marathons.id,
+            name: marathons.name,
+            city: marathons.city,
+            country: marathons.country,
+            websiteUrl: marathons.websiteUrl,
+            description: marathons.description,
+          },
+        })
+        .from(userFavoriteMarathons)
+        .innerJoin(marathons, eq(marathons.id, userFavoriteMarathons.marathonId))
+        .where(eq(userFavoriteMarathons.userId, req.session.userId!))
+        .orderBy(desc(userFavoriteMarathons.createdAt));
+
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/users/me/favorites/:marathonId", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const [marathon] = await database
+        .select({ id: marathons.id })
+        .from(marathons)
+        .where(eq(marathons.id, req.params.marathonId));
+
+      if (!marathon) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      await database
+        .insert(userFavoriteMarathons)
+        .values({
+          userId: req.session.userId!,
+          marathonId: req.params.marathonId,
+        })
+        .onConflictDoNothing({
+          target: [
+            userFavoriteMarathons.userId,
+            userFavoriteMarathons.marathonId,
+          ],
+        });
+
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/users/me/favorites/:marathonId", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      await database
+        .delete(userFavoriteMarathons)
+        .where(
+          and(
+            eq(userFavoriteMarathons.userId, req.session.userId!),
+            eq(userFavoriteMarathons.marathonId, req.params.marathonId),
+          ),
+        );
+
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Get marathons list with filtering, pagination and search
   app.get("/api/marathons", async (req, res, next) => {
     try {
@@ -460,6 +543,31 @@ export async function registerRoutes(
           },
         })),
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/marathons/:marathonId/favorite-status", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+
+      if (!req.session?.userId) {
+        return res.json({ isFavorited: false });
+      }
+
+      const [record] = await database
+        .select({ id: userFavoriteMarathons.id })
+        .from(userFavoriteMarathons)
+        .where(
+          and(
+            eq(userFavoriteMarathons.userId, req.session.userId),
+            eq(userFavoriteMarathons.marathonId, req.params.marathonId),
+          ),
+        )
+        .limit(1);
+
+      res.json({ isFavorited: !!record });
     } catch (error) {
       next(error);
     }
