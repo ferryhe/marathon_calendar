@@ -9,6 +9,7 @@
     "build": "tsx script/build.ts",
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "db:ensure": "tsx script/db-ensure-pr6-schema.ts && tsx script/db-ensure-stage1-3-schema.ts",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx script/seed-marathons.ts"
   },
