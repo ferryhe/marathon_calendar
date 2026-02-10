@@ -103,6 +103,22 @@ export type AdminRawCrawl = {
   contentHash: string | null;
   status: string;
   fetchedAt: string;
+  processedAt: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+export type AdminRawCrawlDetail = AdminRawCrawl & {
+  rawContent: string | null;
+  rawContentTruncated: boolean;
+};
+
+export type AdminMarathon = {
+  id: string;
+  name: string;
+  canonicalName: string;
+  city: string | null;
+  country: string | null;
+  websiteUrl: string | null;
 };
 
 export type AdminDiscoveryWebResult = {
@@ -157,6 +173,47 @@ export async function listAdminRawCrawl(token: string, limit: number = 50) {
   return adminRequest<{ data: AdminRawCrawl[] }>(token, `/admin/raw-crawl?limit=${limit}`);
 }
 
+export async function listAdminRawCrawlFiltered(
+  token: string,
+  params: { limit?: number; status?: string },
+) {
+  const query = new URLSearchParams();
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.status) query.set("status", params.status);
+  return adminRequest<{ data: AdminRawCrawl[] }>(token, `/admin/raw-crawl?${query.toString()}`);
+}
+
+export async function getAdminRawCrawl(token: string, id: string, full: boolean = false) {
+  return adminRequest<{ data: AdminRawCrawlDetail }>(
+    token,
+    `/admin/raw-crawl/${id}?full=${full ? "true" : "false"}`,
+  );
+}
+
+export async function ignoreAdminRawCrawl(token: string, id: string) {
+  return adminRequest<{ success: boolean }>(token, `/admin/raw-crawl/${id}/ignore`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function resolveAdminRawCrawl(
+  token: string,
+  id: string,
+  payload: {
+    year?: number;
+    raceDate?: string;
+    registrationStatus?: string | null;
+    registrationUrl?: string | null;
+    note?: string;
+  },
+) {
+  return adminRequest<{ data: any }>(token, `/admin/raw-crawl/${id}/resolve`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function listAdminMarathonSources(
   token: string,
   params?: { limit?: number; sourceId?: string; search?: string },
@@ -170,6 +227,27 @@ export async function listAdminMarathonSources(
     token,
     `/admin/marathon-sources${qs ? `?${qs}` : ""}`,
   );
+}
+
+export async function listAdminMarathons(
+  token: string,
+  params?: { limit?: number; search?: string },
+) {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.search) query.set("search", params.search);
+  const qs = query.toString();
+  return adminRequest<{ data: AdminMarathon[] }>(token, `/admin/marathons${qs ? `?${qs}` : ""}`);
+}
+
+export async function upsertAdminMarathonSource(
+  token: string,
+  payload: { marathonId: string; sourceId: string; sourceUrl: string; isPrimary?: boolean },
+) {
+  return adminRequest<{ data: any }>(token, "/admin/marathon-sources", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function adminDiscoveryWebSearch(
