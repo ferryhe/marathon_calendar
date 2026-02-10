@@ -1,9 +1,21 @@
 import { useRoute, Link } from "wouter";
-import { ArrowLeft, Calendar, MapPin, Star } from "lucide-react";
-import { useMarathon } from "@/hooks/useMarathons";
+import { ArrowLeft, Calendar, MapPin, Star, ThumbsUp, Flag } from "lucide-react";
+import {
+  useMarathon,
+  useMarathonReviews,
+  useCreateReview,
+  useUpdateReview,
+  useDeleteReview,
+  useLikeReview,
+  useReportReview,
+} from "@/hooks/useMarathons";
+import { useCurrentUser, useLogin, useLogout, useRegister } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useMemo, useState } from "react";
 
 function formatDate(dateValue?: string | null) {
   if (!dateValue) {
@@ -22,6 +34,77 @@ export default function MarathonDetailPage() {
   const [matched, params] = useRoute("/marathons/:id");
   const marathonId = matched ? params.id : "";
   const { data, isLoading, error } = useMarathon(marathonId);
+  const { data: reviews = [] } = useMarathonReviews(marathonId);
+  const { data: currentUser } = useCurrentUser();
+  const loginMutation = useLogin();
+  const registerMutation = useRegister();
+  const logoutMutation = useLogout();
+  const createReviewMutation = useCreateReview(marathonId);
+  const updateReviewMutation = useUpdateReview(marathonId);
+  const deleteReviewMutation = useDeleteReview(marathonId);
+  const likeReviewMutation = useLikeReview(marathonId);
+  const reportReviewMutation = useReportReview(marathonId);
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState("");
+  const [editingReviewId, setEditingReviewId] = useState<string | null>(null);
+
+  const reviewStats = useMemo(() => {
+    if (reviews.length === 0) {
+      return { count: 0, average: 0 };
+    }
+
+    const total = reviews.reduce((sum, item) => sum + item.rating, 0);
+    return { count: reviews.length, average: total / reviews.length };
+  }, [reviews]);
+
+  const submitAuth = async () => {
+    if (!authUsername || !authPassword) {
+      return;
+    }
+
+    if (isRegisterMode) {
+      await registerMutation.mutateAsync({
+        username: authUsername,
+        password: authPassword,
+      });
+    } else {
+      await loginMutation.mutateAsync({
+        username: authUsername,
+        password: authPassword,
+      });
+    }
+
+    setAuthPassword("");
+  };
+
+  const submitReview = async () => {
+    if (!comment.trim()) {
+      return;
+    }
+
+    if (editingReviewId) {
+      await updateReviewMutation.mutateAsync({
+        reviewId: editingReviewId,
+        payload: {
+          rating,
+          comment,
+        },
+      });
+      setEditingReviewId(null);
+    } else {
+      await createReviewMutation.mutateAsync({
+        rating,
+        comment,
+        marathonEditionId: data?.editions?.[0]?.id,
+      });
+    }
+
+    setRating(5);
+    setComment("");
+  };
 
   if (!matched) {
     return null;
@@ -75,7 +158,7 @@ export default function MarathonDetailPage() {
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <Star className="w-4 h-4" />
-                    评分：{data.reviews.averageRating.toFixed(1)} / 5
+                    评分：{reviewStats.average.toFixed(1)} / 5
                   </span>
                 </div>
               </CardHeader>
@@ -137,21 +220,151 @@ export default function MarathonDetailPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="text-sm text-muted-foreground">
-                  共 {data.reviews.count} 条评论，平均分 {data.reviews.averageRating.toFixed(1)}
+                  共 {reviewStats.count} 条评论，平均分 {reviewStats.average.toFixed(1)}
                 </div>
 
-                {data.reviews.items.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">暂无评论</p>
+                {!currentUser ? (
+                  <div className="rounded-xl border p-4 space-y-3 bg-secondary/20">
+                    <div className="text-sm font-medium">
+                      登录后可发表评论、编辑和删除自己的评论
+                    </div>
+                    <Input
+                      placeholder="用户名（3-30位，字母数字下划线）"
+                      value={authUsername}
+                      onChange={(event) => setAuthUsername(event.target.value)}
+                    />
+                    <Input
+                      type="password"
+                      placeholder="密码（至少6位）"
+                      value={authPassword}
+                      onChange={(event) => setAuthPassword(event.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1"
+                        onClick={submitAuth}
+                        disabled={loginMutation.isPending || registerMutation.isPending}
+                      >
+                        {isRegisterMode ? "注册并登录" : "登录"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsRegisterMode((value) => !value)}
+                      >
+                        {isRegisterMode ? "切换登录" : "切换注册"}
+                      </Button>
+                    </div>
+                  </div>
                 ) : (
                   <div className="space-y-3">
-                    {data.reviews.items.slice(0, 10).map((review) => (
+                    <div className="rounded-xl border p-4 space-y-3 bg-secondary/20">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">
+                          当前用户：{currentUser.username}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => logoutMutation.mutate()}
+                        >
+                          退出登录
+                        </Button>
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <span className="text-sm">评分</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={5}
+                          value={rating}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            setRating(Number.isNaN(value) ? 5 : Math.max(1, Math.min(5, value)));
+                          }}
+                          className="w-24"
+                        />
+                      </div>
+                      <Textarea
+                        value={comment}
+                        onChange={(event) => setComment(event.target.value)}
+                        placeholder="写下你对赛事的体验和建议..."
+                      />
+                      <div className="flex gap-2">
+                        <Button onClick={submitReview}>
+                          {editingReviewId ? "保存修改" : "发布评论"}
+                        </Button>
+                        {editingReviewId && (
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setEditingReviewId(null);
+                              setRating(5);
+                              setComment("");
+                            }}
+                          >
+                            取消编辑
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {reviews.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">暂无评论</p>
+                    ) : null}
+
+                    {reviews.slice(0, 20).map((review) => (
                       <div key={review.id} className="rounded-xl border p-4 space-y-2">
-                        <div className="text-sm font-medium">
-                          {review.userDisplayName} · {review.rating} 分
+                        <div className="text-sm font-medium flex items-center justify-between gap-3">
+                          <span>
+                            {review.userDisplayName} · {review.rating} 分
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatDate(review.createdAt)}
+                          </span>
                         </div>
                         <p className="text-sm text-foreground/90">
                           {review.comment || "该用户未填写评论内容"}
                         </p>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => likeReviewMutation.mutate(review.id)}
+                          >
+                            <ThumbsUp className="w-4 h-4 mr-1" />
+                            点赞 {review.likesCount}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => reportReviewMutation.mutate(review.id)}
+                          >
+                            <Flag className="w-4 h-4 mr-1" />
+                            举报 {review.reportCount}
+                          </Button>
+                          {review.userId === currentUser.id && (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingReviewId(review.id);
+                                  setRating(review.rating);
+                                  setComment(review.comment ?? "");
+                                }}
+                              >
+                                编辑
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => deleteReviewMutation.mutate(review.id)}
+                              >
+                                删除
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

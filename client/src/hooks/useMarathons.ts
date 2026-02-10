@@ -1,5 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient, type MarathonQueryParams } from '@/lib/apiClient';
+import {
+  apiClient,
+  type MarathonQueryParams,
+  type CreateReviewPayload,
+  type UpdateReviewPayload,
+} from '@/lib/apiClient';
 
 // Query keys
 export const marathonKeys = {
@@ -56,9 +61,58 @@ export function useCreateReview(marathonId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (review: any) => apiClient.createReview(marathonId, review),
+    mutationFn: (review: CreateReviewPayload) => apiClient.createReview(marathonId, review),
     onSuccess: () => {
       // Invalidate and refetch
+      queryClient.invalidateQueries({ queryKey: ['reviews', marathonId] });
+      queryClient.invalidateQueries({ queryKey: marathonKeys.detail(marathonId) });
+    },
+  });
+}
+
+export function useUpdateReview(marathonId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ reviewId, payload }: { reviewId: string; payload: UpdateReviewPayload }) =>
+      apiClient.updateReview(reviewId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reviews', marathonId] });
+      queryClient.invalidateQueries({ queryKey: marathonKeys.detail(marathonId) });
+    },
+  });
+}
+
+export function useDeleteReview(marathonId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (reviewId: string) => apiClient.deleteReview(reviewId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reviews', marathonId] });
+      queryClient.invalidateQueries({ queryKey: marathonKeys.detail(marathonId) });
+    },
+  });
+}
+
+export function useLikeReview(marathonId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (reviewId: string) => apiClient.likeReview(reviewId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reviews', marathonId] });
+      queryClient.invalidateQueries({ queryKey: marathonKeys.detail(marathonId) });
+    },
+  });
+}
+
+export function useReportReview(marathonId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (reviewId: string) => apiClient.reportReview(reviewId),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reviews', marathonId] });
       queryClient.invalidateQueries({ queryKey: marathonKeys.detail(marathonId) });
     },
