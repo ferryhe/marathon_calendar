@@ -12,7 +12,8 @@
     "db:ensure": "tsx script/db-ensure-pr6-schema.ts && tsx script/db-ensure-stage1-3-schema.ts",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx script/seed-marathons.ts",
-    "config:import": "tsx script/import-sources-yaml.ts"
+    "config:import": "tsx script/import-sources-yaml.ts",
+    "marathons:import-list": "tsx script/import-marathon-list.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
