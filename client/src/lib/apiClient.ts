@@ -121,13 +121,13 @@ export interface MarathonQueryParams {
 
 export interface CreateReviewPayload {
   rating: number;
-  comment?: string;
+  comment?: string | null;
   marathonEditionId?: string;
 }
 
 export interface UpdateReviewPayload {
   rating?: number;
-  comment?: string;
+  comment?: string | null;
 }
 
 class ApiClient {

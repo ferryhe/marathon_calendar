@@ -122,19 +122,20 @@ export default function MarathonDetailPage() {
   };
 
   const submitReview = async () => {
-    if (!comment.trim()) return;
+    const trimmedComment = comment.trim();
+    const commentPayload = trimmedComment === "" ? null : trimmedComment;
 
     try {
       if (editingReviewId) {
         await updateReviewMutation.mutateAsync({
           reviewId: editingReviewId,
-          payload: { rating, comment },
+          payload: { rating, comment: commentPayload },
         });
         setEditingReviewId(null);
       } else {
         await createReviewMutation.mutateAsync({
           rating,
-          comment,
+          comment: commentPayload,
           marathonEditionId: data?.editions?.[0]?.id,
         });
       }
@@ -379,7 +380,25 @@ export default function MarathonDetailPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => likeReviewMutation.mutate(review.id)}
+                            onClick={async () => {
+                              if (!currentUser) {
+                                toast({
+                                  title: "需要登录",
+                                  description: "登录后才可以点赞。",
+                                  variant: "destructive",
+                                });
+                                return;
+                              }
+                              try {
+                                await likeReviewMutation.mutateAsync(review.id);
+                              } catch (error) {
+                                toast({
+                                  title: "操作失败",
+                                  description: getFriendlyErrorMessage(error),
+                                  variant: "destructive",
+                                });
+                              }
+                            }}
                           >
                             <ThumbsUp className="w-4 h-4 mr-1" />
                             点赞 {review.likesCount}
@@ -387,7 +406,25 @@ export default function MarathonDetailPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => reportReviewMutation.mutate(review.id)}
+                            onClick={async () => {
+                              if (!currentUser) {
+                                toast({
+                                  title: "需要登录",
+                                  description: "登录后才可以举报。",
+                                  variant: "destructive",
+                                });
+                                return;
+                              }
+                              try {
+                                await reportReviewMutation.mutateAsync(review.id);
+                              } catch (error) {
+                                toast({
+                                  title: "操作失败",
+                                  description: getFriendlyErrorMessage(error),
+                                  variant: "destructive",
+                                });
+                              }
+                            }}
                           >
                             <Flag className="w-4 h-4 mr-1" />
                             举报 {review.reportCount}
