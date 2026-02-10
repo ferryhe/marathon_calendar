@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 
 const AUTH_QUERY_KEY = ["auth", "me"] as const;
+const FAVORITES_QUERY_KEY = ["users", "me", "favorites"] as const;
 
 export function useCurrentUser() {
   return useQuery({
@@ -25,6 +26,25 @@ export function useMyReviews(enabled: boolean = true) {
       return result.data;
     },
     enabled,
+  });
+}
+
+export function useMyFavorites(enabled: boolean = true) {
+  return useQuery({
+    queryKey: FAVORITES_QUERY_KEY,
+    queryFn: async () => {
+      const result = await apiClient.getMyFavorites();
+      return result.data;
+    },
+    enabled,
+  });
+}
+
+export function useFavoriteStatus(marathonId: string, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["marathons", marathonId, "favorite-status"],
+    queryFn: () => apiClient.getFavoriteStatus(marathonId),
+    enabled: !!marathonId && enabled,
   });
 }
 
@@ -56,6 +76,33 @@ export function useLogout() {
     mutationFn: () => apiClient.logout(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+      queryClient.removeQueries({ queryKey: FAVORITES_QUERY_KEY });
+    },
+  });
+}
+
+export function useAddFavorite() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (marathonId: string) => apiClient.addFavorite(marathonId),
+    onSuccess: (_, marathonId) => {
+      queryClient.invalidateQueries({ queryKey: FAVORITES_QUERY_KEY });
+      queryClient.invalidateQueries({
+        queryKey: ["marathons", marathonId, "favorite-status"],
+      });
+    },
+  });
+}
+
+export function useRemoveFavorite() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (marathonId: string) => apiClient.removeFavorite(marathonId),
+    onSuccess: (_, marathonId) => {
+      queryClient.invalidateQueries({ queryKey: FAVORITES_QUERY_KEY });
+      queryClient.invalidateQueries({
+        queryKey: ["marathons", marathonId, "favorite-status"],
+      });
     },
   });
 }

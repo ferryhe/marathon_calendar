@@ -58,6 +58,19 @@ export interface MyReviewDTO extends ReviewDTO {
   };
 }
 
+export interface FavoriteMarathonDTO {
+  id: string;
+  favoritedAt: string;
+  marathon: {
+    id: string;
+    name: string;
+    city: string | null;
+    country: string | null;
+    websiteUrl: string | null;
+    description: string | null;
+  };
+}
+
 export interface AuthUser {
   id: string;
   username: string;
@@ -221,6 +234,28 @@ class ApiClient {
 
   async getMyReviews(): Promise<{ data: MyReviewDTO[] }> {
     return this.request<{ data: MyReviewDTO[] }>(`/users/me/reviews`);
+  }
+
+  async getMyFavorites(): Promise<{ data: FavoriteMarathonDTO[] }> {
+    return this.request<{ data: FavoriteMarathonDTO[] }>(`/users/me/favorites`);
+  }
+
+  async addFavorite(marathonId: string): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>(`/users/me/favorites/${marathonId}`, {
+      method: "POST",
+    });
+  }
+
+  async removeFavorite(marathonId: string): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>(`/users/me/favorites/${marathonId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getFavoriteStatus(marathonId: string): Promise<{ isFavorited: boolean }> {
+    return this.request<{ isFavorited: boolean }>(
+      `/marathons/${marathonId}/favorite-status`,
+    );
   }
 }
 

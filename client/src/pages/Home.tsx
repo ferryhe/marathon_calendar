@@ -52,6 +52,11 @@ export default function Home() {
             </h1>
 
             <div className="flex items-center gap-2">
+              <Link href="/my-favorites">
+                <Button variant="outline" size="sm" className="rounded-full">
+                  我的收藏
+                </Button>
+              </Link>
               <Link href="/my-reviews">
                 <Button variant="outline" size="sm" className="rounded-full">
                   我的评论
