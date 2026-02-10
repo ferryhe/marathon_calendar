@@ -187,6 +187,29 @@ npm run dev:client
 
 MIT License
 
+## ⚠️ Known Dependencies Issues
+
+### cos-nodejs-sdk-v5
+
+The project uses `cos-nodejs-sdk-v5` for Tencent Cloud Object Storage integration. This SDK depends on the deprecated `request` package, which increases long-term security/maintenance risk.
+
+**Rationale for continued use:**
+- Official SDK from Tencent Cloud for their COS service
+- No official alternative SDK available without the `request` dependency
+- Used only for avatar upload functionality with local fallback option
+- Isolated to avatar upload module (`server/routes.ts`)
+
+**Mitigations:**
+- Avatar upload is an optional feature with local filesystem fallback
+- COS credentials are only provided in production environment
+- Regular security audits and dependency updates
+- Monitor for SDK updates or alternatives
+
+**Future considerations:**
+- Watch for Tencent Cloud SDK updates that remove `request` dependency
+- Consider alternative object storage services with modern SDKs if security issues arise
+- Evaluate migration to direct S3-compatible API calls
+
 ## Crawler Module
 
 ### Overview

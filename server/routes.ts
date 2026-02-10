@@ -687,6 +687,11 @@ export async function registerRoutes(
   });
 
   // Get marathons list with filtering, pagination and search
+  // TODO: Performance optimization needed - Currently loads all matching marathons 
+  // and editions into memory, then sorts and paginates in JS. This can become a 
+  // CPU/memory bottleneck as dataset grows. Consider pushing sorting/pagination 
+  // into SQL (e.g., join/select nextEdition in subquery/CTE, compute total with 
+  // count(*), and apply limit/offset on final sorted result).
   app.get("/api/marathons", async (req, res, next) => {
     try {
       const database = ensureDatabase();
