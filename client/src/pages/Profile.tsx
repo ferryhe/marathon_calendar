@@ -79,10 +79,9 @@ export default function ProfilePage() {
       return;
     }
 
+    // Only send displayName, don't send avatar fields to preserve existing avatarSource
     await updateProfileMutation.mutateAsync({
       displayName: displayName.trim(),
-      avatarUrl: avatarUrl.trim() ? avatarUrl.trim() : null,
-      avatarSource: avatarUrl.trim() ? "manual" : "manual",
     });
     toast({ title: "个人资料已更新" });
   };

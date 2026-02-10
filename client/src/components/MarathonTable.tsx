@@ -89,7 +89,14 @@ export function MarathonTable({
           registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
         } as MarathonWithDate;
       })
-      .sort((a, b) => a.displayDate.getTime() - b.displayDate.getTime());
+      .sort((a, b) => {
+        // Only apply client-side sort if sortBy is raceDate
+        // For other sort options, trust the server-side ordering
+        if (filters.sortBy === "raceDate") {
+          return a.displayDate.getTime() - b.displayDate.getTime();
+        }
+        return 0; // Preserve server order for name sorting
+      });
 
     const groups: Record<string, MarathonWithDate[]> = {};
     for (const event of events) {
@@ -99,7 +106,7 @@ export function MarathonTable({
     }
 
     return groups;
-  }, [data, region, showMineOnly, favoriteMarathonIds]);
+  }, [data, region, showMineOnly, favoriteMarathonIds, filters.sortBy]);
 
   if (isLoading || (showMineOnly && favoritesLoading)) {
     return (

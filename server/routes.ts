@@ -388,14 +388,30 @@ export async function registerRoutes(
       requireAuth(req);
       const payload = updateProfilePayloadSchema.parse(req.body);
 
+      // Build update object conditionally to avoid unintentionally clearing avatar fields
+      const updateData: {
+        displayName?: (typeof users.$inferInsert)["displayName"];
+        avatarUrl?: (typeof users.$inferInsert)["avatarUrl"];
+        avatarSource?: (typeof users.$inferInsert)["avatarSource"];
+        updatedAt: Date;
+      } = {
+        displayName: payload.displayName,
+        updatedAt: new Date(),
+      };
+
+      const body = req.body as Record<string, unknown>;
+
+      if (Object.prototype.hasOwnProperty.call(body, "avatarUrl")) {
+        updateData.avatarUrl = payload.avatarUrl ?? null;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(body, "avatarSource")) {
+        updateData.avatarSource = payload.avatarSource ?? "manual";
+      }
+
       const [updated] = await database
         .update(users)
-        .set({
-          displayName: payload.displayName,
-          avatarUrl: payload.avatarUrl ?? null,
-          avatarSource: payload.avatarSource ?? "manual",
-          updatedAt: new Date(),
-        })
+        .set(updateData)
         .where(eq(users.id, req.session.userId!))
         .returning({
           id: users.id,
