@@ -42,6 +42,7 @@ export interface ReviewDTO {
   userId: string | null;
   marathonEditionId: string | null;
   userDisplayName: string;
+  userAvatarUrl?: string | null;
   rating: number;
   comment: string | null;
   likesCount: number;
@@ -74,6 +75,25 @@ export interface FavoriteMarathonDTO {
 export interface AuthUser {
   id: string;
   username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  avatarSource: "manual" | "upload" | "wechat";
+  isWechatBound: boolean;
+  wechatNickname: string | null;
+  wechatAvatarUrl: string | null;
+}
+
+export interface UpdateProfilePayload {
+  displayName: string;
+  avatarUrl?: string | null;
+  avatarSource?: "manual" | "upload" | "wechat";
+}
+
+export interface WechatBindPayload {
+  wechatOpenId: string;
+  wechatUnionId?: string;
+  wechatNickname: string;
+  wechatAvatarUrl?: string;
 }
 
 export interface PaginatedResponse<T> {
@@ -172,7 +192,7 @@ class ApiClient {
   }
 
   // Review APIs
-  async getMarathonReviews(marathonId: string): Promise<any[]> {
+  async getMarathonReviews(marathonId: string): Promise<ReviewDTO[]> {
     return this.request<ReviewDTO[]>(`/marathons/${marathonId}/reviews`);
   }
 
@@ -256,6 +276,33 @@ class ApiClient {
     return this.request<{ isFavorited: boolean }>(
       `/marathons/${marathonId}/favorite-status`,
     );
+  }
+
+  async updateMyProfile(payload: UpdateProfilePayload): Promise<{ user: AuthUser }> {
+    return this.request<{ user: AuthUser }>(`/users/me`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async uploadAvatar(dataUrl: string): Promise<{ avatarUrl: string; user: AuthUser }> {
+    return this.request<{ avatarUrl: string; user: AuthUser }>(`/users/me/avatar/upload`, {
+      method: "POST",
+      body: JSON.stringify({ dataUrl }),
+    });
+  }
+
+  async bindWechat(payload: WechatBindPayload): Promise<{ user: AuthUser }> {
+    return this.request<{ user: AuthUser }>(`/users/me/wechat/bind`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async unbindWechat(): Promise<{ user: AuthUser }> {
+    return this.request<{ user: AuthUser }>(`/users/me/wechat/unbind`, {
+      method: "POST",
+    });
   }
 }
 

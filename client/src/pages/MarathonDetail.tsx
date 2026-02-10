@@ -78,6 +78,7 @@ export default function MarathonDetailPage() {
 
   const submitAuth = async () => {
     if (!authUsername || !authPassword) return;
+
     if (isRegisterMode) {
       await registerMutation.mutateAsync({
         username: authUsername,
@@ -247,9 +248,7 @@ export default function MarathonDetailPage() {
 
                 {!currentUser ? (
                   <div className="rounded-xl border p-4 space-y-3 bg-secondary/20">
-                    <div className="text-sm font-medium">
-                      登录后可发表评论、编辑和删除自己的评论
-                    </div>
+                    <div className="text-sm font-medium">登录后可发表评论、编辑和删除自己的评论</div>
                     <Input
                       placeholder="用户名（3-30位，字母数字下划线）"
                       value={authUsername}
@@ -278,7 +277,9 @@ export default function MarathonDetailPage() {
                   <div className="space-y-3">
                     <div className="rounded-xl border p-4 space-y-3 bg-secondary/20">
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">当前用户：{currentUser.username}</span>
+                        <span className="text-sm font-medium">
+                          当前用户：{currentUser.displayName || currentUser.username}
+                        </span>
                         <Button variant="ghost" size="sm" onClick={() => logoutMutation.mutate()}>
                           退出登录
                         </Button>
@@ -325,17 +326,28 @@ export default function MarathonDetailPage() {
 
                     {reviews.slice(0, 20).map((review) => (
                       <div key={review.id} className="rounded-xl border p-4 space-y-2">
-                        <div className="text-sm font-medium flex items-center justify-between gap-3">
-                          <span>
-                            {review.userDisplayName} · {review.rating} 分
-                          </span>
-                          <span className="text-xs text-muted-foreground">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {review.userAvatarUrl ? (
+                              <img
+                                src={review.userAvatarUrl}
+                                alt={review.userDisplayName}
+                                className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                              />
+                            ) : null}
+                            <span className="text-sm font-medium truncate">
+                              {review.userDisplayName} · {review.rating} 分
+                            </span>
+                          </div>
+                          <span className="text-xs text-muted-foreground flex-shrink-0">
                             {formatDate(review.createdAt)}
                           </span>
                         </div>
+
                         <p className="text-sm text-foreground/90">
                           {review.comment || "该用户未填写评论内容"}
                         </p>
+
                         <div className="flex items-center gap-2">
                           <Button
                             variant="outline"

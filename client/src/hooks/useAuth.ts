@@ -106,3 +106,55 @@ export function useRemoveFavorite() {
     },
   });
 }
+
+export function useUpdateMyProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: {
+      displayName: string;
+      avatarUrl?: string | null;
+      avatarSource?: "manual" | "upload" | "wechat";
+    }) => apiClient.updateMyProfile(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ["users", "me", "reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+    },
+  });
+}
+
+export function useUploadAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dataUrl: string) => apiClient.uploadAvatar(dataUrl),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ["users", "me", "reviews"] });
+    },
+  });
+}
+
+export function useBindWechat() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: {
+      wechatOpenId: string;
+      wechatUnionId?: string;
+      wechatNickname: string;
+      wechatAvatarUrl?: string;
+    }) => apiClient.bindWechat(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+    },
+  });
+}
+
+export function useUnbindWechat() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiClient.unbindWechat(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+    },
+  });
+}

@@ -62,7 +62,6 @@ export default function Home() {
       });
       return;
     }
-
     setViewMode("mine");
   };
 
@@ -81,6 +80,11 @@ export default function Home() {
             </h1>
 
             <div className="flex items-center gap-2">
+              <Link href="/profile">
+                <Button variant="outline" size="sm" className="rounded-full">
+                  个人资料
+                </Button>
+              </Link>
               <Link href="/my-favorites">
                 <Button variant="outline" size="sm" className="rounded-full">
                   我的收藏
