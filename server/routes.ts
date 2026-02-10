@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { type Server } from "http";
-import { eq, and, or, like, sql, desc, asc } from "drizzle-orm";
+import { eq, and, or, like, sql, desc, asc, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
   insertMarathonSchema,
@@ -30,7 +30,10 @@ const marathonQuerySchema = z.object({
   search: z.string().optional(),
   city: z.string().optional(),
   country: z.string().optional(),
-  sortBy: z.enum(['name', 'createdAt']).default('createdAt'),
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  status: z.string().optional(),
+  sortBy: z.enum(['name', 'createdAt', 'raceDate']).default('raceDate'),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
 });
 
@@ -59,10 +62,10 @@ export async function registerRoutes(
     try {
       const database = ensureDatabase();
       const params = marathonQuerySchema.parse(req.query);
-      
+
       // Build where conditions
       const conditions = [];
-      
+
       if (params.search) {
         conditions.push(
           or(
@@ -81,31 +84,108 @@ export async function registerRoutes(
       if (params.country) {
         conditions.push(eq(marathons.country, params.country));
       }
-      
+
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      
-      // Get total count
-      const countResult = await database
-        .select({ count: sql<number>`count(*)::int` })
-        .from(marathons)
-        .where(whereClause);
-      
-      const total = countResult[0]?.count || 0;
-      
-      // Get paginated records with sorting
-      const offset = (params.page - 1) * params.limit;
-      const orderColumn = params.sortBy === 'name' ? marathons.name : marathons.createdAt;
-      
-      const records = await database
+
+      const baseMarathons = await database
         .select()
         .from(marathons)
         .where(whereClause)
-        .orderBy(params.sortOrder === 'desc' ? desc(orderColumn) : asc(orderColumn))
-        .limit(params.limit)
-        .offset(offset);
-      
+        .orderBy(asc(marathons.name));
+
+      if (baseMarathons.length === 0) {
+        return res.json({
+          data: [],
+          pagination: {
+            page: params.page,
+            limit: params.limit,
+            total: 0,
+            totalPages: 0,
+          },
+        });
+      }
+
+      const marathonIds = baseMarathons.map((marathon) => marathon.id);
+      const editionConditions = [inArray(marathonEditions.marathonId, marathonIds)];
+
+      if (params.year) {
+        editionConditions.push(eq(marathonEditions.year, params.year));
+      }
+
+      if (params.month) {
+        editionConditions.push(
+          sql`extract(month from ${marathonEditions.raceDate}) = ${params.month}`,
+        );
+      }
+
+      if (params.status) {
+        editionConditions.push(eq(marathonEditions.registrationStatus, params.status));
+      }
+
+      const editionWhereClause =
+        editionConditions.length > 1 ? and(...editionConditions) : editionConditions[0];
+
+      const editionRecords = await database
+        .select()
+        .from(marathonEditions)
+        .where(editionWhereClause)
+        .orderBy(asc(marathonEditions.raceDate), desc(marathonEditions.year));
+
+      const editionsByMarathon = new Map<string, typeof editionRecords>();
+      for (const edition of editionRecords) {
+        const list = editionsByMarathon.get(edition.marathonId) ?? [];
+        list.push(edition);
+        editionsByMarathon.set(edition.marathonId, list);
+      }
+
+      const requiresEditionFilter =
+        params.year !== undefined ||
+        params.month !== undefined ||
+        params.status !== undefined;
+
+      const enrichedRecords = baseMarathons
+        .map((marathon) => {
+          const editions = editionsByMarathon.get(marathon.id) ?? [];
+          const nextEdition = editions[0];
+          return {
+            ...marathon,
+            nextEdition,
+          };
+        })
+        .filter((record) => (requiresEditionFilter ? !!record.nextEdition : true));
+
+      const sortedRecords = [...enrichedRecords].sort((a, b) => {
+        if (params.sortBy === "name") {
+          const compareValue = a.name.localeCompare(b.name, "zh-Hans-CN");
+          return params.sortOrder === "desc" ? -compareValue : compareValue;
+        }
+
+        if (params.sortBy === "createdAt") {
+          const timeA = new Date(a.createdAt).getTime();
+          const timeB = new Date(b.createdAt).getTime();
+          return params.sortOrder === "desc" ? timeB - timeA : timeA - timeB;
+        }
+
+        const raceA = a.nextEdition?.raceDate
+          ? new Date(a.nextEdition.raceDate).getTime()
+          : params.sortOrder === "desc"
+            ? Number.NEGATIVE_INFINITY
+            : Number.POSITIVE_INFINITY;
+        const raceB = b.nextEdition?.raceDate
+          ? new Date(b.nextEdition.raceDate).getTime()
+          : params.sortOrder === "desc"
+            ? Number.NEGATIVE_INFINITY
+            : Number.POSITIVE_INFINITY;
+
+        return params.sortOrder === "desc" ? raceB - raceA : raceA - raceB;
+      });
+
+      const total = sortedRecords.length;
+      const offset = (params.page - 1) * params.limit;
+      const paged = sortedRecords.slice(offset, offset + params.limit);
+
       res.json({
-        data: records,
+        data: paged,
         pagination: {
           page: params.page,
           limit: params.limit,
@@ -165,6 +245,41 @@ export async function registerRoutes(
           ...r.marathon,
           nextEdition: r.edition,
         }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/marathons/hot", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+
+      const records = await database
+        .select({
+          marathon: marathons,
+          reviewCount: sql<number>`count(${marathonReviews.id})::int`,
+          averageRating: sql<number>`coalesce(avg(${marathonReviews.rating}), 0)::float`,
+        })
+        .from(marathons)
+        .leftJoin(marathonReviews, eq(marathonReviews.marathonId, marathons.id))
+        .groupBy(marathons.id)
+        .orderBy(
+          desc(sql`count(${marathonReviews.id})`),
+          desc(sql`coalesce(avg(${marathonReviews.rating}), 0)`),
+          asc(marathons.name),
+        )
+        .limit(limit);
+
+      res.json({
+        data: records.map((record) => ({
+          ...record.marathon,
+          stats: {
+            reviewCount: record.reviewCount,
+            averageRating: Number(record.averageRating ?? 0),
+          },
+        })),
       });
     } catch (error) {
       next(error);
