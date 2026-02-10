@@ -110,7 +110,7 @@ export default function MarathonDetailPage() {
 
   const submitReview = async () => {
     const trimmedComment = comment.trim();
-    const commentPayload = trimmedComment === "" ? null : trimmedComment;
+    const commentPayload = trimmedComment === "" ? undefined : trimmedComment;
 
     if (editingReviewId) {
       await updateReviewMutation.mutateAsync({
@@ -124,7 +124,6 @@ export default function MarathonDetailPage() {
         comment: commentPayload,
         marathonEditionId: data?.editions?.[0]?.id,
       });
-    }
     }
 
     setRating(5);

@@ -252,6 +252,7 @@ export const insertReviewSchema = createInsertSchema(marathonReviews)
   })
   .extend({
     rating: z.number().int().min(1).max(5),
+    comment: z.string().nullable().optional(),
   });
 
 export const insertUserFavoriteMarathonSchema = createInsertSchema(

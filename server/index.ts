@@ -5,6 +5,8 @@ import path from "path";
 import { mkdirSync } from "fs";
 import session from "express-session";
 import createMemoryStore from "memorystore";
+import connectPgSimple from "connect-pg-simple";
+import pg from "pg";
 import { log } from "./logger";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -13,6 +15,7 @@ import { startSyncScheduler } from "./syncScheduler";
 const app = express();
 const httpServer = createServer(app);
 const MemoryStore = createMemoryStore(session);
+const PgStore = connectPgSimple(session);
 
 declare module "http" {
   interface IncomingMessage {
@@ -46,6 +49,32 @@ if (!sessionSecretEnv && !isProduction) {
   );
 }
 
+// Configure session store based on environment
+// In production, use PostgreSQL for persistent, shared session storage
+// In development, use in-memory store for simplicity
+let sessionStore;
+if (isProduction && process.env.DATABASE_URL) {
+  const pgPool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+  });
+  sessionStore = new PgStore({
+    pool: pgPool,
+    createTableIfMissing: true,
+    tableName: 'user_sessions',
+  });
+  console.log('Using PostgreSQL session store for production');
+} else {
+  sessionStore = new MemoryStore({
+    checkPeriod: 24 * 60 * 60 * 1000,
+  });
+  if (isProduction) {
+    console.warn(
+      'WARNING: Using in-memory session store in production. Sessions will be lost on restart. ' +
+      'Set DATABASE_URL to use persistent PostgreSQL session storage.'
+    );
+  }
+}
+
 app.use(
   session({
     name: "mc.sid",
@@ -58,9 +87,7 @@ app.use(
       secure: process.env.NODE_ENV === "production",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
-    store: new MemoryStore({
-      checkPeriod: 24 * 60 * 60 * 1000,
-    }),
+    store: sessionStore,
   }),
 );
 
