@@ -121,6 +121,9 @@ async function ensureRawCrawlDataTable(pool: pg.Pool) {
   await pool.query(
     "create index if not exists raw_crawl_data_fetched_idx on raw_crawl_data (fetched_at desc)",
   );
+  await pool.query(
+    "create index if not exists raw_crawl_data_status_idx on raw_crawl_data (status)",
+  );
 }
 
 async function main() {
@@ -150,4 +153,3 @@ main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });
-

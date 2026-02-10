@@ -12,10 +12,18 @@ import {
 } from "@shared/schema";
 import { db, pool } from "./db";
 import { log } from "./logger";
+import { aiExtractFromHtml, isAiFallbackEnabled } from "./aiExtractor";
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const RAW_CONTENT_MAX_CHARS = 2 * 1024 * 1024;
 const SCHEDULER_LOCK_KEY = 0x6d_63_5f_73; // "mc_s" for stable advisory lock
+
+type EditionExtract = {
+  raceDate: string | null;
+  registrationStatus: string | null;
+  registrationUrl: string | null;
+  method: "rule" | "jsonld" | "regex" | "ai";
+};
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
@@ -125,7 +133,7 @@ function isValidYmd(yyyy: number, mm: number, dd: number) {
   );
 }
 
-function extractEditionFromHtml(html: string) {
+function extractEditionFromHtml(html: string): EditionExtract | null {
   const jsonLdEvents = extractJsonLdEvents(html);
   for (const event of jsonLdEvents) {
     const raceDate = coerceDateString(event.startDate);
@@ -134,6 +142,7 @@ function extractEditionFromHtml(html: string) {
         raceDate,
         registrationStatus: null as string | null,
         registrationUrl: typeof event.url === "string" ? event.url : null,
+        method: "jsonld" as const,
       };
     }
   }
@@ -155,6 +164,7 @@ function extractEditionFromHtml(html: string) {
       raceDate: `${yyyy}-${mm}-${dd}`,
       registrationStatus: null as string | null,
       registrationUrl: null as string | null,
+      method: "regex" as const,
     };
   }
 
@@ -242,7 +252,7 @@ function extractEditionFromHtmlWithConfig(params: {
   html: string;
   pageUrl: string;
   source: Source;
-}) {
+}): EditionExtract | null {
   const config = (params.source.config ?? null) as Record<string, unknown> | null;
   const raceDateRule = readRule(config, "raceDate");
   const statusRule = readRule(config, "registrationStatus");
@@ -258,7 +268,7 @@ function extractEditionFromHtmlWithConfig(params: {
     const registrationUrl = rawRegUrl ? resolveUrlMaybe(rawRegUrl, params.pageUrl) : null;
 
     if (raceDate || registrationStatus || registrationUrl) {
-      return { raceDate, registrationStatus, registrationUrl };
+      return { raceDate, registrationStatus, registrationUrl, method: "rule" as const };
     }
   }
 
@@ -306,12 +316,16 @@ export async function syncMarathonSourceOnce(params: {
       if (raw.length > RAW_CONTENT_MAX_CHARS) {
         raw = raw.slice(0, RAW_CONTENT_MAX_CHARS);
       }
+      const fetchedAtIso = new Date().toISOString();
 
       const contentHash = sha256(raw);
       const isUnchanged = Boolean(params.lastHash && params.lastHash === contentHash);
 
+      let rawRowId: string | null = null;
       if (!isUnchanged) {
-        await database.insert(rawCrawlData).values({
+        const inserted = await database
+          .insert(rawCrawlData)
+          .values({
           marathonId: params.marathonId,
           sourceId: params.source.id,
           sourceUrl: params.sourceUrl,
@@ -321,9 +335,11 @@ export async function syncMarathonSourceOnce(params: {
           contentHash,
           status: "pending",
           metadata: {
-            fetchedAt: startedAt.toISOString(),
+            fetchedAt: fetchedAtIso,
           },
-        });
+        })
+          .returning({ id: rawCrawlData.id });
+        rawRowId = inserted[0]?.id ?? null;
       }
 
       let updatedCount = 0;
@@ -332,11 +348,35 @@ export async function syncMarathonSourceOnce(params: {
       if (isUnchanged) {
         unchangedCount = 1;
       } else if (params.source.strategy === "HTML") {
-        const extracted = extractEditionFromHtmlWithConfig({
+        let extracted = extractEditionFromHtmlWithConfig({
           html: raw,
           pageUrl: params.sourceUrl,
           source: params.source,
         });
+
+        let usedAi = false;
+        let aiError: string | null = null;
+        if (!extracted?.raceDate && isAiFallbackEnabled()) {
+          try {
+            const ai = await aiExtractFromHtml({
+              pageUrl: params.sourceUrl,
+              html: raw,
+            });
+            if (ai) {
+              usedAi = true;
+              extracted = {
+                raceDate: ai.raceDate,
+                registrationStatus: ai.registrationStatus,
+                registrationUrl: ai.registrationUrl,
+                method: "ai" as const,
+              };
+            }
+          } catch (error) {
+            usedAi = true;
+            aiError = error instanceof Error ? error.message : "AI extract failed";
+          }
+        }
+
         if (extracted?.raceDate) {
           const year = Number(extracted.raceDate.slice(0, 4));
           await database
@@ -361,8 +401,62 @@ export async function syncMarathonSourceOnce(params: {
               },
             });
           updatedCount = 1;
+
+          if (rawRowId) {
+            await database
+              .update(rawCrawlData)
+              .set({
+                status: "processed",
+                processedAt: new Date(),
+                metadata: {
+                  fetchedAt: fetchedAtIso,
+                  extraction: {
+                    method: extracted.method,
+                    raceDate: extracted.raceDate,
+                    registrationStatus: extracted.registrationStatus,
+                    registrationUrl: extracted.registrationUrl,
+                  },
+                  ai: usedAi
+                    ? {
+                        used: true,
+                        model: process.env.AI_MODEL ?? null,
+                        error: aiError,
+                      }
+                    : { used: false },
+                },
+              })
+              .where(eq(rawCrawlData.id, rawRowId));
+          }
         } else {
           unchangedCount = 1;
+
+          if (rawRowId) {
+            await database
+              .update(rawCrawlData)
+              .set({
+                status: "needs_review",
+                processedAt: new Date(),
+                metadata: {
+                  fetchedAt: fetchedAtIso,
+                  extraction: extracted
+                    ? {
+                        method: extracted.method,
+                        raceDate: extracted.raceDate,
+                        registrationStatus: extracted.registrationStatus,
+                        registrationUrl: extracted.registrationUrl,
+                      }
+                    : { method: "none" },
+                  ai: usedAi
+                    ? {
+                        used: true,
+                        model: process.env.AI_MODEL ?? null,
+                        error: aiError,
+                      }
+                    : { used: false },
+                },
+              })
+              .where(eq(rawCrawlData.id, rawRowId));
+          }
         }
       }
 
@@ -394,19 +488,36 @@ export async function syncMarathonSourceOnce(params: {
       return { runId: run.id, status: "success" as const };
     } catch (error) {
       lastError = error;
+      const message = error instanceof Error ? error.message : "Unknown error";
+
+      const backoffSeconds = (params.source.retryBackoffSeconds ?? 30) * attempt;
+      const minIntervalSeconds = params.source.minIntervalSeconds ?? 0;
+      const nextDelaySeconds = Math.max(backoffSeconds, minIntervalSeconds);
+      const nextCheckAt =
+        nextDelaySeconds > 0 ? new Date(Date.now() + nextDelaySeconds * 1000) : null;
+
+      await database
+        .update(marathonSources)
+        .set({
+          lastCheckedAt: new Date(),
+          lastHttpStatus: null,
+          lastError: message,
+          nextCheckAt,
+        })
+        .where(eq(marathonSources.id, params.marathonSourceId));
+
       await database
         .update(marathonSyncRuns)
         .set({
           status: attempt < (params.source.retryMax ?? 3) ? "retrying" : "failed",
           attempt,
-          message: error instanceof Error ? error.message : "Unknown error",
+          message,
         })
         .where(eq(marathonSyncRuns.id, run.id));
 
       if (attempt >= (params.source.retryMax ?? 3)) {
         break;
       }
-      const backoffSeconds = (params.source.retryBackoffSeconds ?? 30) * attempt;
       await sleep(backoffSeconds * 1000);
     }
   }
