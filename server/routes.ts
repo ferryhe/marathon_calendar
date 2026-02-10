@@ -2,6 +2,7 @@ import type { Express, Request } from "express";
 import { type Server } from "http";
 import path from "path";
 import { promises as fs } from "fs";
+import COS from "cos-nodejs-sdk-v5";
 import { eq, and, or, like, sql, desc, asc, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -147,6 +148,83 @@ function parseAvatarDataUrl(dataUrl: string) {
 
   const ext = mime === "image/jpeg" || mime === "image/jpg" ? "jpg" : mime.split("/")[1];
   return { buffer, ext };
+}
+
+const COS_BUCKET = process.env.COS_BUCKET ?? "marathon-calendar-1256398230";
+const COS_REGION = process.env.COS_REGION;
+const COS_SECRET_ID = process.env.COS_SECRET_ID;
+const COS_SECRET_KEY = process.env.COS_SECRET_KEY;
+const COS_PUBLIC_BASE_URL = process.env.COS_PUBLIC_BASE_URL;
+
+const cosClient =
+  COS_REGION && COS_SECRET_ID && COS_SECRET_KEY
+    ? new COS({
+        SecretId: COS_SECRET_ID,
+        SecretKey: COS_SECRET_KEY,
+      })
+    : null;
+
+function getCosPublicUrl(key: string) {
+  const normalized = key.replace(/^\/+/, "");
+  if (COS_PUBLIC_BASE_URL) {
+    const base = COS_PUBLIC_BASE_URL.replace(/\/+$/, "");
+    return `${base}/${normalized}`;
+  }
+
+  if (!COS_REGION) {
+    throw new Error("COS_REGION is required for COS uploads");
+  }
+
+  return `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${normalized}`;
+}
+
+async function uploadAvatarObject(
+  userId: string,
+  ext: string,
+  buffer: Buffer,
+): Promise<{ avatarUrl: string; storage: "cos" | "local" }> {
+  const now = Date.now();
+  const objectKey = `avatars/${userId}/${now}.${ext}`;
+
+  if (cosClient && COS_REGION) {
+    await new Promise<void>((resolve, reject) => {
+      cosClient.putObject(
+        {
+          Bucket: COS_BUCKET,
+          Region: COS_REGION,
+          Key: objectKey,
+          Body: buffer,
+          ContentLength: buffer.length,
+          ContentType: `image/${ext === "jpg" ? "jpeg" : ext}`,
+          CacheControl: "public, max-age=31536000, immutable",
+        },
+        (err) => {
+          if (err) {
+            return reject(err);
+          }
+
+          return resolve();
+        },
+      );
+    });
+
+    return {
+      avatarUrl: getCosPublicUrl(objectKey),
+      storage: "cos",
+    };
+  }
+
+  const relativeDir = path.join("uploads", "avatars");
+  const absoluteDir = path.resolve(process.cwd(), relativeDir);
+  await fs.mkdir(absoluteDir, { recursive: true });
+
+  const fileName = `${userId}-${now}.${ext}`;
+  await fs.writeFile(path.join(absoluteDir, fileName), buffer);
+
+  return {
+    avatarUrl: `/uploads/avatars/${fileName}`,
+    storage: "local",
+  };
 }
 
 export async function registerRoutes(
@@ -324,14 +402,7 @@ export async function registerRoutes(
       requireAuth(req);
       const payload = avatarUploadPayloadSchema.parse(req.body);
       const { buffer, ext } = parseAvatarDataUrl(payload.dataUrl);
-
-      const relativeDir = path.join("uploads", "avatars");
-      const absoluteDir = path.resolve(process.cwd(), relativeDir);
-      await fs.mkdir(absoluteDir, { recursive: true });
-
-      const fileName = `${req.session.userId}-${Date.now()}.${ext}`;
-      await fs.writeFile(path.join(absoluteDir, fileName), buffer);
-      const avatarUrl = `/uploads/avatars/${fileName}`;
+      const { avatarUrl } = await uploadAvatarObject(req.session.userId!, ext, buffer);
 
       const [updated] = await database
         .update(users)
