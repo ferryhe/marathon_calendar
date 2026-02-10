@@ -16,6 +16,18 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  displayName: text("display_name"),
+  avatarUrl: text("avatar_url"),
+  avatarSource: text("avatar_source").default("manual").notNull(),
+  wechatOpenId: text("wechat_openid").unique(),
+  wechatUnionId: text("wechat_unionid").unique(),
+  wechatNickname: text("wechat_nickname"),
+  wechatAvatarUrl: text("wechat_avatar_url"),
+  isWechatBound: boolean("is_wechat_bound").default(false).notNull(),
+  wechatBoundAt: timestamp("wechat_bound_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 export const marathons = pgTable(
@@ -134,16 +146,79 @@ export const marathonReviews = pgTable("marathon_reviews", {
   marathonId: varchar("marathon_id")
     .references(() => marathons.id)
     .notNull(),
+  userId: varchar("user_id").references(() => users.id),
   marathonEditionId: varchar("marathon_edition_id").references(
     () => marathonEditions.id,
   ),
   userDisplayName: text("user_display_name").notNull(),
   rating: integer("rating").notNull(),
   comment: text("comment"),
+  likesCount: integer("likes_count").default(0).notNull(),
+  reportCount: integer("report_count").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
 });
+
+export const reviewLikes = pgTable(
+  "review_likes",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    reviewId: varchar("review_id")
+      .references(() => marathonReviews.id)
+      .notNull(),
+    userId: varchar("user_id")
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    reviewUserUnique: uniqueIndex("review_likes_unique").on(table.reviewId, table.userId),
+  }),
+);
+
+export const reviewReports = pgTable(
+  "review_reports",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    reviewId: varchar("review_id")
+      .references(() => marathonReviews.id)
+      .notNull(),
+    userId: varchar("user_id")
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    reviewUserUnique: uniqueIndex("review_reports_unique").on(table.reviewId, table.userId),
+  }),
+);
+
+export const userFavoriteMarathons = pgTable(
+  "user_favorite_marathons",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id")
+      .references(() => users.id)
+      .notNull(),
+    marathonId: varchar("marathon_id")
+      .references(() => marathons.id)
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userMarathonUnique: uniqueIndex("user_favorite_marathons_unique").on(
+      table.userId,
+      table.marathonId,
+    ),
+  }),
+);
 
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
@@ -162,6 +237,7 @@ export const insertMarathonSchema = createInsertSchema(marathons).pick({
 export const insertReviewSchema = createInsertSchema(marathonReviews)
   .pick({
     marathonId: true,
+    userId: true,
     marathonEditionId: true,
     userDisplayName: true,
     rating: true,
@@ -171,6 +247,13 @@ export const insertReviewSchema = createInsertSchema(marathonReviews)
     rating: z.number().int().min(1).max(5),
   });
 
+export const insertUserFavoriteMarathonSchema = createInsertSchema(
+  userFavoriteMarathons,
+).pick({
+  userId: true,
+  marathonId: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
@@ -179,3 +262,8 @@ export type Marathon = typeof marathons.$inferSelect;
 
 export type InsertReview = z.infer<typeof insertReviewSchema>;
 export type MarathonReview = typeof marathonReviews.$inferSelect;
+
+export type InsertUserFavoriteMarathon = z.infer<
+  typeof insertUserFavoriteMarathonSchema
+>;
+export type UserFavoriteMarathon = typeof userFavoriteMarathons.$inferSelect;

@@ -62,6 +62,10 @@ SESSION_SECRET=replace-with-a-random-string
 AI_API_KEY=your-ai-api-key
 ```
 
+说明：
+- 开发环境未设置 `SESSION_SECRET` 会使用默认值并打印警告；生产环境必须设置 `SESSION_SECRET`（否则服务将拒绝启动）。
+- `NODE_ENV=production` 时会话存储使用 PostgreSQL（`connect-pg-simple`），启动时会自动创建 `mc_sessions` 表。
+
 4. 安装依赖并初始化数据库：
 
 ```bash
@@ -98,6 +102,10 @@ REDIS_URL=redis://localhost:6379
 SESSION_SECRET=replace-with-a-random-string
 AI_API_KEY=your-ai-api-key
 ```
+
+说明：
+- 开发环境未设置 `SESSION_SECRET` 会使用默认值并打印警告；生产环境必须设置 `SESSION_SECRET`（否则服务将拒绝启动）。
+- `NODE_ENV=production` 时会话存储使用 PostgreSQL（`connect-pg-simple`），启动时会自动创建 `mc_sessions` 表。
 
 4. 安装依赖并初始化数据库：
 
@@ -206,3 +214,23 @@ The following extensions have been made to enhance data structure compatibility:
 
 - **Updated Fields**:
   - `data_format`: Changed to accept additional data formats (e.g., XML, JSON).
+
+## Tencent COS Avatar Config (Production)
+
+Avatar upload now supports dual mode:
+- COS mode: enabled when `COS_REGION` + `COS_SECRET_ID` + `COS_SECRET_KEY` are provided.
+- Local mode: fallback to `/uploads/avatars` when COS credentials are missing.
+
+Required env vars:
+- `COS_BUCKET` (already set to `marathon-calendar-1256398230` in `.env.example`)
+- `COS_REGION`
+- `COS_SECRET_ID`
+- `COS_SECRET_KEY`
+
+Optional env var:
+- `COS_PUBLIC_BASE_URL` (CDN domain, e.g. `https://cdn.your-domain.com`)
+
+Recommended Tencent Cloud setup:
+- COS bucket public-read for GET.
+- API key write permission limited to this bucket path.
+- Front CDN with cache headers.
