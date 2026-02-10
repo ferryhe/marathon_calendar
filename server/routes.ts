@@ -15,11 +15,16 @@ import {
   marathonReviews,
   reviewLikes,
   reviewReports,
+  sources,
+  marathonSources,
+  marathonSyncRuns,
+  rawCrawlData,
   marathons,
   marathonEditions,
 } from "@shared/schema";
 import { db } from "./db";
 import { hashPassword, verifyPassword } from "./auth";
+import { syncMarathonSourceOnce, syncNowOnce } from "./syncScheduler";
 
 const reviewPayloadSchema = insertReviewSchema.omit({
   marathonId: true,
@@ -101,6 +106,22 @@ function ensureDatabase() {
   }
 
   return db;
+}
+
+function requireAdmin(req: Request) {
+  const expected = process.env.ADMIN_API_TOKEN;
+  if (!expected) {
+    const error = new Error("Admin API is not enabled");
+    (error as Error & { status?: number }).status = 404;
+    throw error;
+  }
+
+  const headerValue = req.header("x-admin-token") ?? "";
+  if (headerValue !== expected) {
+    const error = new Error("Admin authentication required");
+    (error as Error & { status?: number }).status = 401;
+    throw error;
+  }
 }
 
 async function regenerateSession(req: Request) {
@@ -1362,6 +1383,163 @@ export async function registerRoutes(
         .returning();
 
       res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // --- Admin-only: data collection/sync management (Stage 1.3) ---
+  app.get("/api/admin/sources", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const records = await database
+        .select()
+        .from(sources)
+        .orderBy(desc(sources.priority), asc(sources.name));
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          name: z.string().trim().min(1).max(200).optional(),
+          type: z.string().trim().min(1).max(50).optional(),
+          strategy: z.string().trim().min(1).max(50).optional(),
+          baseUrl: z.string().url().nullable().optional(),
+          priority: z.number().int().min(0).max(1000).optional(),
+          isActive: z.boolean().optional(),
+          retryMax: z.number().int().min(1).max(10).optional(),
+          retryBackoffSeconds: z.number().int().min(1).max(3600).optional(),
+          requestTimeoutMs: z.number().int().min(1000).max(120000).optional(),
+          minIntervalSeconds: z.number().int().min(0).max(7 * 24 * 3600).optional(),
+          notes: z.string().max(2000).nullable().optional(),
+          config: z.record(z.string(), z.unknown()).nullable().optional(),
+        })
+        .parse(req.body);
+
+      const [updated] = await database
+        .update(sources)
+        .set({
+          ...payload,
+          updatedAt: new Date(),
+        })
+        .where(eq(sources.id, req.params.id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+      res.json({ data: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/sync/run-all", async (req, res, next) => {
+    try {
+      requireAdmin(req);
+      await syncNowOnce();
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/sync/run-marathon-source", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          marathonSourceId: z.string().uuid(),
+        })
+        .parse(req.body);
+
+      const [record] = await database
+        .select({
+          msId: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          lastHash: marathonSources.lastHash,
+          source: sources,
+        })
+        .from(marathonSources)
+        .innerJoin(sources, eq(sources.id, marathonSources.sourceId))
+        .where(eq(marathonSources.id, payload.marathonSourceId));
+
+      if (!record) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+
+      const result = await syncMarathonSourceOnce({
+        source: record.source,
+        marathonId: record.marathonId,
+        marathonSourceId: record.msId,
+        sourceUrl: record.sourceUrl,
+        lastHash: record.lastHash,
+      });
+
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/sync/runs", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const limit = z
+        .preprocess(
+          (value) => (Array.isArray(value) ? value[0] : value),
+          z.coerce.number().int().min(1).max(200).default(50),
+        )
+        .parse(req.query.limit);
+      const records = await database
+        .select()
+        .from(marathonSyncRuns)
+        .orderBy(desc(marathonSyncRuns.startedAt))
+        .limit(limit);
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/raw-crawl", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const limit = z
+        .preprocess(
+          (value) => (Array.isArray(value) ? value[0] : value),
+          z.coerce.number().int().min(1).max(200).default(50),
+        )
+        .parse(req.query.limit);
+      const records = await database
+        .select({
+          id: rawCrawlData.id,
+          marathonId: rawCrawlData.marathonId,
+          sourceId: rawCrawlData.sourceId,
+          sourceUrl: rawCrawlData.sourceUrl,
+          httpStatus: rawCrawlData.httpStatus,
+          contentType: rawCrawlData.contentType,
+          contentHash: rawCrawlData.contentHash,
+          status: rawCrawlData.status,
+          fetchedAt: rawCrawlData.fetchedAt,
+        })
+        .from(rawCrawlData)
+        .orderBy(desc(rawCrawlData.fetchedAt))
+        .limit(limit);
+      res.json({ data: records });
     } catch (error) {
       next(error);
     }
