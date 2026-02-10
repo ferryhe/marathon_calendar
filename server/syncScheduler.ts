@@ -225,19 +225,36 @@ function normalizeDateString(value: string): string | null {
   if (direct) return direct;
   const m1 = value.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
   if (m1) {
-    const yyyy = m1[1];
-    const mm = String(m1[2]).padStart(2, "0");
-    const dd = String(m1[3]).padStart(2, "0");
+    const yyyyN = Number(m1[1]);
+    const mmN = Number(m1[2]);
+    const ddN = Number(m1[3]);
+    if (!isValidYmd(yyyyN, mmN, ddN)) return null;
+    const yyyy = String(yyyyN);
+    const mm = String(mmN).padStart(2, "0");
+    const dd = String(ddN).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
   }
   const m2 = value.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
   if (m2) {
-    const yyyy = m2[1];
-    const mm = String(m2[2]).padStart(2, "0");
-    const dd = String(m2[3]).padStart(2, "0");
+    const yyyyN = Number(m2[1]);
+    const mmN = Number(m2[2]);
+    const ddN = Number(m2[3]);
+    if (!isValidYmd(yyyyN, mmN, ddN)) return null;
+    const yyyy = String(yyyyN);
+    const mm = String(mmN).padStart(2, "0");
+    const dd = String(ddN).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
   }
   return null;
+}
+
+function isValidYmdString(value: string) {
+  const m = value.match(/^(20\d{2})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const yyyyN = Number(m[1]);
+  const mmN = Number(m[2]);
+  const ddN = Number(m[3]);
+  return isValidYmd(yyyyN, mmN, ddN);
 }
 
 function resolveUrlMaybe(value: string, pageUrl: string): string {
@@ -303,6 +320,10 @@ export async function syncMarathonSourceOnce(params: {
 
   while (attempt < (params.source.retryMax ?? 3)) {
     attempt += 1;
+    let rawRowId: string | null = null;
+    let rawFetchedAtIso: string | null = null;
+    let rawHttpStatus: number | null = null;
+    let rawContentHash: string | null = null;
     try {
       const response = await fetchWithTimeout(params.sourceUrl, {
         timeoutMs,
@@ -317,11 +338,13 @@ export async function syncMarathonSourceOnce(params: {
         raw = raw.slice(0, RAW_CONTENT_MAX_CHARS);
       }
       const fetchedAtIso = new Date().toISOString();
+      rawFetchedAtIso = fetchedAtIso;
+      rawHttpStatus = httpStatus;
 
       const contentHash = sha256(raw);
+      rawContentHash = contentHash;
       const isUnchanged = Boolean(params.lastHash && params.lastHash === contentHash);
 
-      let rawRowId: string | null = null;
       if (!isUnchanged) {
         const inserted = await database
           .insert(rawCrawlData)
@@ -377,14 +400,19 @@ export async function syncMarathonSourceOnce(params: {
           }
         }
 
-        if (extracted?.raceDate) {
-          const year = Number(extracted.raceDate.slice(0, 4));
+        const extractedRaceDate =
+          extracted?.raceDate && isValidYmdString(extracted.raceDate)
+            ? extracted.raceDate
+            : null;
+
+        if (extracted && extractedRaceDate) {
+          const year = Number(extractedRaceDate.slice(0, 4));
           const merge = await upsertEditionWithMerge({
             database,
             marathonId: params.marathonId,
             year,
             incoming: {
-              raceDate: extracted.raceDate,
+              raceDate: extractedRaceDate,
               registrationStatus: extracted.registrationStatus,
               registrationUrl: extracted.registrationUrl,
             },
@@ -411,7 +439,7 @@ export async function syncMarathonSourceOnce(params: {
                   fetchedAt: fetchedAtIso,
                   extraction: {
                     method: extracted.method,
-                    raceDate: extracted.raceDate,
+                    raceDate: extractedRaceDate,
                     registrationStatus: extracted.registrationStatus,
                     registrationUrl: extracted.registrationUrl,
                   },
@@ -445,7 +473,7 @@ export async function syncMarathonSourceOnce(params: {
                   extraction: extracted
                     ? {
                         method: extracted.method,
-                        raceDate: extracted.raceDate,
+                        raceDate: extractedRaceDate,
                         registrationStatus: extracted.registrationStatus,
                         registrationUrl: extracted.registrationUrl,
                       }
@@ -493,6 +521,25 @@ export async function syncMarathonSourceOnce(params: {
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : "Unknown error";
+
+      if (rawRowId) {
+        await database
+          .update(rawCrawlData)
+          .set({
+            status: "failed",
+            processedAt: new Date(),
+            metadata: {
+              fetchedAt: rawFetchedAtIso,
+              httpStatus: rawHttpStatus,
+              contentHash: rawContentHash,
+              error: {
+                at: new Date().toISOString(),
+                message,
+              },
+            },
+          })
+          .where(eq(rawCrawlData.id, rawRowId));
+      }
 
       const backoffSeconds = (params.source.retryBackoffSeconds ?? 30) * attempt;
       const minIntervalSeconds = params.source.minIntervalSeconds ?? 0;
