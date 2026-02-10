@@ -1545,5 +1545,60 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/marathon-sources", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(200).default(50),
+          sourceId: z.string().uuid().optional(),
+          search: z.string().trim().min(1).max(200).optional(),
+        })
+        .parse(req.query);
+
+      const conditions = [];
+      if (params.sourceId) {
+        conditions.push(eq(marathonSources.sourceId, params.sourceId));
+      }
+      if (params.search) {
+        conditions.push(
+          or(
+            like(marathons.name, `%${params.search}%`),
+            like(marathons.canonicalName, `%${params.search}%`),
+            like(marathonSources.sourceUrl, `%${params.search}%`),
+          ),
+        );
+      }
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const records = await database
+        .select({
+          id: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+          lastCheckedAt: marathonSources.lastCheckedAt,
+          nextCheckAt: marathonSources.nextCheckAt,
+          lastHttpStatus: marathonSources.lastHttpStatus,
+          lastError: marathonSources.lastError,
+          marathonName: marathons.name,
+          canonicalName: marathons.canonicalName,
+          sourceName: sources.name,
+        })
+        .from(marathonSources)
+        .innerJoin(marathons, eq(marathons.id, marathonSources.marathonId))
+        .innerJoin(sources, eq(sources.id, marathonSources.sourceId))
+        .where(whereClause)
+        .orderBy(desc(marathonSources.isPrimary), desc(marathonSources.lastCheckedAt))
+        .limit(params.limit);
+
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return httpServer;
 }
