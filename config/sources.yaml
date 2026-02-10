@@ -35,17 +35,189 @@ sources:
         #   selector: "a[href*='register']"
         #   attr: "href"
 
-  - name: 平台聚合（待接入）
+  # 官网示例（来源：docs/研究报告-马拉松数据源调研.md）
+  - name: 北京马拉松官网
+    type: official
+    strategy: HTML
+    baseUrl: https://www.beijing-marathon.com
+    priority: 95
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 86400
+    notes: "官网示例来源于数据源调研报告"
+    config: {}
+
+  - name: 上海马拉松官网
+    type: official
+    strategy: HTML
+    baseUrl: https://www.shang-ma.com
+    priority: 95
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 86400
+    notes: "官网示例来源于数据源调研报告"
+    config: {}
+
+  - name: 厦门马拉松官网
+    type: official
+    strategy: HTML
+    baseUrl: https://www.xmim.org
+    priority: 95
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 86400
+    notes: "官网示例来源于数据源调研报告"
+    config: {}
+
+  - name: 广州马拉松官网
+    type: official
+    strategy: HTML
+    baseUrl: https://www.gzmarathon.com
+    priority: 95
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 86400
+    notes: "官网示例来源于数据源调研报告"
+    config: {}
+
+  - name: 杭州马拉松官网
+    type: official
+    strategy: HTML
+    baseUrl: https://www.hzim.org
+    priority: 95
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 86400
+    notes: "官网示例来源于数据源调研报告"
+    config: {}
+
+  - name: 成都马拉松官网
+    type: official
+    strategy: HTML
+    baseUrl: https://www.chengdumarathon.com
+    priority: 95
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 86400
+    notes: "官网示例来源于数据源调研报告"
+    config: {}
+
+  - name: 武汉马拉松官网
+    type: official
+    strategy: HTML
+    baseUrl: https://www.wuhanmarathon.com
+    priority: 95
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 86400
+    notes: "官网示例来源于数据源调研报告"
+    config: {}
+
+  - name: 深圳马拉松官网
+    type: official
+    strategy: HTML
+    baseUrl: https://www.szmarthon.com
+    priority: 95
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 86400
+    notes: "官网示例来源于数据源调研报告"
+    config: {}
+
+  # 报名平台（来源：docs/研究报告-马拉松数据源调研.md）
+  - name: 最酷体育（Zuicool）
     type: platform
     strategy: HTML
-    baseUrl: null
-    priority: 10
+    baseUrl: https://www.zuicool.com
+    priority: 90
     isActive: false
     retryMax: 3
     retryBackoffSeconds: 30
     requestTimeoutMs: 15000
     minIntervalSeconds: 21600
-    notes: "Placeholder for Zuicool/爱燃烧 etc. Discovery + binding is semi-manual."
+    notes: "国内主流马拉松报名平台之一"
+    config: {}
+
+  - name: 芝华安方体育
+    type: platform
+    strategy: HTML
+    baseUrl: https://www.zhihuianfang.com
+    priority: 86
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 21600
+    notes: "专业赛事运营公司"
+    config: {}
+
+  - name: 爱燃烧（iranshao）
+    type: platform
+    strategy: HTML
+    baseUrl: https://iranshao.com
+    priority: 88
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 21600
+    notes: "跑步社区+赛事报名"
+    config: {}
+
+  - name: 42旅（42travel）
+    type: platform
+    strategy: HTML
+    baseUrl: https://www.42travel.com
+    priority: 75
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 21600
+    notes: "跑步社区和赛事聚合"
+    config: {}
+
+  - name: 悦跑圈（JoyRun）
+    type: platform
+    strategy: HTML
+    baseUrl: https://www.thejoyrun.com
+    priority: 70
+    isActive: false
+    retryMax: 3
+    retryBackoffSeconds: 30
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 21600
+    notes: "跑步APP+赛事信息"
+    config: {}
+
+  # 搜索/发现（只用于 discovery，不做定时抓取）
+  - name: Brave 搜索
+    type: search
+    strategy: API
+    baseUrl: https://api.search.brave.com/res/v1/web/search
+    priority: 40
+    isActive: false
+    retryMax: 1
+    retryBackoffSeconds: 1
+    requestTimeoutMs: 15000
+    minIntervalSeconds: 0
+    notes: "用于发现新增/小型赛事；结合 AI/人工筛选后再绑定到 Marathon Sources"
     config: {}
 
 # Optional: bind specific marathon official pages for crawling.
@@ -55,4 +227,3 @@ marathonSources:
   #   sourceName: 赛事官方网站（直采）
   #   sourceUrl: https://www.marathon.tokyo/en/
   #   isPrimary: true
-
