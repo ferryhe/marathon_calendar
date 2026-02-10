@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   adminDiscoveryWebSearch,
   getAdminToken,
+  getAdminStats,
   getAdminRawCrawl,
   ignoreAdminRawCrawl,
   listAdminMarathons,
@@ -31,6 +32,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 function formatDateTime(value?: string | null) {
   if (!value) return "-";
@@ -67,6 +69,28 @@ export default function AdminDataPage() {
   }, []);
 
   const hasToken = token.trim().length > 0;
+  const [tab, setTab] = useState<string>(() => {
+    try {
+      return localStorage.getItem("mc_admin_tab") ?? "overview";
+    } catch {
+      return "overview";
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("mc_admin_tab", tab);
+    } catch {
+      // ignore
+    }
+  }, [tab]);
+
+  const statsQuery = useQuery({
+    queryKey: ["admin", "stats", token],
+    queryFn: () => getAdminStats(token),
+    enabled: hasToken && tab === "overview",
+    refetchInterval: 15_000,
+  });
 
   const sourcesQuery = useQuery({
     queryKey: ["admin", "sources", token],
@@ -82,13 +106,13 @@ export default function AdminDataPage() {
         sourceId: sourceFilter || undefined,
         search: search.trim() ? search.trim() : undefined,
       }),
-    enabled: hasToken,
+    enabled: hasToken && tab === "binding",
   });
 
   const runsQuery = useQuery({
     queryKey: ["admin", "sync-runs", token],
     queryFn: () => listAdminSyncRuns(token, 40),
-    enabled: hasToken,
+    enabled: hasToken && tab === "runs",
     refetchInterval: 10_000,
   });
 
@@ -99,7 +123,7 @@ export default function AdminDataPage() {
         limit: 60,
         status: rawStatus || undefined,
       }),
-    enabled: hasToken,
+    enabled: hasToken && tab === "review",
   });
 
   const rawDetailQuery = useQuery({
@@ -130,7 +154,7 @@ export default function AdminDataPage() {
         limit: 20,
         search: bindMarathonSearch.trim(),
       }),
-    enabled: hasToken && bindMarathonSearch.trim().length > 0,
+    enabled: hasToken && tab === "binding" && bindMarathonSearch.trim().length > 0,
   });
 
   const runAllMutation = useMutation({
@@ -248,6 +272,7 @@ export default function AdminDataPage() {
 
   const sources = sourcesQuery.data?.data ?? [];
   const sourceOptions = useMemo(() => sources.map((s) => ({ id: s.id, name: s.name })), [sources]);
+  const stats = statsQuery.data?.data;
 
   return (
     <div className="min-h-screen bg-background">
@@ -313,160 +338,277 @@ export default function AdminDataPage() {
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Card className="lg:col-span-2">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Sources</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => sourcesQuery.refetch()}
-                disabled={!hasToken || sourcesQuery.isFetching}
-              >
-                <RefreshCw className="w-4 h-4 mr-1" />
-                刷新
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {sourcesQuery.error ? (
-                <p className="text-sm text-destructive">
-                  {getFriendlyErrorMessage(sourcesQuery.error)}
-                </p>
-              ) : null}
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className="flex flex-wrap justify-start gap-2">
+            <TabsTrigger value="overview">概览</TabsTrigger>
+            <TabsTrigger value="sources">Sources</TabsTrigger>
+            <TabsTrigger value="runs">同步</TabsTrigger>
+            <TabsTrigger value="binding">绑定/发现</TabsTrigger>
+            <TabsTrigger value="review">needs_review</TabsTrigger>
+            <TabsTrigger value="scheduler">定期更新</TabsTrigger>
+          </TabsList>
 
-              {sources.length === 0 ? (
-                <p className="text-sm text-muted-foreground">暂无数据</p>
-              ) : (
-                <div className="space-y-3">
-                  {sources.map((source) => {
-                    const configDraft =
-                      configDraftById[source.id] ??
-                      JSON.stringify(source.config ?? {}, null, 2);
-                    return (
-                      <div key={source.id} className="rounded-xl border p-3 space-y-2">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="font-medium truncate">{source.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {source.type} / {source.strategy} / priority={source.priority} /{" "}
-                              lastRunAt={formatDateTime(source.lastRunAt)}
+          <TabsContent value="overview" className="mt-4 space-y-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>概览</CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => statsQuery.refetch()}
+                  disabled={!hasToken || statsQuery.isFetching}
+                >
+                  <RefreshCw className="w-4 h-4 mr-1" />
+                  刷新
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!hasToken ? (
+                  <div className="text-sm text-muted-foreground">
+                    请先在上方输入并保存 `ADMIN_API_TOKEN`。
+                  </div>
+                ) : (
+                  <>
+                    {statsQuery.error ? (
+                      <p className="text-sm text-destructive">
+                        {getFriendlyErrorMessage(statsQuery.error)}
+                      </p>
+                    ) : null}
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="rounded-xl border p-3">
+                        <div className="text-xs text-muted-foreground">Sources</div>
+                        <div className="text-lg font-bold mt-1">
+                          {stats?.sources.active ?? "-"} / {stats?.sources.total ?? "-"}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">active / total</div>
+                      </div>
+                      <div className="rounded-xl border p-3">
+                        <div className="text-xs text-muted-foreground">Marathon Sources</div>
+                        <div className="text-lg font-bold mt-1">
+                          {stats?.marathonSources.total ?? "-"}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">绑定总数</div>
+                      </div>
+                      <div className="rounded-xl border p-3">
+                        <div className="text-xs text-muted-foreground">一次性触发</div>
+                        <div className="mt-2">
+                          <Button
+                            size="sm"
+                            onClick={() => runAllMutation.mutate()}
+                            disabled={runAllMutation.isPending}
+                          >
+                            立即同步一次
+                          </Button>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-2">
+                          这是“单次触发”。定期更新见 “定期更新” Tab。
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border p-3 space-y-2">
+                      <div className="text-sm font-medium">Raw Crawl 状态</div>
+                      <div className="flex flex-wrap gap-2">
+                        {(stats?.raw.byStatus ?? []).map((x) => (
+                          <Badge
+                            key={x.status}
+                            variant={x.status === "needs_review" ? "destructive" : "secondary"}
+                          >
+                            {x.status}: {x.count}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        近 24h：{stats?.since24h ? formatDateTime(stats.since24h) : "-"} 至{" "}
+                        {stats?.now ? formatDateTime(stats.now) : "-"}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {(stats?.raw.last24hByStatus ?? []).map((x) => (
+                          <Badge key={x.status} variant="outline">
+                            {x.status}: {x.count}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border p-3 space-y-2">
+                      <div className="text-sm font-medium">Sync Runs（近 24h）</div>
+                      <div className="flex flex-wrap gap-2">
+                        {(stats?.runs.last24hByStatus ?? []).map((x) => (
+                          <Badge key={x.status} variant="outline">
+                            {x.status}: {x.count}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="sources" className="mt-4 space-y-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Sources</CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => sourcesQuery.refetch()}
+                  disabled={!hasToken || sourcesQuery.isFetching}
+                >
+                  <RefreshCw className="w-4 h-4 mr-1" />
+                  刷新
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {sourcesQuery.error ? (
+                  <p className="text-sm text-destructive">
+                    {getFriendlyErrorMessage(sourcesQuery.error)}
+                  </p>
+                ) : null}
+
+                {sources.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">暂无数据</p>
+                ) : (
+                  <div className="space-y-3">
+                    {sources.map((source) => {
+                      const configDraft =
+                        configDraftById[source.id] ??
+                        JSON.stringify(source.config ?? {}, null, 2);
+                      return (
+                        <div key={source.id} className="rounded-xl border p-3 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-medium truncate">{source.name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {source.type} / {source.strategy} / priority={source.priority} /{" "}
+                                lastRunAt={formatDateTime(source.lastRunAt)}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant={source.isActive ? "default" : "outline"}
+                                onClick={() =>
+                                  updateSourceMutation.mutate({
+                                    id: source.id,
+                                    isActive: !source.isActive,
+                                  })
+                                }
+                                disabled={updateSourceMutation.isPending}
+                              >
+                                {source.isActive ? "启用中" : "已停用"}
+                              </Button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              variant={source.isActive ? "default" : "outline"}
-                              onClick={() =>
+
+                          <div className="flex flex-col md:flex-row gap-2">
+                            <Input
+                              type="number"
+                              value={String(source.priority)}
+                              onChange={(e) =>
                                 updateSourceMutation.mutate({
                                   id: source.id,
-                                  isActive: !source.isActive,
+                                  priority: Number(e.target.value),
                                 })
                               }
+                              className="md:w-40"
+                            />
+                            <Input value={source.baseUrl ?? ""} disabled placeholder="baseUrl" />
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="text-xs text-muted-foreground">
+                              config（JSON，保存后写入数据库）
+                            </div>
+                            <Textarea
+                              value={configDraft}
+                              onChange={(e) =>
+                                setConfigDraftById((prev) => ({
+                                  ...prev,
+                                  [source.id]: e.target.value,
+                                }))
+                              }
+                              rows={6}
+                            />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                try {
+                                  const parsed = JSON.parse(configDraft);
+                                  updateSourceMutation.mutate({
+                                    id: source.id,
+                                    config: parsed,
+                                  });
+                                } catch {
+                                  toast({
+                                    title: "JSON 解析失败",
+                                    description: "请检查 config JSON 格式。",
+                                    variant: "destructive",
+                                  });
+                                }
+                              }}
                               disabled={updateSourceMutation.isPending}
                             >
-                              {source.isActive ? "启用中" : "已停用"}
+                              保存 config
                             </Button>
                           </div>
                         </div>
-
-                        <div className="flex flex-col md:flex-row gap-2">
-                          <Input
-                            type="number"
-                            value={String(source.priority)}
-                            onChange={(e) =>
-                              updateSourceMutation.mutate({
-                                id: source.id,
-                                priority: Number(e.target.value),
-                              })
-                            }
-                            className="md:w-40"
-                          />
-                          <Input value={source.baseUrl ?? ""} disabled placeholder="baseUrl" />
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="text-xs text-muted-foreground">
-                            config（JSON，保存后写入数据库）
-                          </div>
-                          <Textarea
-                            value={configDraft}
-                            onChange={(e) =>
-                              setConfigDraftById((prev) => ({
-                                ...prev,
-                                [source.id]: e.target.value,
-                              }))
-                            }
-                            rows={6}
-                          />
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              try {
-                                const parsed = JSON.parse(configDraft);
-                                updateSourceMutation.mutate({
-                                  id: source.id,
-                                  config: parsed,
-                                });
-                              } catch {
-                                toast({
-                                  title: "JSON 解析失败",
-                                  description: "请检查 config JSON 格式。",
-                                  variant: "destructive",
-                                });
-                              }
-                            }}
-                            disabled={updateSourceMutation.isPending}
-                          >
-                            保存 config
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>同步</CardTitle>
-              <Button
-                size="sm"
-                onClick={() => runAllMutation.mutate()}
-                disabled={!hasToken || runAllMutation.isPending}
-              >
-                立即同步一次
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="text-xs text-muted-foreground">
-                最近 40 次运行（自动每 10s 刷新）
-              </div>
-              {runsQuery.error ? (
-                <p className="text-sm text-destructive">{getFriendlyErrorMessage(runsQuery.error)}</p>
-              ) : null}
-              <div className="space-y-2">
-                {(runsQuery.data?.data ?? []).map((run) => (
-                  <div key={run.id} className="rounded-xl border p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-medium truncate">{run.status}</div>
-                      <div className="text-xs text-muted-foreground">{formatDateTime(run.startedAt)}</div>
-                    </div>
-                    {run.message || run.errorMessage ? (
-                      <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                        {(run.message || run.errorMessage) ?? ""}
-                      </div>
-                    ) : null}
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-        <Card>
+          <TabsContent value="runs" className="mt-4 space-y-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>同步</CardTitle>
+                <Button
+                  size="sm"
+                  onClick={() => runAllMutation.mutate()}
+                  disabled={!hasToken || runAllMutation.isPending}
+                >
+                  立即同步一次
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="text-xs text-muted-foreground">
+                  最近 40 次运行（自动每 10s 刷新）
+                </div>
+                {runsQuery.error ? (
+                  <p className="text-sm text-destructive">
+                    {getFriendlyErrorMessage(runsQuery.error)}
+                  </p>
+                ) : null}
+                <div className="space-y-2">
+                  {(runsQuery.data?.data ?? []).map((run) => (
+                    <div key={run.id} className="rounded-xl border p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm font-medium truncate">{run.status}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatDateTime(run.startedAt)}
+                        </div>
+                      </div>
+                      {run.message || run.errorMessage ? (
+                        <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                          {(run.message || run.errorMessage) ?? ""}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="binding" className="mt-4 space-y-6">
+            <Card>
           <CardHeader>
             <CardTitle>Marathon Sources</CardTitle>
           </CardHeader>
@@ -675,6 +817,9 @@ export default function AdminDataPage() {
           </CardContent>
         </Card>
 
+          </TabsContent>
+
+          <TabsContent value="review" className="mt-4 space-y-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Raw Crawl</CardTitle>
@@ -745,6 +890,27 @@ export default function AdminDataPage() {
             })}
           </CardContent>
         </Card>
+
+          </TabsContent>
+
+          <TabsContent value="scheduler" className="mt-4 space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>定期更新（Scheduler）</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-muted-foreground">
+                <div>
+                  定期更新由服务端进程内调度器执行：`SYNC_SCHEDULER_ENABLED=true` 可强制开启，
+                  `SYNC_SCHEDULER_INTERVAL_MS` 控制轮询间隔。
+                </div>
+                <div>
+                  生产环境（`NODE_ENV=production`）默认开启。开发环境建议先用 “同步” Tab 的
+                  “立即同步一次” 手动触发，确认配置与数据源规则无误后再开启定时。
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
         <Dialog
           open={Boolean(selectedRawId)}
