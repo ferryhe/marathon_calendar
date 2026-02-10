@@ -160,6 +160,44 @@ export const marathonReviews = pgTable("marathon_reviews", {
     .notNull(),
 });
 
+export const reviewLikes = pgTable(
+  "review_likes",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    reviewId: varchar("review_id")
+      .references(() => marathonReviews.id)
+      .notNull(),
+    userId: varchar("user_id")
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    reviewUserUnique: uniqueIndex("review_likes_unique").on(table.reviewId, table.userId),
+  }),
+);
+
+export const reviewReports = pgTable(
+  "review_reports",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    reviewId: varchar("review_id")
+      .references(() => marathonReviews.id)
+      .notNull(),
+    userId: varchar("user_id")
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    reviewUserUnique: uniqueIndex("review_reports_unique").on(table.reviewId, table.userId),
+  }),
+);
+
 export const userFavoriteMarathons = pgTable(
   "user_favorite_marathons",
   {

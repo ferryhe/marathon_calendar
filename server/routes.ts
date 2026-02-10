@@ -4,7 +4,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import COS from "cos-nodejs-sdk-v5";
 import sharp from "sharp";
-import { eq, and, or, like, sql, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, or, like, sql, desc, asc, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import {
   users,
@@ -13,6 +13,8 @@ import {
   insertReviewSchema,
   userFavoriteMarathons,
   marathonReviews,
+  reviewLikes,
+  reviewReports,
   marathons,
   marathonEditions,
 } from "@shared/schema";
@@ -99,6 +101,15 @@ function ensureDatabase() {
   }
 
   return db;
+}
+
+async function regenerateSession(req: Request) {
+  await new Promise<void>((resolve, reject) => {
+    req.session.regenerate((err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
 }
 
 function canonicalizeName(name: string) {
@@ -384,6 +395,8 @@ export async function registerRoutes(
         })
         .returning();
 
+      // Mitigate session fixation: rotate session ID upon auth state change.
+      await regenerateSession(req);
       req.session.userId = user.id;
       req.session.username = user.username;
       req.session.displayName = user.displayName ?? user.username;
@@ -425,6 +438,8 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
+      // Mitigate session fixation: rotate session ID upon auth state change.
+      await regenerateSession(req);
       req.session.userId = user.id;
       req.session.username = user.username;
       req.session.displayName = user.displayName ?? user.username;
@@ -493,14 +508,28 @@ export async function registerRoutes(
       requireAuth(req);
       const payload = updateProfilePayloadSchema.parse(req.body);
 
+      const body = req.body as Record<string, unknown>;
+      const updateData: {
+        displayName: (typeof users.$inferInsert)["displayName"];
+        avatarUrl?: (typeof users.$inferInsert)["avatarUrl"];
+        avatarSource?: (typeof users.$inferInsert)["avatarSource"];
+        updatedAt: Date;
+      } = {
+        displayName: payload.displayName,
+        updatedAt: new Date(),
+      };
+
+      // Avoid unintentionally clearing avatar fields when the client only updates displayName.
+      if (Object.prototype.hasOwnProperty.call(body, "avatarUrl")) {
+        updateData.avatarUrl = payload.avatarUrl ?? null;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, "avatarSource")) {
+        updateData.avatarSource = payload.avatarSource ?? "manual";
+      }
+
       const [updated] = await database
         .update(users)
-        .set({
-          displayName: payload.displayName,
-          avatarUrl: payload.avatarUrl ?? null,
-          avatarSource: payload.avatarSource ?? "manual",
-          updatedAt: new Date(),
-        })
+        .set(updateData)
         .where(eq(users.id, req.session.userId!))
         .returning({
           id: users.id,
@@ -568,6 +597,27 @@ export async function registerRoutes(
       requireAuth(req);
       const payload = bindWechatPayloadSchema.parse(req.body);
 
+      const userId = req.session.userId!;
+      const [openIdConflict] = await database
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.wechatOpenId, payload.wechatOpenId), ne(users.id, userId)))
+        .limit(1);
+      if (openIdConflict) {
+        return res.status(409).json({ message: "WeChat openId already bound" });
+      }
+
+      if (payload.wechatUnionId) {
+        const [unionIdConflict] = await database
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.wechatUnionId, payload.wechatUnionId), ne(users.id, userId)))
+          .limit(1);
+        if (unionIdConflict) {
+          return res.status(409).json({ message: "WeChat unionId already bound" });
+        }
+      }
+
       const [updated] = await database
         .update(users)
         .set({
@@ -579,7 +629,7 @@ export async function registerRoutes(
           wechatBoundAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(eq(users.id, req.session.userId!))
+        .where(eq(users.id, userId))
         .returning({
           id: users.id,
           username: users.username,
@@ -593,6 +643,10 @@ export async function registerRoutes(
 
       res.json({ user: updated ? toAuthUser(updated) : null });
     } catch (error) {
+      // Map unique constraint violations to 409 so the client can react properly.
+      if ((error as any)?.code === "23505") {
+        return res.status(409).json({ message: "WeChat already bound" });
+      }
       next(error);
     }
   });
@@ -919,7 +973,12 @@ export async function registerRoutes(
   app.get("/api/marathons/upcoming", async (req, res, next) => {
     try {
       const database = ensureDatabase();
-      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const limit = z
+        .preprocess(
+          (value) => (Array.isArray(value) ? value[0] : value),
+          z.coerce.number().int().min(1).max(50).default(10),
+        )
+        .parse(req.query.limit);
       
       // Get marathons with editions that have future race dates
       const records = await database
@@ -947,7 +1006,12 @@ export async function registerRoutes(
   app.get("/api/marathons/hot", async (req, res, next) => {
     try {
       const database = ensureDatabase();
-      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const limit = z
+        .preprocess(
+          (value) => (Array.isArray(value) ? value[0] : value),
+          z.coerce.number().int().min(1).max(50).default(10),
+        )
+        .parse(req.query.limit);
 
       const records = await database
         .select({
@@ -1216,17 +1280,41 @@ export async function registerRoutes(
   app.post("/api/reviews/:id/like", async (req, res, next) => {
     try {
       const database = ensureDatabase();
+      requireAuth(req);
+
+      const reviewId = req.params.id;
+      const userId = req.session.userId!;
+
+      const [existing] = await database
+        .select({ id: marathonReviews.id })
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, reviewId));
+      if (!existing) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      const inserted = await database
+        .insert(reviewLikes)
+        .values({
+          reviewId,
+          userId,
+        })
+        .onConflictDoNothing({
+          target: [reviewLikes.reviewId, reviewLikes.userId],
+        })
+        .returning({ reviewId: reviewLikes.reviewId });
+
+      if (inserted.length === 0) {
+        return res.status(409).json({ message: "Already liked" });
+      }
+
       const [updated] = await database
         .update(marathonReviews)
         .set({
           likesCount: sql`${marathonReviews.likesCount} + 1`,
         })
-        .where(eq(marathonReviews.id, req.params.id))
+        .where(eq(marathonReviews.id, reviewId))
         .returning();
-
-      if (!updated) {
-        return res.status(404).json({ message: "Review not found" });
-      }
 
       res.json(updated);
     } catch (error) {
@@ -1237,17 +1325,41 @@ export async function registerRoutes(
   app.post("/api/reviews/:id/report", async (req, res, next) => {
     try {
       const database = ensureDatabase();
+      requireAuth(req);
+
+      const reviewId = req.params.id;
+      const userId = req.session.userId!;
+
+      const [existing] = await database
+        .select({ id: marathonReviews.id })
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, reviewId));
+      if (!existing) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      const inserted = await database
+        .insert(reviewReports)
+        .values({
+          reviewId,
+          userId,
+        })
+        .onConflictDoNothing({
+          target: [reviewReports.reviewId, reviewReports.userId],
+        })
+        .returning({ reviewId: reviewReports.reviewId });
+
+      if (inserted.length === 0) {
+        return res.status(409).json({ message: "Already reported" });
+      }
+
       const [updated] = await database
         .update(marathonReviews)
         .set({
           reportCount: sql`${marathonReviews.reportCount} + 1`,
         })
-        .where(eq(marathonReviews.id, req.params.id))
+        .where(eq(marathonReviews.id, reviewId))
         .returning();
-
-      if (!updated) {
-        return res.status(404).json({ message: "Review not found" });
-      }
 
       res.json(updated);
     } catch (error) {
