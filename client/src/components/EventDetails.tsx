@@ -8,6 +8,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Link } from "wouter";
 import { 
   Calendar, 
   MapPin, 
@@ -138,6 +139,12 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
           </div>
 
           <div className="pt-4 pb-8">
+            <Link href={`/marathons/${event.id}`}>
+              <Button variant="outline" className="w-full h-11 rounded-xl mb-3">
+                查看完整详情页
+              </Button>
+            </Link>
+
             <Button asChild className="w-full h-14 rounded-2xl text-base font-semibold shadow-xl shadow-primary/10 transition-transform active:scale-[0.97]">
               <a href={event.websiteUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2">
                 前往官网查看 <ExternalLink className="w-4 h-4" />
