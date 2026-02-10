@@ -41,11 +41,25 @@ async function main() {
   <body>ok</body>
 </html>`;
 
+  const htmlNoDate = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+  </head>
+  <body>no date</body>
+</html>`;
+
   const server = createServer((req, res) => {
     if (req.url === "/event") {
       res.statusCode = 200;
       res.setHeader("content-type", "text/html; charset=utf-8");
       res.end(html);
+      return;
+    }
+    if (req.url === "/nodate") {
+      res.statusCode = 200;
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.end(htmlNoDate);
       return;
     }
     res.statusCode = 404;
@@ -55,11 +69,15 @@ async function main() {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   invariant(address && typeof address === "object", "Failed to get server address");
-  const url = `http://127.0.0.1:${address.port}/event`;
+  const url = `http://127.0.0.1:${address.port}`;
+  const urlEvent = `${url}/event`;
+  const urlNoDate = `${url}/nodate`;
 
   let marathonId: string | null = null;
+  let marathonId2: string | null = null;
   let sourceId: string | null = null;
   let marathonSourceId: string | null = null;
+  let marathonSourceId2: string | null = null;
 
   try {
     const [marathon] = await db
@@ -75,6 +93,20 @@ async function main() {
       })
       .returning();
     marathonId = marathon.id;
+
+    const [marathon2] = await db
+      .insert(marathons)
+      .values({
+        name: "Smoke Marathon (no date)",
+        canonicalName: `smoke-sync-nodate-${idSuffix}`,
+        city: "Smoke City",
+        country: "China",
+        description: "smoke",
+        websiteUrl: null,
+        updatedAt: new Date(),
+      })
+      .returning();
+    marathonId2 = marathon2.id;
 
     const [source] = await db
       .insert(sources)
@@ -100,21 +132,42 @@ async function main() {
       .values({
         marathonId,
         sourceId,
-        sourceUrl: url,
+        sourceUrl: urlEvent,
         isPrimary: true,
         lastCheckedAt: null,
       })
       .returning();
     marathonSourceId = ms.id;
 
+    const [ms2] = await db
+      .insert(marathonSources)
+      .values({
+        marathonId: marathonId2,
+        sourceId,
+        sourceUrl: urlNoDate,
+        isPrimary: true,
+        lastCheckedAt: null,
+      })
+      .returning();
+    marathonSourceId2 = ms2.id;
+
     const result = await syncMarathonSourceOnce({
       source,
       marathonId,
       marathonSourceId,
-      sourceUrl: url,
+      sourceUrl: urlEvent,
       lastHash: null,
     });
     invariant(result.status === "success", `sync failed: ${JSON.stringify(result)}`);
+
+    const result2 = await syncMarathonSourceOnce({
+      source,
+      marathonId: marathonId2,
+      marathonSourceId: marathonSourceId2,
+      sourceUrl: urlNoDate,
+      lastHash: null,
+    });
+    invariant(result2.status === "success", `sync failed: ${JSON.stringify(result2)}`);
 
     const editions = await db
       .select()
@@ -124,10 +177,19 @@ async function main() {
     invariant(editions[0].raceDate === "2026-03-15", "raceDate mismatch");
 
     const raw = await db
-      .select({ id: rawCrawlData.id })
+      .select({ id: rawCrawlData.id, status: rawCrawlData.status, processedAt: rawCrawlData.processedAt })
       .from(rawCrawlData)
       .where(eq(rawCrawlData.marathonId, marathonId));
     invariant(raw.length >= 1, "expected raw_crawl_data inserted");
+    invariant(raw[0].status === "processed", "expected raw status processed");
+    invariant(Boolean(raw[0].processedAt), "expected raw processedAt set");
+
+    const raw2 = await db
+      .select({ id: rawCrawlData.id, status: rawCrawlData.status })
+      .from(rawCrawlData)
+      .where(eq(rawCrawlData.marathonId, marathonId2));
+    invariant(raw2.length >= 1, "expected raw_crawl_data inserted for nodate");
+    invariant(raw2[0].status === "needs_review", "expected raw status needs_review for nodate");
 
     console.log("OK: Stage 1.3 sync smoke passed");
   } finally {
@@ -141,6 +203,13 @@ async function main() {
       await db.delete(marathonEditions).where(eq(marathonEditions.marathonId, marathonId));
       await db.delete(marathons).where(eq(marathons.id, marathonId));
     }
+    if (marathonId2) {
+      await db.delete(rawCrawlData).where(eq(rawCrawlData.marathonId, marathonId2));
+      await db.delete(marathonSyncRuns).where(eq(marathonSyncRuns.marathonId, marathonId2));
+      await db.delete(marathonSources).where(eq(marathonSources.marathonId, marathonId2));
+      await db.delete(marathonEditions).where(eq(marathonEditions.marathonId, marathonId2));
+      await db.delete(marathons).where(eq(marathons.id, marathonId2));
+    }
     if (sourceId) {
       await db.delete(sources).where(eq(sources.id, sourceId));
     }
@@ -151,4 +220,3 @@ main().catch((error) => {
   console.error(error instanceof Error ? error.stack ?? error.message : String(error));
   process.exit(1);
 });
-

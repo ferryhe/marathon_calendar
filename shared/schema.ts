@@ -69,6 +69,9 @@ export const marathonEditions = pgTable(
     registrationUrl: text("registration_url"),
     registrationOpenDate: date("registration_open_date"),
     registrationCloseDate: date("registration_close_date"),
+    // Per-field provenance for merge/conflict resolution.
+    // Example: { raceDate: { sourceId, sourceType, priority, rank, at }, ... }
+    fieldSources: jsonb("field_sources").$type<Record<string, unknown> | null>(),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })

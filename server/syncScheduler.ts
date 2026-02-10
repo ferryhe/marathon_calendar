@@ -3,7 +3,6 @@ import { load } from "cheerio";
 import { and, asc, desc, eq, isNull, lte, or } from "drizzle-orm";
 import {
   marathons,
-  marathonEditions,
   marathonSources,
   marathonSyncRuns,
   rawCrawlData,
@@ -13,6 +12,7 @@ import {
 import { db, pool } from "./db";
 import { log } from "./logger";
 import { aiExtractFromHtml, isAiFallbackEnabled } from "./aiExtractor";
+import { upsertEditionWithMerge } from "./editionMerge";
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const RAW_CONTENT_MAX_CHARS = 2 * 1024 * 1024;
@@ -379,34 +379,33 @@ export async function syncMarathonSourceOnce(params: {
 
         if (extracted?.raceDate) {
           const year = Number(extracted.raceDate.slice(0, 4));
-          await database
-            .insert(marathonEditions)
-            .values({
-              marathonId: params.marathonId,
-              year,
+          const merge = await upsertEditionWithMerge({
+            database,
+            marathonId: params.marathonId,
+            year,
+            incoming: {
               raceDate: extracted.raceDate,
               registrationStatus: extracted.registrationStatus,
               registrationUrl: extracted.registrationUrl,
-              lastSyncedAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: [marathonEditions.marathonId, marathonEditions.year],
-              set: {
-                raceDate: extracted.raceDate,
-                registrationStatus: extracted.registrationStatus,
-                registrationUrl: extracted.registrationUrl,
-                lastSyncedAt: new Date(),
-                updatedAt: new Date(),
-              },
-            });
-          updatedCount = 1;
+            },
+            source: {
+              sourceId: params.source.id,
+              sourceType: params.source.type,
+              priority: params.source.priority,
+            },
+          });
+
+          if (merge.action === "updated" || merge.action === "inserted") {
+            updatedCount = 1;
+          } else {
+            unchangedCount = 1;
+          }
 
           if (rawRowId) {
             await database
               .update(rawCrawlData)
               .set({
-                status: "processed",
+                status: merge.conflicts.length > 0 ? "needs_review" : "processed",
                 processedAt: new Date(),
                 metadata: {
                   fetchedAt: fetchedAtIso,
@@ -415,6 +414,11 @@ export async function syncMarathonSourceOnce(params: {
                     raceDate: extracted.raceDate,
                     registrationStatus: extracted.registrationStatus,
                     registrationUrl: extracted.registrationUrl,
+                  },
+                  merge: {
+                    action: merge.action,
+                    year: merge.year,
+                    conflicts: merge.conflicts,
                   },
                   ai: usedAi
                     ? {

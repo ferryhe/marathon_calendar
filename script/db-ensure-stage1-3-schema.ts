@@ -126,6 +126,20 @@ async function ensureRawCrawlDataTable(pool: pg.Pool) {
   );
 }
 
+async function ensureMarathonEditionsColumns(pool: pg.Pool) {
+  const table = "marathon_editions";
+  // Added for Stage 1.3 merge/conflict resolution (field-level provenance).
+  const columns: Array<{ name: string; ddl: string }> = [
+    { name: "field_sources", ddl: "jsonb" },
+  ];
+
+  for (const col of columns) {
+    if (!(await columnExists(pool, table, col.name))) {
+      await pool.query(`alter table ${table} add column ${col.name} ${col.ddl}`);
+    }
+  }
+}
+
 async function main() {
   const databaseUrl = requireEnv("DATABASE_URL");
   const pool = new Pool({ connectionString: databaseUrl });
@@ -134,6 +148,7 @@ async function main() {
     await ensureSourcesColumns(pool);
     await ensureMarathonSourcesColumns(pool);
     await ensureMarathonSyncRunsColumns(pool);
+    await ensureMarathonEditionsColumns(pool);
     await ensureRawCrawlDataTable(pool);
     await pool.query("commit");
     console.log("OK: ensured Stage 1.3 schema prerequisites");
