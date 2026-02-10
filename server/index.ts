@@ -5,11 +5,13 @@ import path from "path";
 import { mkdirSync } from "fs";
 import session from "express-session";
 import createMemoryStore from "memorystore";
+import connectPgSimple from "connect-pg-simple";
 import { ZodError } from "zod";
 import { log } from "./logger";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { startSyncScheduler } from "./syncScheduler";
+import { pool } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
@@ -29,8 +31,43 @@ declare module "express-session" {
   }
 }
 
-const sessionSecret =
-  process.env.SESSION_SECRET ?? "marathon-dev-session-secret-change-me";
+const isProduction = process.env.NODE_ENV === "production";
+const sessionSecretEnv = process.env.SESSION_SECRET;
+
+if (!sessionSecretEnv && isProduction) {
+  throw new Error(
+    "SESSION_SECRET environment variable must be set when NODE_ENV=production",
+  );
+}
+
+const sessionSecret = sessionSecretEnv ?? "marathon-dev-session-secret-change-me";
+if (!sessionSecretEnv && !isProduction) {
+  console.warn(
+    "Using default development SESSION_SECRET. Do not use this value in production.",
+  );
+}
+
+const sessionStore = (() => {
+  if (!isProduction) {
+    return new MemoryStore({
+      checkPeriod: 24 * 60 * 60 * 1000,
+    });
+  }
+
+  if (!pool) {
+    throw new Error(
+      "DATABASE_URL must be set when NODE_ENV=production (required for Postgres-backed session store).",
+    );
+  }
+
+  const PgSessionStore = connectPgSimple(session);
+  return new PgSessionStore({
+    pool,
+    // Keep a stable table name so we can manage/clean it in production if needed.
+    tableName: "mc_sessions",
+    createTableIfMissing: true,
+  });
+})();
 
 app.use(
   session({
@@ -44,9 +81,7 @@ app.use(
       secure: process.env.NODE_ENV === "production",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
-    store: new MemoryStore({
-      checkPeriod: 24 * 60 * 60 * 1000,
-    }),
+    store: sessionStore,
   }),
 );
 
