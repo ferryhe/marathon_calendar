@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { MarathonTable } from "@/components/MarathonTable";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -23,7 +24,6 @@ export default function Home() {
   const { toast } = useToast();
 
   const currentYear = new Date().getFullYear();
-  const nextYear = currentYear + 1;
 
   const handleUpdate = () => {
     setIsUpdating(true);
@@ -50,15 +50,23 @@ export default function Home() {
               />
               马拉松日历
             </h1>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={handleUpdate} 
-              disabled={isUpdating}
-              className="rounded-full"
-            >
-              <RefreshCw className={`h-5 w-5 ${isUpdating ? "animate-spin" : ""}`} />
-            </Button>
+
+            <div className="flex items-center gap-2">
+              <Link href="/my-reviews">
+                <Button variant="outline" size="sm" className="rounded-full">
+                  我的评论
+                </Button>
+              </Link>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleUpdate}
+                disabled={isUpdating}
+                className="rounded-full"
+              >
+                <RefreshCw className={`h-5 w-5 ${isUpdating ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
           </div>
 
           <div className="flex flex-col gap-3">
@@ -72,15 +80,25 @@ export default function Home() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            
-            <Tabs 
-              value={region} 
-              onValueChange={(v) => setRegion(v as "China" | "Overseas")} 
+
+            <Tabs
+              value={region}
+              onValueChange={(v) => setRegion(v as "China" | "Overseas")}
               className="w-full"
             >
               <TabsList className="grid w-full grid-cols-2 bg-secondary/50 rounded-xl p-1">
-                <TabsTrigger value="China" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">国内赛事</TabsTrigger>
-                <TabsTrigger value="Overseas" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">海外赛事</TabsTrigger>
+                <TabsTrigger
+                  value="China"
+                  className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  国内赛事
+                </TabsTrigger>
+                <TabsTrigger
+                  value="Overseas"
+                  className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  海外赛事
+                </TabsTrigger>
               </TabsList>
             </Tabs>
 
@@ -135,7 +153,6 @@ export default function Home() {
           searchQuery={searchQuery}
           filters={{
             year: currentYear,
-            fallbackYear: nextYear,
             month: monthFilter === "all" ? undefined : Number(monthFilter),
             status: statusFilter === "all" ? undefined : statusFilter,
             sortBy,

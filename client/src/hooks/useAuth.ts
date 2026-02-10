@@ -17,6 +17,17 @@ export function useCurrentUser() {
   });
 }
 
+export function useMyReviews(enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["users", "me", "reviews"],
+    queryFn: async () => {
+      const result = await apiClient.getMyReviews();
+      return result.data;
+    },
+    enabled,
+  });
+}
+
 export function useRegister() {
   const queryClient = useQueryClient();
   return useMutation({
