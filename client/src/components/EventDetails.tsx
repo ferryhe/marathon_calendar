@@ -7,6 +7,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { useToast } from "@/hooks/use-toast";
+import { getFriendlyErrorMessage } from "@/lib/errors";
 import { Link } from "wouter";
 import {
   Award,
@@ -35,6 +37,7 @@ interface EventDetailsProps {
 export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
   if (!event) return null;
 
+  const { toast } = useToast();
   const { data: currentUser } = useCurrentUser();
   const { data: favoriteStatus } = useFavoriteStatus(event.id, open);
   const addFavoriteMutation = useAddFavorite();
@@ -52,10 +55,18 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
   const toggleFavorite = async () => {
     if (!currentUser) return;
 
-    if (isFavorited) {
-      await removeFavoriteMutation.mutateAsync(event.id);
-    } else {
-      await addFavoriteMutation.mutateAsync(event.id);
+    try {
+      if (isFavorited) {
+        await removeFavoriteMutation.mutateAsync(event.id);
+      } else {
+        await addFavoriteMutation.mutateAsync(event.id);
+      }
+    } catch (error) {
+      toast({
+        title: "操作失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
     }
   };
 

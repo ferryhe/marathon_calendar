@@ -9,6 +9,8 @@ import {
   Star,
   ThumbsUp,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { getFriendlyErrorMessage } from "@/lib/errors";
 import {
   useCreateReview,
   useDeleteReview,
@@ -41,6 +43,7 @@ function formatDate(dateValue?: string | null) {
 }
 
 export default function MarathonDetailPage() {
+  const { toast } = useToast();
   const [matched, params] = useRoute("/marathons/:id");
   const marathonId = matched ? params.id : "";
 
@@ -79,48 +82,72 @@ export default function MarathonDetailPage() {
   const submitAuth = async () => {
     if (!authUsername || !authPassword) return;
 
-    if (isRegisterMode) {
-      await registerMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
-      });
-    } else {
-      await loginMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
+    try {
+      if (isRegisterMode) {
+        await registerMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      } else {
+        await loginMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      }
+      setAuthPassword("");
+    } catch (error) {
+      toast({
+        title: isRegisterMode ? "注册失败" : "登录失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
       });
     }
-    setAuthPassword("");
   };
 
   const toggleFavorite = async () => {
     if (!currentUser || !marathonId) return;
-    if (isFavorited) {
-      await removeFavoriteMutation.mutateAsync(marathonId);
-    } else {
-      await addFavoriteMutation.mutateAsync(marathonId);
+    try {
+      if (isFavorited) {
+        await removeFavoriteMutation.mutateAsync(marathonId);
+      } else {
+        await addFavoriteMutation.mutateAsync(marathonId);
+      }
+    } catch (error) {
+      toast({
+        title: "操作失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
     }
   };
 
   const submitReview = async () => {
     if (!comment.trim()) return;
 
-    if (editingReviewId) {
-      await updateReviewMutation.mutateAsync({
-        reviewId: editingReviewId,
-        payload: { rating, comment },
-      });
-      setEditingReviewId(null);
-    } else {
-      await createReviewMutation.mutateAsync({
-        rating,
-        comment,
-        marathonEditionId: data?.editions?.[0]?.id,
+    try {
+      if (editingReviewId) {
+        await updateReviewMutation.mutateAsync({
+          reviewId: editingReviewId,
+          payload: { rating, comment },
+        });
+        setEditingReviewId(null);
+      } else {
+        await createReviewMutation.mutateAsync({
+          rating,
+          comment,
+          marathonEditionId: data?.editions?.[0]?.id,
+        });
+      }
+
+      setRating(5);
+      setComment("");
+    } catch (error) {
+      toast({
+        title: "提交失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
       });
     }
-
-    setRating(5);
-    setComment("");
   };
 
   if (!matched) return null;

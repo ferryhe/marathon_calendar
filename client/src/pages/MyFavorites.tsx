@@ -8,6 +8,8 @@ import {
   useRegister,
   useRemoveFavorite,
 } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { getFriendlyErrorMessage } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,6 +22,7 @@ function formatDate(dateValue?: string | null) {
 }
 
 export default function MyFavoritesPage() {
+  const { toast } = useToast();
   const { data: currentUser, isLoading: isUserLoading } = useCurrentUser();
   const { data: favorites = [], isLoading: isFavoritesLoading } = useMyFavorites(!!currentUser);
   const loginMutation = useLogin();
@@ -33,19 +36,27 @@ export default function MyFavoritesPage() {
   const submitAuth = async () => {
     if (!authUsername || !authPassword) return;
 
-    if (isRegisterMode) {
-      await registerMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
-      });
-    } else {
-      await loginMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
+    try {
+      if (isRegisterMode) {
+        await registerMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      } else {
+        await loginMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      }
+
+      setAuthPassword("");
+    } catch (error) {
+      toast({
+        title: isRegisterMode ? "注册失败" : "登录失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
       });
     }
-
-    setAuthPassword("");
   };
 
   return (

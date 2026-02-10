@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { ArrowLeft, Calendar, Loader2, MapPin, MessageSquare, Star } from "lucide-react";
 import { useCurrentUser, useLogin, useMyReviews, useRegister } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { getFriendlyErrorMessage } from "@/lib/errors";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +22,7 @@ function formatDate(dateValue?: string | null) {
 }
 
 export default function MyReviewsPage() {
+  const { toast } = useToast();
   const { data: currentUser, isLoading: isUserLoading } = useCurrentUser();
   const { data: myReviews = [], isLoading: isReviewsLoading } = useMyReviews(!!currentUser);
   const loginMutation = useLogin();
@@ -46,19 +49,27 @@ export default function MyReviewsPage() {
       return;
     }
 
-    if (isRegisterMode) {
-      await registerMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
-      });
-    } else {
-      await loginMutation.mutateAsync({
-        username: authUsername,
-        password: authPassword,
+    try {
+      if (isRegisterMode) {
+        await registerMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      } else {
+        await loginMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      }
+
+      setAuthPassword("");
+    } catch (error) {
+      toast({
+        title: isRegisterMode ? "注册失败" : "登录失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
       });
     }
-
-    setAuthPassword("");
   };
 
   return (

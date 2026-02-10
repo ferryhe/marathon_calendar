@@ -2,6 +2,7 @@ import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { ArrowLeft, Loader2, Upload, UserCircle2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { getFriendlyErrorMessage } from "@/lib/errors";
 import {
   useBindWechat,
   useCurrentUser,
@@ -54,16 +55,33 @@ export default function ProfilePage() {
     setWechatAvatarUrl(currentUser.wechatAvatarUrl || "");
   }, [currentUser]);
 
+
   const submitAuth = async () => {
     if (!authUsername || !authPassword) return;
 
-    if (isRegisterMode) {
-      await registerMutation.mutateAsync({ username: authUsername, password: authPassword });
-    } else {
-      await loginMutation.mutateAsync({ username: authUsername, password: authPassword });
+    try {
+      if (isRegisterMode) {
+        await registerMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      } else {
+        await loginMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
+      }
+
+      setAuthPassword("");
+    } catch (error) {
+      toast({
+        title: isRegisterMode ? "注册失败" : "登录失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
     }
-    setAuthPassword("");
   };
+
 
   const saveProfile = async () => {
     if (!displayName.trim()) {
@@ -71,13 +89,22 @@ export default function ProfilePage() {
       return;
     }
 
-    await updateProfileMutation.mutateAsync({
-      displayName: displayName.trim(),
-      avatarUrl: avatarUrl.trim() ? avatarUrl.trim() : null,
-      avatarSource: avatarUrl.trim() ? "manual" : "manual",
-    });
-    toast({ title: "个人资料已更新" });
+    try {
+      await updateProfileMutation.mutateAsync({
+        displayName: displayName.trim(),
+        avatarUrl: avatarUrl.trim() ? avatarUrl.trim() : null,
+        avatarSource: "manual",
+      });
+      toast({ title: "个人资料已更新" });
+    } catch (error) {
+      toast({
+        title: "保存失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    }
   };
+
 
   const onUploadAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -89,22 +116,41 @@ export default function ProfilePage() {
       return;
     }
 
-    const dataUrl = await fileToDataUrl(file);
-    const result = await uploadAvatarMutation.mutateAsync(dataUrl);
-    setAvatarUrl(result.avatarUrl);
-    toast({ title: "头像上传成功" });
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const result = await uploadAvatarMutation.mutateAsync(dataUrl);
+      setAvatarUrl(result.avatarUrl);
+      toast({ title: "头像上传成功" });
+    } catch (error) {
+      toast({
+        title: "头像上传失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    }
   };
+
 
   const useWechatAvatar = async () => {
     if (!currentUser?.wechatAvatarUrl) return;
-    await updateProfileMutation.mutateAsync({
-      displayName: displayName.trim(),
-      avatarUrl: currentUser.wechatAvatarUrl,
-      avatarSource: "wechat",
-    });
-    setAvatarUrl(currentUser.wechatAvatarUrl);
-    toast({ title: "已切换为微信头像" });
+
+    try {
+      await updateProfileMutation.mutateAsync({
+        displayName: displayName.trim(),
+        avatarUrl: currentUser.wechatAvatarUrl,
+        avatarSource: "wechat",
+      });
+      setAvatarUrl(currentUser.wechatAvatarUrl);
+      toast({ title: "已切换为微信头像" });
+    } catch (error) {
+      toast({
+        title: "切换失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    }
   };
+
 
   const bindWechat = async () => {
     if (!wechatOpenId || !wechatNickname) {
@@ -112,19 +158,36 @@ export default function ProfilePage() {
       return;
     }
 
-    await bindWechatMutation.mutateAsync({
-      wechatOpenId: wechatOpenId.trim(),
-      wechatUnionId: wechatUnionId.trim() || undefined,
-      wechatNickname: wechatNickname.trim(),
-      wechatAvatarUrl: wechatAvatarUrl.trim() || undefined,
-    });
-    toast({ title: "微信已绑定（开发模拟）" });
-    setShowBindForm(false);
+    try {
+      await bindWechatMutation.mutateAsync({
+        wechatOpenId: wechatOpenId.trim(),
+        wechatUnionId: wechatUnionId.trim() || undefined,
+        wechatNickname: wechatNickname.trim(),
+        wechatAvatarUrl: wechatAvatarUrl.trim() || undefined,
+      });
+      toast({ title: "微信已绑定（开发模拟）" });
+      setShowBindForm(false);
+    } catch (error) {
+      toast({
+        title: "绑定失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    }
   };
 
+
   const unbindWechat = async () => {
-    await unbindWechatMutation.mutateAsync();
-    toast({ title: "微信绑定已解除" });
+    try {
+      await unbindWechatMutation.mutateAsync();
+      toast({ title: "微信绑定已解除" });
+    } catch (error) {
+      toast({
+        title: "解绑失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    }
   };
 
   const avatarPreview = useMemo(() => {
