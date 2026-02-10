@@ -1,5 +1,12 @@
 # 马拉松日历应用 - 项目文档总览
 
+## ⚙️ 首次安装（Windows / Linux）
+
+首次安装与环境启动步骤已整理在仓库根目录 `README.md` 的“快速开始”章节，包含：
+- Windows 首次安装（含 Docker PostgreSQL）
+- Linux 首次安装（含 Docker PostgreSQL）
+- Linux 生产环境启动方式
+
 ## 📚 文档目录
 
 本文档库包含马拉松日历应用开发的完整研究报告和项目计划。

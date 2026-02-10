@@ -37,43 +37,95 @@
 ### 环境要求
 
 - Node.js 20+
-- PostgreSQL 14+
-- Redis
+- Docker（用于快速启动 PostgreSQL）
+- Redis（当前版本可选，预留给缓存模块）
 
-### 安装依赖
+### 首次安装（Windows）
+
+1. 安装 Node.js 20+ 与 Docker Desktop。
+2. 用 Docker 启动 PostgreSQL：
 
 ```bash
-npm install
+docker run --name marathon-pg ^
+  -e POSTGRES_USER=marathon ^
+  -e POSTGRES_PASSWORD=marathon ^
+  -e POSTGRES_DB=marathon_calendar ^
+  -p 5432:5432 -d postgres:16
 ```
 
-### 配置环境变量
-
-创建 `.env` 文件：
+3. 在项目根目录创建 `.env`：
 
 ```env
-DATABASE_URL=postgresql://user:password@localhost:5432/marathon_calendar
+DATABASE_URL=postgresql://marathon:marathon@localhost:5432/marathon_calendar
 REDIS_URL=redis://localhost:6379
-SESSION_SECRET=your-secret-key
+SESSION_SECRET=replace-with-a-random-string
 AI_API_KEY=your-ai-api-key
 ```
 
-### 初始化数据库
+4. 安装依赖并初始化数据库：
 
 ```bash
+npm install
 npm run db:push
 ```
 
-### 启动开发服务器
+5. 启动开发服务（前后端一体）：
 
 ```bash
-# 启动后端API服务
 npm run dev
-
-# 启动前端开发服务器（新终端）
-npm run dev:client
 ```
 
-访问 http://localhost:5000 查看应用。
+访问 http://localhost:5000 。
+
+### 首次安装（Linux）
+
+1. 安装 Node.js 20+、Docker Engine（或 Docker Desktop for Linux）。
+2. 启动 PostgreSQL 容器：
+
+```bash
+docker run --name marathon-pg \
+  -e POSTGRES_USER=marathon \
+  -e POSTGRES_PASSWORD=marathon \
+  -e POSTGRES_DB=marathon_calendar \
+  -p 5432:5432 -d postgres:16
+```
+
+3. 在项目根目录创建 `.env`：
+
+```env
+DATABASE_URL=postgresql://marathon:marathon@localhost:5432/marathon_calendar
+REDIS_URL=redis://localhost:6379
+SESSION_SECRET=replace-with-a-random-string
+AI_API_KEY=your-ai-api-key
+```
+
+4. 安装依赖并初始化数据库：
+
+```bash
+npm install
+npm run db:push
+```
+
+5. 启动开发服务：
+
+```bash
+npm run dev
+```
+
+访问 http://localhost:5000 。
+
+### Linux 生产环境启动
+
+```bash
+npm run build
+npm run start
+```
+
+### 仅前端调试（可选）
+
+```bash
+npm run dev:client
+```
 
 ## 📱 功能特性
 

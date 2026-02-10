@@ -1,5 +1,10 @@
 import { db } from "../server/db";
-import { marathons, marathonEditions } from "../shared/schema";
+import {
+  marathons,
+  marathonEditions,
+  marathonSources,
+  sources,
+} from "../shared/schema";
 
 // Sample marathon data to seed
 const marathonSeedData = [
@@ -260,6 +265,129 @@ const marathonSeedData = [
   },
 ];
 
+const sourceSeedData = [
+  // Layer 1: official websites (high priority)
+  {
+    name: "赛事官方网站（直采）",
+    baseUrl: null,
+    priority: 100,
+    notes: "第一层核心数据源；按赛事官网直采，数据权威性最高",
+  },
+  {
+    name: "北京马拉松官网",
+    baseUrl: "https://www.beijing-marathon.com",
+    priority: 95,
+    notes: "第一层核心数据源；官网示例来源于数据源调研报告",
+  },
+  {
+    name: "上海马拉松官网",
+    baseUrl: "https://www.shang-ma.com",
+    priority: 95,
+    notes: "第一层核心数据源；官网示例来源于数据源调研报告",
+  },
+  {
+    name: "厦门马拉松官网",
+    baseUrl: "https://www.xmim.org",
+    priority: 95,
+    notes: "第一层核心数据源；官网示例来源于数据源调研报告",
+  },
+  {
+    name: "广州马拉松官网",
+    baseUrl: "https://www.gzmarathon.com",
+    priority: 95,
+    notes: "第一层核心数据源；官网示例来源于数据源调研报告",
+  },
+  {
+    name: "杭州马拉松官网",
+    baseUrl: "https://www.hzim.org",
+    priority: 95,
+    notes: "第一层核心数据源；官网示例来源于数据源调研报告",
+  },
+  {
+    name: "成都马拉松官网",
+    baseUrl: "https://www.chengdumarathon.com",
+    priority: 95,
+    notes: "第一层核心数据源；官网示例来源于数据源调研报告",
+  },
+  {
+    name: "武汉马拉松官网",
+    baseUrl: "https://www.wuhanmarathon.com",
+    priority: 95,
+    notes: "第一层核心数据源；官网示例来源于数据源调研报告",
+  },
+  {
+    name: "深圳马拉松官网",
+    baseUrl: "https://www.szmarthon.com",
+    priority: 95,
+    notes: "第一层核心数据源；官网示例来源于数据源调研报告（原文URL）",
+  },
+
+  // Layer 1: major registration platforms
+  {
+    name: "最酷体育（Zuicool）",
+    baseUrl: "https://www.zuicool.com",
+    priority: 90,
+    notes: "第一层核心数据源；国内主流马拉松报名平台",
+  },
+  {
+    name: "爱燃烧（iranshao）",
+    baseUrl: "https://iranshao.com",
+    priority: 88,
+    notes: "第一层核心数据源；跑步社区+赛事报名",
+  },
+  {
+    name: "芝华安方体育",
+    baseUrl: "https://www.zhihuianfang.com",
+    priority: 86,
+    notes: "第一层核心数据源；专业赛事运营公司",
+  },
+
+  // Layer 2: supplementary platforms
+  {
+    name: "42旅（42travel）",
+    baseUrl: "https://www.42travel.com",
+    priority: 75,
+    notes: "第二层补充数据源；国内外赛事聚合",
+  },
+  {
+    name: "悦跑圈（JoyRun）",
+    baseUrl: "https://www.thejoyrun.com",
+    priority: 70,
+    notes: "第二层补充数据源；跑步APP+赛事信息",
+  },
+
+  // Layer 3: discovery channels
+  {
+    name: "Google 搜索",
+    baseUrl: "https://www.google.com/search",
+    priority: 40,
+    notes: "第三层发现数据源；用于发现新增/小型赛事",
+  },
+  {
+    name: "Bing 搜索",
+    baseUrl: "https://www.bing.com/search",
+    priority: 40,
+    notes: "第三层发现数据源；用于发现新增/小型赛事",
+  },
+  {
+    name: "社交媒体与跑步社区",
+    baseUrl: null,
+    priority: 30,
+    notes: "第三层发现数据源；公众号/微博/小红书/抖音等",
+  },
+] as const;
+
+const officialSourceByCity: Record<string, string> = {
+  北京: "北京马拉松官网",
+  上海: "上海马拉松官网",
+  厦门: "厦门马拉松官网",
+  广州: "广州马拉松官网",
+  杭州: "杭州马拉松官网",
+  成都: "成都马拉松官网",
+  武汉: "武汉马拉松官网",
+  深圳: "深圳马拉松官网",
+};
+
 async function seed() {
   if (!db) {
     console.error("Database not configured. Please set DATABASE_URL environment variable.");
@@ -269,6 +397,14 @@ async function seed() {
   console.log("Starting marathon data seed...");
 
   try {
+    const seededMarathons: Array<{
+      id: string;
+      name: string;
+      city: string | null;
+      country: string | null;
+      websiteUrl: string | null;
+    }> = [];
+
     for (const data of marathonSeedData) {
       const { editions, ...marathonData } = data;
 
@@ -289,6 +425,13 @@ async function seed() {
         .returning();
 
       console.log(`✓ Inserted/Updated marathon: ${marathon.name}`);
+      seededMarathons.push({
+        id: marathon.id,
+        name: marathon.name,
+        city: marathon.city,
+        country: marathon.country,
+        websiteUrl: marathon.websiteUrl,
+      });
 
       // Insert editions
       for (const edition of editions) {
@@ -305,8 +448,153 @@ async function seed() {
       }
     }
 
+    console.log("\nSeeding source catalog...");
+    const sourceMap = new Map<
+      string,
+      { id: string; baseUrl: string | null; name: string }
+    >();
+
+    for (const sourceData of sourceSeedData) {
+      const [sourceRecord] = await db
+        .insert(sources)
+        .values(sourceData)
+        .onConflictDoUpdate({
+          target: sources.name,
+          set: {
+            baseUrl: sourceData.baseUrl,
+            priority: sourceData.priority,
+            notes: sourceData.notes,
+          },
+        })
+        .returning();
+
+      sourceMap.set(sourceRecord.name, {
+        id: sourceRecord.id,
+        baseUrl: sourceRecord.baseUrl,
+        name: sourceRecord.name,
+      });
+
+      console.log(`✓ Upserted source: ${sourceRecord.name}`);
+    }
+
+    console.log("\nLinking marathons to sources...");
+
+    const upsertMarathonSource = async (
+      marathonId: string,
+      sourceName: string,
+      sourceUrl: string,
+      isPrimary: boolean,
+    ) => {
+      const sourceRecord = sourceMap.get(sourceName);
+      if (!sourceRecord) {
+        console.warn(`  ⚠ Source not found: ${sourceName}`);
+        return;
+      }
+
+      await db
+        .insert(marathonSources)
+        .values({
+          marathonId,
+          sourceId: sourceRecord.id,
+          sourceUrl,
+          isPrimary,
+          lastCheckedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: [marathonSources.marathonId, marathonSources.sourceId],
+          set: {
+            sourceUrl,
+            isPrimary,
+            lastCheckedAt: new Date(),
+          },
+        });
+    };
+
+    let sourceLinks = 0;
+
+    for (const marathon of seededMarathons) {
+      const plannedLinks: Array<{
+        sourceName: string;
+        sourceUrl: string;
+        isPrimary: boolean;
+      }> = [];
+      let hasPrimary = false;
+
+      const cityOfficialSource = marathon.city
+        ? officialSourceByCity[marathon.city]
+        : undefined;
+      const cityOfficialRecord = cityOfficialSource
+        ? sourceMap.get(cityOfficialSource)
+        : undefined;
+
+      if (cityOfficialRecord?.baseUrl) {
+        plannedLinks.push({
+          sourceName: cityOfficialRecord.name,
+          sourceUrl: cityOfficialRecord.baseUrl,
+          isPrimary: true,
+        });
+        hasPrimary = true;
+      } else if (marathon.websiteUrl) {
+        plannedLinks.push({
+          sourceName: "赛事官方网站（直采）",
+          sourceUrl: marathon.websiteUrl,
+          isPrimary: true,
+        });
+        hasPrimary = true;
+      }
+
+      if (marathon.country === "China") {
+        for (const platformName of [
+          "最酷体育（Zuicool）",
+          "爱燃烧（iranshao）",
+          "芝华安方体育",
+          "悦跑圈（JoyRun）",
+        ]) {
+          const platform = sourceMap.get(platformName);
+          if (!platform?.baseUrl) {
+            continue;
+          }
+          plannedLinks.push({
+            sourceName: platform.name,
+            sourceUrl: platform.baseUrl,
+            isPrimary: false,
+          });
+        }
+      } else {
+        for (const platformName of ["42旅（42travel）", "爱燃烧（iranshao）"]) {
+          const platform = sourceMap.get(platformName);
+          if (!platform?.baseUrl) {
+            continue;
+          }
+          plannedLinks.push({
+            sourceName: platform.name,
+            sourceUrl: platform.baseUrl,
+            isPrimary: false,
+          });
+        }
+      }
+
+      if (!hasPrimary && plannedLinks.length > 0) {
+        plannedLinks[0].isPrimary = true;
+      }
+
+      for (const link of plannedLinks) {
+        await upsertMarathonSource(
+          marathon.id,
+          link.sourceName,
+          link.sourceUrl,
+          link.isPrimary,
+        );
+        sourceLinks += 1;
+      }
+
+      console.log(`✓ Linked sources for marathon: ${marathon.name}`);
+    }
+
     console.log("\n✅ Seed completed successfully!");
     console.log(`Seeded ${marathonSeedData.length} marathons`);
+    console.log(`Seeded ${sourceSeedData.length} sources`);
+    console.log(`Upserted ${sourceLinks} marathon-source links`);
   } catch (error) {
     console.error("❌ Seed failed:", error);
     process.exit(1);
