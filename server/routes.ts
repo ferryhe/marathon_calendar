@@ -14,6 +14,8 @@ import {
   marathonReviews,
   marathons,
   marathonEditions,
+  reviewLikes,
+  reviewReports,
 } from "@shared/schema";
 import { db } from "./db";
 import { hashPassword, verifyPassword } from "./auth";
@@ -51,6 +53,11 @@ const marathonQuerySchema = z.object({
 const searchQuerySchema = z.object({
   q: z.string().trim().min(1).max(200),
 });
+
+const limitQuerySchema = z.object({
+  limit: z.coerce.number().min(1).max(50).default(10),
+});
+
 
 const registerPayloadSchema = insertUserSchema.extend({
   username: z.string().trim().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/),
@@ -456,6 +463,31 @@ export async function registerRoutes(
       requireAuth(req);
       const payload = bindWechatPayloadSchema.parse(req.body);
 
+      // Check if wechatOpenId or wechatUnionId is already bound to another user
+      const conditions = [];
+      if (payload.wechatOpenId) {
+        conditions.push(eq(users.wechatOpenId, payload.wechatOpenId));
+      }
+      if (payload.wechatUnionId) {
+        conditions.push(eq(users.wechatUnionId, payload.wechatUnionId));
+      }
+
+      if (conditions.length > 0) {
+        const [existingBinding] = await database
+          .select({ id: users.id })
+          .from(users)
+          .where(and(
+            or(...conditions),
+            sql`${users.id} != ${req.session.userId}`
+          ));
+
+        if (existingBinding) {
+          return res.status(409).json({ 
+            message: "This WeChat account is already bound to another user" 
+          });
+        }
+      }
+
       const [updated] = await database
         .update(users)
         .set({
@@ -807,7 +839,7 @@ export async function registerRoutes(
   app.get("/api/marathons/upcoming", async (req, res, next) => {
     try {
       const database = ensureDatabase();
-      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const { limit } = limitQuerySchema.parse(req.query);
       
       // Get marathons with editions that have future race dates
       const records = await database
@@ -1104,6 +1136,44 @@ export async function registerRoutes(
   app.post("/api/reviews/:id/like", async (req, res, next) => {
     try {
       const database = ensureDatabase();
+      
+      // Require authentication
+      if (!req.session.userId) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      // Check if review exists
+      const [review] = await database
+        .select()
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, req.params.id));
+
+      if (!review) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      // Check if user already liked this review
+      const [existingLike] = await database
+        .select()
+        .from(reviewLikes)
+        .where(
+          and(
+            eq(reviewLikes.reviewId, req.params.id),
+            eq(reviewLikes.userId, req.session.userId)
+          )
+        );
+
+      if (existingLike) {
+        return res.status(409).json({ message: "Already liked this review" });
+      }
+
+      // Add like record
+      await database.insert(reviewLikes).values({
+        reviewId: req.params.id,
+        userId: req.session.userId,
+      });
+
+      // Increment like count
       const [updated] = await database
         .update(marathonReviews)
         .set({
@@ -1111,10 +1181,6 @@ export async function registerRoutes(
         })
         .where(eq(marathonReviews.id, req.params.id))
         .returning();
-
-      if (!updated) {
-        return res.status(404).json({ message: "Review not found" });
-      }
 
       res.json(updated);
     } catch (error) {
@@ -1125,6 +1191,44 @@ export async function registerRoutes(
   app.post("/api/reviews/:id/report", async (req, res, next) => {
     try {
       const database = ensureDatabase();
+      
+      // Require authentication
+      if (!req.session.userId) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      // Check if review exists
+      const [review] = await database
+        .select()
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, req.params.id));
+
+      if (!review) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      // Check if user already reported this review
+      const [existingReport] = await database
+        .select()
+        .from(reviewReports)
+        .where(
+          and(
+            eq(reviewReports.reviewId, req.params.id),
+            eq(reviewReports.userId, req.session.userId)
+          )
+        );
+
+      if (existingReport) {
+        return res.status(409).json({ message: "Already reported this review" });
+      }
+
+      // Add report record
+      await database.insert(reviewReports).values({
+        reviewId: req.params.id,
+        userId: req.session.userId,
+      });
+
+      // Increment report count
       const [updated] = await database
         .update(marathonReviews)
         .set({
@@ -1132,10 +1236,6 @@ export async function registerRoutes(
         })
         .where(eq(marathonReviews.id, req.params.id))
         .returning();
-
-      if (!updated) {
-        return res.status(404).json({ message: "Review not found" });
-      }
 
       res.json(updated);
     } catch (error) {
