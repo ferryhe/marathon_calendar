@@ -42,7 +42,14 @@ export default function Home() {
       <header className="sticky top-0 z-50 glass border-b">
         <div className="container mx-auto px-4 py-4 space-y-4">
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold tracking-tight">马拉松日历</h1>
+            <h1 className="text-2xl font-bold tracking-tight inline-flex items-center gap-2">
+              <img
+                src="/favicon.svg"
+                alt="Marathon icon"
+                className="w-7 h-7 rounded-lg shadow-sm transition-transform duration-200 hover:scale-105"
+              />
+              马拉松日历
+            </h1>
             <Button 
               variant="ghost" 
               size="icon" 
