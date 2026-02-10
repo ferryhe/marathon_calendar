@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Calendar, ChevronRight, Loader2, MapPin } from "lucide-react";
+import { Calendar, ChevronRight, ExternalLink, Loader2, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useMarathons } from "@/hooks/useMarathons";
 import { EventDetails } from "./EventDetails";
@@ -198,6 +198,18 @@ export function MarathonTable({
                         </div>
 
                         <div className="flex items-center gap-3">
+                          {event.websiteUrl ? (
+                            <a
+                              href={event.websiteUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
+                              onClick={(e) => e.stopPropagation()}
+                              title="打开官网"
+                            >
+                              <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                            </a>
+                          ) : null}
                           <Badge
                             variant="default"
                             className={getStatusBadgeStyle(event.registrationStatus)}
@@ -246,13 +258,25 @@ export function MarathonTable({
                     </div>
 
                     <div className="flex items-center gap-3">
-                      <Badge
-                        variant="default"
-                        className={getStatusBadgeStyle(event.registrationStatus)}
+                    {event.websiteUrl ? (
+                      <a
+                        href={event.websiteUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
+                        onClick={(e) => e.stopPropagation()}
+                        title="打开官网"
                       >
-                        {event.registrationStatus}
-                      </Badge>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+                        <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                      </a>
+                    ) : null}
+                    <Badge
+                      variant="default"
+                      className={getStatusBadgeStyle(event.registrationStatus)}
+                    >
+                      {event.registrationStatus}
+                    </Badge>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                     </div>
                   </motion.div>
                 );
