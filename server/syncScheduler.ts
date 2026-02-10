@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { load } from "cheerio";
 import { and, asc, desc, eq, isNull, lte, or } from "drizzle-orm";
 import {
   marathons,
@@ -142,6 +143,108 @@ function extractEditionFromHtml(html: string) {
   return null;
 }
 
+type HtmlExtractRule = {
+  selector: string;
+  attr?: string;
+  regex?: string;
+  group?: number;
+};
+
+function readRule(
+  config: Record<string, unknown> | null,
+  key: string,
+): HtmlExtractRule | null {
+  if (!config || typeof config !== "object") return null;
+  const extract = (config as any).extract;
+  if (!extract || typeof extract !== "object") return null;
+  const rule = (extract as any)[key];
+  if (!rule || typeof rule !== "object") return null;
+  if (typeof (rule as any).selector !== "string") return null;
+  return {
+    selector: (rule as any).selector,
+    attr: typeof (rule as any).attr === "string" ? (rule as any).attr : undefined,
+    regex: typeof (rule as any).regex === "string" ? (rule as any).regex : undefined,
+    group: typeof (rule as any).group === "number" ? (rule as any).group : undefined,
+  };
+}
+
+function applyRule($: ReturnType<typeof load>, rule: HtmlExtractRule): string | null {
+  const el = $(rule.selector).first();
+  if (!el || el.length === 0) return null;
+  const rawValue =
+    !rule.attr || rule.attr === "text"
+      ? el.text()
+      : rule.attr === "html"
+        ? el.html() ?? ""
+        : el.attr(rule.attr) ?? "";
+  const trimmed = String(rawValue ?? "").trim();
+  if (!trimmed) return null;
+
+  if (!rule.regex) return trimmed;
+  try {
+    const re = new RegExp(rule.regex, "i");
+    const match = trimmed.match(re);
+    if (!match) return null;
+    const index = rule.group ?? 1;
+    return (match[index] ?? "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeDateString(value: string): string | null {
+  const direct = coerceDateString(value);
+  if (direct) return direct;
+  const m1 = value.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
+  if (m1) {
+    const yyyy = m1[1];
+    const mm = String(m1[2]).padStart(2, "0");
+    const dd = String(m1[3]).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  const m2 = value.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if (m2) {
+    const yyyy = m2[1];
+    const mm = String(m2[2]).padStart(2, "0");
+    const dd = String(m2[3]).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return null;
+}
+
+function resolveUrlMaybe(value: string, pageUrl: string): string {
+  try {
+    return new URL(value, pageUrl).toString();
+  } catch {
+    return value;
+  }
+}
+
+function extractEditionFromHtmlWithConfig(params: {
+  html: string;
+  pageUrl: string;
+  source: Source;
+}) {
+  const base = extractEditionFromHtml(params.html);
+  if (base?.raceDate) return base;
+
+  const config = (params.source.config ?? null) as Record<string, unknown> | null;
+  const raceDateRule = readRule(config, "raceDate");
+  const statusRule = readRule(config, "registrationStatus");
+  const regUrlRule = readRule(config, "registrationUrl");
+  if (!raceDateRule && !statusRule && !regUrlRule) return null;
+
+  const $ = load(params.html);
+  const rawRaceDate = raceDateRule ? applyRule($, raceDateRule) : null;
+  const raceDate = rawRaceDate ? normalizeDateString(rawRaceDate) : null;
+  const registrationStatus = statusRule ? applyRule($, statusRule) : null;
+  const rawRegUrl = regUrlRule ? applyRule($, regUrlRule) : null;
+  const registrationUrl = rawRegUrl ? resolveUrlMaybe(rawRegUrl, params.pageUrl) : null;
+
+  if (!raceDate && !registrationStatus && !registrationUrl) return null;
+  return { raceDate, registrationStatus, registrationUrl };
+}
+
 export async function syncMarathonSourceOnce(params: {
   source: Source;
   marathonId: string;
@@ -209,7 +312,11 @@ export async function syncMarathonSourceOnce(params: {
       if (isUnchanged) {
         unchangedCount = 1;
       } else if (params.source.strategy === "HTML") {
-        const extracted = extractEditionFromHtml(raw);
+        const extracted = extractEditionFromHtmlWithConfig({
+          html: raw,
+          pageUrl: params.sourceUrl,
+          source: params.source,
+        });
         if (extracted?.raceDate) {
           const year = Number(extracted.raceDate.slice(0, 4));
           await database
