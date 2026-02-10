@@ -5,6 +5,7 @@ import path from "path";
 import { mkdirSync } from "fs";
 import session from "express-session";
 import createMemoryStore from "memorystore";
+import { ZodError } from "zod";
 import { log } from "./logger";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -95,13 +96,27 @@ app.use((req, res, next) => {
   const stopScheduler = startSyncScheduler();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    console.error("Internal Server Error:", err);
+    const isZodError = err instanceof ZodError;
+    const status = isZodError ? 400 : err.status || err.statusCode || 500;
+    const message = isZodError ? "Validation error" : err.message || "Internal Server Error";
+    const printableError =
+      err instanceof Error
+        ? (err.stack ?? err.message)
+        : (() => {
+            try {
+              return JSON.stringify(err);
+            } catch {
+              return String(err);
+            }
+          })();
+    console.error("Internal Server Error:", printableError);
 
     if (res.headersSent) {
       return next(err);
+    }
+
+    if (isZodError) {
+      return res.status(status).json({ message, issues: err.issues });
     }
 
     return res.status(status).json({ message });
