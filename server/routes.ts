@@ -26,6 +26,7 @@ import { db } from "./db";
 import { hashPassword, verifyPassword } from "./auth";
 import { syncMarathonSourceOnce, syncNowOnce } from "./syncScheduler";
 import { braveWebSearch } from "./braveSearch";
+import { upsertEditionWithMerge } from "./editionMerge";
 
 const reviewPayloadSchema = insertReviewSchema.omit({
   marathonId: true,
@@ -1519,12 +1520,21 @@ export async function registerRoutes(
     try {
       const database = ensureDatabase();
       requireAdmin(req);
-      const limit = z
-        .preprocess(
-          (value) => (Array.isArray(value) ? value[0] : value),
-          z.coerce.number().int().min(1).max(200).default(50),
-        )
-        .parse(req.query.limit);
+      const params = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(200).default(50),
+          status: z.string().trim().min(1).max(50).optional(),
+          marathonId: z.string().uuid().optional(),
+          sourceId: z.string().uuid().optional(),
+        })
+        .parse(req.query);
+
+      const conditions = [];
+      if (params.status) conditions.push(eq(rawCrawlData.status, params.status));
+      if (params.marathonId) conditions.push(eq(rawCrawlData.marathonId, params.marathonId));
+      if (params.sourceId) conditions.push(eq(rawCrawlData.sourceId, params.sourceId));
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
       const records = await database
         .select({
           id: rawCrawlData.id,
@@ -1536,11 +1546,171 @@ export async function registerRoutes(
           contentHash: rawCrawlData.contentHash,
           status: rawCrawlData.status,
           fetchedAt: rawCrawlData.fetchedAt,
+          processedAt: rawCrawlData.processedAt,
+          metadata: rawCrawlData.metadata,
         })
         .from(rawCrawlData)
+        .where(whereClause)
         .orderBy(desc(rawCrawlData.fetchedAt))
-        .limit(limit);
+        .limit(params.limit);
       res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/raw-crawl/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const full = z
+        .preprocess((v) => (Array.isArray(v) ? v[0] : v), z.coerce.boolean().default(false))
+        .parse(req.query.full);
+
+      const [row] = await database
+        .select({
+          id: rawCrawlData.id,
+          marathonId: rawCrawlData.marathonId,
+          sourceId: rawCrawlData.sourceId,
+          sourceUrl: rawCrawlData.sourceUrl,
+          httpStatus: rawCrawlData.httpStatus,
+          contentType: rawCrawlData.contentType,
+          contentHash: rawCrawlData.contentHash,
+          status: rawCrawlData.status,
+          fetchedAt: rawCrawlData.fetchedAt,
+          processedAt: rawCrawlData.processedAt,
+          metadata: rawCrawlData.metadata,
+          rawContent: rawCrawlData.rawContent,
+        })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.id, id))
+        .limit(1);
+
+      if (!row) return res.status(404).json({ message: "Raw crawl not found" });
+
+      const rawContent = full ? row.rawContent : (row.rawContent ?? "").slice(0, 5000);
+      res.json({
+        data: {
+          ...row,
+          rawContent,
+          rawContentTruncated: !full && Boolean(row.rawContent && row.rawContent.length > 5000),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/raw-crawl/:id/ignore", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [updated] = await database
+        .update(rawCrawlData)
+        .set({
+          status: "ignored",
+          processedAt: new Date(),
+        })
+        .where(eq(rawCrawlData.id, id))
+        .returning({ id: rawCrawlData.id });
+
+      if (!updated) return res.status(404).json({ message: "Raw crawl not found" });
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/raw-crawl/:id/resolve", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const payload = z
+        .object({
+          year: z.coerce.number().int().min(2000).max(2100).optional(),
+          raceDate: z.string().trim().min(4).optional(),
+          registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
+          registrationUrl: z.string().trim().url().nullable().optional(),
+          note: z.string().trim().max(2000).optional(),
+        })
+        .refine(
+          (p) =>
+            Boolean(p.raceDate) ||
+            p.registrationStatus !== undefined ||
+            p.registrationUrl !== undefined,
+          { message: "At least one field is required" },
+        )
+        .parse(req.body);
+
+      const [raw] = await database
+        .select({
+          id: rawCrawlData.id,
+          marathonId: rawCrawlData.marathonId,
+          sourceId: rawCrawlData.sourceId,
+          sourceUrl: rawCrawlData.sourceUrl,
+          metadata: rawCrawlData.metadata,
+        })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.id, id))
+        .limit(1);
+
+      if (!raw) return res.status(404).json({ message: "Raw crawl not found" });
+
+      const year =
+        payload.raceDate && payload.raceDate.length >= 4
+          ? Number(payload.raceDate.slice(0, 4))
+          : payload.year;
+      if (!year || !Number.isFinite(year)) {
+        return res.status(400).json({ message: "year is required when raceDate is not provided" });
+      }
+
+      const merge = await upsertEditionWithMerge({
+        database,
+        marathonId: raw.marathonId,
+        year,
+        incoming: {
+          ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
+          ...(payload.registrationStatus !== undefined
+            ? { registrationStatus: payload.registrationStatus }
+            : {}),
+          ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
+        },
+        source: {
+          sourceId: raw.sourceId,
+          sourceType: "manual",
+          priority: 999,
+        },
+      });
+
+      await database
+        .update(rawCrawlData)
+        .set({
+          status: "processed",
+          processedAt: new Date(),
+          metadata: {
+            ...(typeof raw.metadata === "object" && raw.metadata ? raw.metadata : {}),
+            manualResolve: {
+              at: new Date().toISOString(),
+              note: payload.note ?? null,
+              incoming: {
+                year,
+                raceDate: payload.raceDate ?? null,
+                registrationStatus:
+                  payload.registrationStatus !== undefined ? payload.registrationStatus : null,
+                registrationUrl: payload.registrationUrl !== undefined ? payload.registrationUrl : null,
+              },
+              merge,
+            },
+          },
+        })
+        .where(eq(rawCrawlData.id, id));
+
+      res.json({ data: merge });
     } catch (error) {
       next(error);
     }
@@ -1596,6 +1766,81 @@ export async function registerRoutes(
         .limit(params.limit);
 
       res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathons", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(50).default(20),
+          search: z.string().trim().min(1).max(200).optional(),
+        })
+        .parse(req.query);
+
+      const whereClause = params.search
+        ? or(
+            like(marathons.name, `%${params.search}%`),
+            like(marathons.canonicalName, `%${params.search}%`),
+          )
+        : undefined;
+
+      const records = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(whereClause)
+        .orderBy(asc(marathons.name))
+        .limit(params.limit);
+
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/marathon-sources", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          marathonId: z.string().uuid(),
+          sourceId: z.string().uuid(),
+          sourceUrl: z.string().url(),
+          isPrimary: z.boolean().optional().default(false),
+        })
+        .parse(req.body);
+
+      const [row] = await database
+        .insert(marathonSources)
+        .values({
+          marathonId: payload.marathonId,
+          sourceId: payload.sourceId,
+          sourceUrl: payload.sourceUrl,
+          isPrimary: Boolean(payload.isPrimary),
+          lastCheckedAt: null,
+        })
+        .onConflictDoUpdate({
+          target: [marathonSources.marathonId, marathonSources.sourceId],
+          set: {
+            sourceUrl: payload.sourceUrl,
+            isPrimary: Boolean(payload.isPrimary),
+          },
+        })
+        .returning();
+
+      res.json({ data: row });
     } catch (error) {
       next(error);
     }
