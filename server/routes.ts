@@ -3,6 +3,7 @@ import { type Server } from "http";
 import path from "path";
 import { promises as fs } from "fs";
 import COS from "cos-nodejs-sdk-v5";
+import sharp from "sharp";
 import { eq, and, or, like, sql, desc, asc, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -126,28 +127,151 @@ function toAuthUser(user: {
   };
 }
 
-function parseAvatarDataUrl(dataUrl: string) {
+const AVATAR_ALLOWED_INPUT_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/gif",
+]);
+const AVATAR_INPUT_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_OUTPUT_MAX_BYTES = 512 * 1024;
+const AVATAR_MAX_DIMENSION = 4096;
+const AVATAR_MIN_DIMENSION = 64;
+const AVATAR_TARGET_MAX_DIMENSION = 512;
+const AVATAR_SECURITY_TEXT_PATTERNS = [
+  "<script",
+  "<?php",
+  "<html",
+  "<svg",
+  "javascript:",
+  "onerror=",
+  "onload=",
+  "<!doctype",
+  "eval(",
+];
+
+function badRequest(message: string): never {
+  const error = new Error(message);
+  (error as Error & { status?: number }).status = 400;
+  throw error;
+}
+
+function scanForSuspiciousContent(buffer: Buffer) {
+  // Fast heuristic scan for common script/polyglot payload markers.
+  const lowerText = buffer.toString("latin1").toLowerCase();
+  if (AVATAR_SECURITY_TEXT_PATTERNS.some((pattern) => lowerText.includes(pattern))) {
+    badRequest("Avatar image failed security scan");
+  }
+
+  const header = buffer.subarray(0, 8);
+  const hasExecutableHeader =
+    header.length >= 2 && header[0] === 0x4d && header[1] === 0x5a; // MZ
+  const hasZipHeader =
+    header.length >= 4 &&
+    header[0] === 0x50 &&
+    header[1] === 0x4b &&
+    header[2] === 0x03 &&
+    header[3] === 0x04;
+  const hasPdfHeader =
+    header.length >= 5 &&
+    header[0] === 0x25 &&
+    header[1] === 0x50 &&
+    header[2] === 0x44 &&
+    header[3] === 0x46 &&
+    header[4] === 0x2d;
+  if (hasExecutableHeader || hasZipHeader || hasPdfHeader) {
+    badRequest("Avatar image failed security scan");
+  }
+}
+
+function normalizeDetectedMime(format: string | undefined) {
+  if (!format) return null;
+  if (format === "jpeg") return "image/jpeg";
+  return `image/${format}`;
+}
+
+async function compressAvatarToWebp(buffer: Buffer) {
+  for (const quality of [82, 72, 62, 52]) {
+    const output = await sharp(buffer, {
+      failOn: "error",
+      limitInputPixels: AVATAR_MAX_DIMENSION * AVATAR_MAX_DIMENSION,
+    })
+      .rotate()
+      .resize({
+        width: AVATAR_TARGET_MAX_DIMENSION,
+        height: AVATAR_TARGET_MAX_DIMENSION,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({
+        quality,
+        effort: 5,
+      })
+      .toBuffer();
+
+    if (output.length <= AVATAR_OUTPUT_MAX_BYTES) {
+      return output;
+    }
+  }
+
+  badRequest("Avatar image exceeds output size limit");
+}
+
+async function parseAvatarDataUrl(dataUrl: string) {
   const match = dataUrl.match(
     /^data:(image\/(png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)$/i,
   );
   if (!match) {
-    const error = new Error("Invalid image data");
-    (error as Error & { status?: number }).status = 400;
-    throw error;
+    badRequest("Invalid image data");
   }
 
   const mime = match[1].toLowerCase();
-  const base64Body = match[3];
-  const buffer = Buffer.from(base64Body, "base64");
-
-  if (buffer.length > 2 * 1024 * 1024) {
-    const error = new Error("Avatar image exceeds 2MB");
-    (error as Error & { status?: number }).status = 400;
-    throw error;
+  if (!AVATAR_ALLOWED_INPUT_MIME.has(mime)) {
+    badRequest("Avatar MIME type is not allowed");
   }
 
-  const ext = mime === "image/jpeg" || mime === "image/jpg" ? "jpg" : mime.split("/")[1];
-  return { buffer, ext };
+  const base64Body = match[3];
+  const buffer = Buffer.from(base64Body, "base64");
+  if (!buffer.length) {
+    badRequest("Invalid image data");
+  }
+
+  if (buffer.length > AVATAR_INPUT_MAX_BYTES) {
+    badRequest("Avatar image exceeds 2MB");
+  }
+
+  scanForSuspiciousContent(buffer);
+
+  let metadata: sharp.Metadata;
+  try {
+    metadata = await sharp(buffer, {
+      failOn: "error",
+      limitInputPixels: AVATAR_MAX_DIMENSION * AVATAR_MAX_DIMENSION,
+    })
+      .metadata();
+  } catch {
+    badRequest("Invalid image binary");
+  }
+
+  const detectedMime = normalizeDetectedMime(metadata.format);
+  if (!detectedMime || !AVATAR_ALLOWED_INPUT_MIME.has(detectedMime)) {
+    badRequest("Avatar MIME type is not allowed");
+  }
+
+  const width = metadata.width ?? 0;
+  const height = metadata.height ?? 0;
+  if (
+    width < AVATAR_MIN_DIMENSION ||
+    height < AVATAR_MIN_DIMENSION ||
+    width > AVATAR_MAX_DIMENSION ||
+    height > AVATAR_MAX_DIMENSION
+  ) {
+    badRequest("Avatar dimensions are out of allowed range");
+  }
+
+  const compressedBuffer = await compressAvatarToWebp(buffer);
+  return { buffer: compressedBuffer, ext: "webp" as const };
 }
 
 const COS_BUCKET = process.env.COS_BUCKET ?? "marathon-calendar-1256398230";
@@ -401,7 +525,7 @@ export async function registerRoutes(
       const database = ensureDatabase();
       requireAuth(req);
       const payload = avatarUploadPayloadSchema.parse(req.body);
-      const { buffer, ext } = parseAvatarDataUrl(payload.dataUrl);
+      const { buffer, ext } = await parseAvatarDataUrl(payload.dataUrl);
       const { avatarUrl } = await uploadAvatarObject(req.session.userId!, ext, buffer);
 
       const [updated] = await database
