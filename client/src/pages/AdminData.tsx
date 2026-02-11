@@ -679,9 +679,42 @@ export default function AdminDataPage() {
           </TabsContent>
 
           <TabsContent value="runs" className="mt-4 space-y-6">
+            <Card className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+              <CardHeader>
+                <CardTitle>💡 同步记录说明</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div>
+                  <span className="font-medium">什么是同步运行？</span>
+                  同步运行是系统从各个数据源抓取赛事信息并更新数据库的过程。每次同步会遍历所有已绑定的赛事URL，获取最新数据。
+                </div>
+                <div>
+                  <span className="font-medium">运行状态说明：</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1 pl-2">
+                  <li><strong>running</strong>：正在执行同步任务</li>
+                  <li><strong>completed</strong>：同步成功完成</li>
+                  <li><strong>failed</strong>：同步过程中出现错误</li>
+                  <li><strong>partial</strong>：部分数据源同步失败</li>
+                </ul>
+                <div>
+                  <span className="font-medium">何时手动触发同步？</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1 pl-2">
+                  <li>新增赛事绑定后，想立即获取数据</li>
+                  <li>发现数据过期，需要强制更新</li>
+                  <li>测试数据源配置是否正确</li>
+                  <li>开发环境下验证爬虫规则</li>
+                </ul>
+                <div className="text-xs text-muted-foreground pt-2 border-t">
+                  <span className="font-medium">提示：</span>生产环境下，自动更新调度器会定期执行同步，通常无需手动触发。
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>同步</CardTitle>
+                <CardTitle>同步运行历史</CardTitle>
                 <Button
                   size="sm"
                   onClick={() => runAllMutation.mutate()}
@@ -692,7 +725,7 @@ export default function AdminDataPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="text-xs text-muted-foreground">
-                  最近 40 次运行（自动每 10s 刷新）
+                  最近 40 次同步记录（自动每 10s 刷新）
                 </div>
                 {runsQuery.error ? (
                   <p className="text-sm text-destructive">
@@ -1139,18 +1172,60 @@ export default function AdminDataPage() {
           </TabsContent>
 
           <TabsContent value="scheduler" className="mt-4 space-y-6">
+<Card className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+              <CardHeader>
+                <CardTitle>💡 自动更新说明</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div>
+                  <span className="font-medium">什么是自动更新？</span>
+                  自动更新是一个后台调度任务，会按照设定的时间间隔，自动执行同步操作，保持赛事数据的时效性。无需人工干预，系统会持续跟踪所有已绑定数据源的最新信息。
+                </div>
+                <div>
+                  <span className="font-medium">启用条件：</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1 pl-2">
+                  <li><strong>生产环境</strong>：当 <code>NODE_ENV=production</code> 时，自动更新默认开启</li>
+                  <li><strong>开发环境</strong>：默认关闭，可通过环境变量 <code>SYNC_SCHEDULER_ENABLED=true</code> 强制开启</li>
+                </ul>
+                <div>
+                  <span className="font-medium">最佳实践：</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1 pl-2">
+                  <li>开发环境下，先在"同步"标签页手动触发，验证数据源配置正确</li>
+                  <li>确认爬虫规则工作正常后，再开启自动更新</li>
+                  <li>生产环境推荐保持自动更新开启状态</li>
+                  <li>可通过调整 <code>SYNC_SCHEDULER_INTERVAL_MS</code> 控制更新频率（单位：毫秒）</li>
+                </ul>
+                <div className="text-xs text-muted-foreground pt-2 border-t">
+                  <span className="font-medium">提示：</span>自动更新由服务端进程内的调度器执行，无需额外的定时任务或 cron 配置。
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
-                <CardTitle>定期更新（Scheduler）</CardTitle>
+                <CardTitle>配置方法</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <div>
-                  定期更新由服务端进程内调度器执行：`SYNC_SCHEDULER_ENABLED=true` 可强制开启，
-                  `SYNC_SCHEDULER_INTERVAL_MS` 控制轮询间隔。
+                  <span className="font-medium">步骤 1：设置环境变量</span>
                 </div>
-                <div>
-                  生产环境（`NODE_ENV=production`）默认开启。开发环境建议先用 “同步” Tab 的
-                  “立即同步一次” 手动触发，确认配置与数据源规则无误后再开启定时。
+                <div className="ml-4 space-y-1">
+                  <div>• <code>SYNC_SCHEDULER_ENABLED=true</code> - 强制启用自动更新（生产环境默认启用）</div>
+                  <div>• <code>SYNC_SCHEDULER_INTERVAL_MS=3600000</code> - 设置更新间隔（示例：1小时）</div>
+                </div>
+                <div className="mt-3">
+                  <span className="font-medium">步骤 2：重启服务</span>
+                </div>
+                <div className="ml-4">
+                  修改环境变量后，需要重启服务器进程以使配置生效。
+                </div>
+                <div className="mt-3">
+                  <span className="font-medium">步骤 3：验证运行</span>
+                </div>
+                <div className="ml-4">
+                  前往"同步"标签页查看同步记录，确认调度器正常运行。
                 </div>
               </CardContent>
             </Card>
