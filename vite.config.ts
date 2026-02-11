@@ -5,10 +5,24 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { metaImagesPlugin } from "./vite-plugin-meta-images";
 
+const EXTENSION_STACK_PROTOCOLS = ["chrome-extension://", "moz-extension://"];
+
+function isExtensionRuntimeError(error: Error): boolean {
+  const message = error.message ?? "";
+  const stack = error.stack ?? "";
+  return (
+    EXTENSION_STACK_PROTOCOLS.some(
+      (protocol) => message.includes(protocol) || stack.includes(protocol),
+    ) || message.includes("Failed to connect to MetaMask")
+  );
+}
+
 export default defineConfig({
   plugins: [
     react(),
-    runtimeErrorOverlay(),
+    runtimeErrorOverlay({
+      filter: (error) => !isExtensionRuntimeError(error),
+    }),
     tailwindcss(),
     metaImagesPlugin(),
     ...(process.env.NODE_ENV !== "production" &&

@@ -1,7 +1,8 @@
 import crypto from "crypto";
 import { load } from "cheerio";
-import { and, asc, desc, eq, isNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import {
+  marathonEditions,
   marathons,
   marathonSources,
   marathonSyncRuns,
@@ -12,11 +13,12 @@ import {
 import { db, pool } from "./db";
 import { log } from "./logger";
 import { aiExtractFromHtml, isAiFallbackEnabled } from "./aiExtractor";
-import { upsertEditionWithMerge } from "./editionMerge";
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const RAW_CONTENT_MAX_CHARS = 2 * 1024 * 1024;
 const SCHEDULER_LOCK_KEY = 0x6d_63_5f_73; // "mc_s" for stable advisory lock
+const AUTO_UPDATE_DISABLED_NEXT_CHECK_AT_ISO = "2099-12-31T00:00:00.000Z";
+export const AUTO_UPDATE_DISABLED_NEXT_CHECK_AT = new Date(AUTO_UPDATE_DISABLED_NEXT_CHECK_AT_ISO);
 
 type EditionExtract = {
   raceDate: string | null;
@@ -29,6 +31,46 @@ const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+
+function toLocalYmd(value: Date) {
+  const yyyy = value.getFullYear();
+  const mm = String(value.getMonth() + 1).padStart(2, "0");
+  const dd = String(value.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function isPastRaceDate(raceDate: string, todayYmd: string) {
+  return raceDate < todayYmd;
+}
+
+export function isAutoUpdateDisabled(nextCheckAt?: Date | string | null) {
+  if (!nextCheckAt) return false;
+  const value = nextCheckAt instanceof Date ? nextCheckAt.getTime() : new Date(nextCheckAt).getTime();
+  if (!Number.isFinite(value)) return false;
+  return value >= AUTO_UPDATE_DISABLED_NEXT_CHECK_AT.getTime();
+}
+
+function computeNextCheckAtAfterSuccess(params: {
+  minIntervalSeconds: number;
+  autoUpdateEnabled: boolean;
+}) {
+  if (!params.autoUpdateEnabled) return AUTO_UPDATE_DISABLED_NEXT_CHECK_AT;
+  return params.minIntervalSeconds > 0
+    ? new Date(Date.now() + params.minIntervalSeconds * 1000)
+    : null;
+}
+
+function computeNextCheckAtAfterFailure(params: {
+  retryBackoffSeconds: number;
+  attempt: number;
+  minIntervalSeconds: number;
+  autoUpdateEnabled: boolean;
+}) {
+  if (!params.autoUpdateEnabled) return AUTO_UPDATE_DISABLED_NEXT_CHECK_AT;
+  const backoffSeconds = params.retryBackoffSeconds * params.attempt;
+  const nextDelaySeconds = Math.max(backoffSeconds, params.minIntervalSeconds);
+  return nextDelaySeconds > 0 ? new Date(Date.now() + nextDelaySeconds * 1000) : null;
+}
 
 function ensureDatabase() {
   if (!db || !pool) {
@@ -298,9 +340,52 @@ export async function syncMarathonSourceOnce(params: {
   marathonSourceId: string;
   sourceUrl: string;
   lastHash: string | null;
+  autoUpdateEnabled?: boolean;
 }) {
   const database = ensureDatabase();
   const startedAt = new Date();
+  const todayYmd = toLocalYmd(startedAt);
+  const autoUpdateEnabled = params.autoUpdateEnabled ?? true;
+
+  const [latestRaceDateRow] = await database
+    .select({
+      latestRaceDate: sql<string | null>`max(${marathonEditions.raceDate})`,
+    })
+    .from(marathonEditions)
+    .where(
+      and(
+        eq(marathonEditions.marathonId, params.marathonId),
+        isNotNull(marathonEditions.raceDate),
+      ),
+    );
+  const latestRaceDate = latestRaceDateRow?.latestRaceDate ?? null;
+  if (latestRaceDate && isPastRaceDate(latestRaceDate, todayYmd)) {
+    const message = `赛事已完赛（${latestRaceDate}），已停止自动更新`;
+    const [run] = await database
+      .insert(marathonSyncRuns)
+      .values({
+        marathonId: params.marathonId,
+        sourceId: params.source.id,
+        status: "skipped",
+        strategyUsed: params.source.strategy,
+        attempt: 1,
+        message,
+        startedAt,
+        finishedAt: new Date(),
+      })
+      .returning();
+
+    await database
+      .update(marathonSources)
+      .set({
+        lastCheckedAt: new Date(),
+        lastError: message,
+        nextCheckAt: autoUpdateEnabled ? null : AUTO_UPDATE_DISABLED_NEXT_CHECK_AT,
+      })
+      .where(eq(marathonSources.id, params.marathonSourceId));
+
+    return { runId: run.id, status: "skipped" as const };
+  }
 
   const [run] = await database
     .insert(marathonSyncRuns)
@@ -406,40 +491,13 @@ export async function syncMarathonSourceOnce(params: {
             : null;
 
         if (extracted && extractedRaceDate) {
-          const year = Number(extractedRaceDate.slice(0, 4));
-          const merge = await upsertEditionWithMerge({
-            database,
-            marathonId: params.marathonId,
-            year,
-            incoming: {
-              raceDate: extractedRaceDate,
-              registrationStatus: extracted.registrationStatus,
-              registrationUrl: extracted.registrationUrl,
-            },
-            source: {
-              sourceId: params.source.id,
-              sourceType: params.source.type,
-              priority: params.source.priority,
-            },
-            // Auto-publish only when the race date is extracted and there are no conflicts,
-            // and the source is an official site.
-            publish:
-              params.source.type === "official"
-                ? { status: "published" as const }
-                : { status: "draft" as const },
-          });
-
-          if (merge.action === "updated" || merge.action === "inserted") {
-            updatedCount = 1;
-          } else {
-            unchangedCount = 1;
-          }
+          updatedCount = 1;
 
           if (rawRowId) {
             await database
               .update(rawCrawlData)
               .set({
-                status: merge.conflicts.length > 0 ? "needs_review" : "processed",
+                status: "needs_review",
                 processedAt: new Date(),
                 metadata: {
                   fetchedAt: fetchedAtIso,
@@ -448,11 +506,7 @@ export async function syncMarathonSourceOnce(params: {
                     raceDate: extractedRaceDate,
                     registrationStatus: extracted.registrationStatus,
                     registrationUrl: extracted.registrationUrl,
-                  },
-                  merge: {
-                    action: merge.action,
-                    year: merge.year,
-                    conflicts: merge.conflicts,
+                    reviewMode: "manual_gate",
                   },
                   ai: usedAi
                     ? {
@@ -505,10 +559,10 @@ export async function syncMarathonSourceOnce(params: {
           lastHash: contentHash,
           lastHttpStatus: httpStatus,
           lastError: null,
-          nextCheckAt:
-            params.source.minIntervalSeconds && params.source.minIntervalSeconds > 0
-              ? new Date(Date.now() + params.source.minIntervalSeconds * 1000)
-              : null,
+          nextCheckAt: computeNextCheckAtAfterSuccess({
+            minIntervalSeconds: params.source.minIntervalSeconds ?? 0,
+            autoUpdateEnabled,
+          }),
         })
         .where(eq(marathonSources.id, params.marathonSourceId));
 
@@ -548,10 +602,12 @@ export async function syncMarathonSourceOnce(params: {
       }
 
       const backoffSeconds = (params.source.retryBackoffSeconds ?? 30) * attempt;
-      const minIntervalSeconds = params.source.minIntervalSeconds ?? 0;
-      const nextDelaySeconds = Math.max(backoffSeconds, minIntervalSeconds);
-      const nextCheckAt =
-        nextDelaySeconds > 0 ? new Date(Date.now() + nextDelaySeconds * 1000) : null;
+      const nextCheckAt = computeNextCheckAtAfterFailure({
+        retryBackoffSeconds: params.source.retryBackoffSeconds ?? 30,
+        attempt,
+        minIntervalSeconds: params.source.minIntervalSeconds ?? 0,
+        autoUpdateEnabled,
+      });
 
       await database
         .update(marathonSources)
@@ -595,6 +651,7 @@ export async function syncMarathonSourceOnce(params: {
 async function syncSources() {
   const database = ensureDatabase();
   const now = new Date();
+  const todayYmd = toLocalYmd(now);
 
   const activeSources = await database
     .select()
@@ -632,7 +689,45 @@ async function syncSources() {
       )
       .orderBy(desc(marathonSources.isPrimary), asc(marathonSources.createdAt));
 
+    const marathonIds = Array.from(new Set(links.map((x) => x.marathonId)));
+    const latestRaceDateByMarathonId = new Map<string, string>();
+    if (marathonIds.length > 0) {
+      const latestRaceDateRows = await database
+        .select({
+          marathonId: marathonEditions.marathonId,
+          latestRaceDate: sql<string | null>`max(${marathonEditions.raceDate})`,
+        })
+        .from(marathonEditions)
+        .where(
+          and(
+            inArray(marathonEditions.marathonId, marathonIds),
+            isNotNull(marathonEditions.raceDate),
+          ),
+        )
+        .groupBy(marathonEditions.marathonId);
+
+      for (const row of latestRaceDateRows) {
+        if (row.latestRaceDate) {
+          latestRaceDateByMarathonId.set(row.marathonId, row.latestRaceDate);
+        }
+      }
+    }
+
     for (const link of links) {
+      const autoUpdateEnabled = !isAutoUpdateDisabled(link.nextCheckAt);
+      const latestRaceDate = latestRaceDateByMarathonId.get(link.marathonId) ?? null;
+      if (latestRaceDate && isPastRaceDate(latestRaceDate, todayYmd)) {
+        await database
+          .update(marathonSources)
+          .set({
+            lastCheckedAt: now,
+            lastError: `赛事已完赛（${latestRaceDate}），已停止自动更新`,
+            nextCheckAt: autoUpdateEnabled ? null : AUTO_UPDATE_DISABLED_NEXT_CHECK_AT,
+          })
+          .where(eq(marathonSources.id, link.id));
+        continue;
+      }
+
       const urlToFetch = link.sourceUrl || link.websiteUrl;
       if (!urlToFetch) continue;
 
@@ -642,6 +737,7 @@ async function syncSources() {
         marathonSourceId: link.id,
         sourceUrl: urlToFetch,
         lastHash: link.lastHash,
+        autoUpdateEnabled,
       });
     }
   }

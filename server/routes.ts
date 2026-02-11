@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+﻿import type { Express, Request } from "express";
 import { type Server } from "http";
 import path from "path";
 import { promises as fs } from "fs";
@@ -22,9 +22,15 @@ import {
   marathons,
   marathonEditions,
 } from "@shared/schema";
+import { isChinaCountry, canonicalCountryValue } from "@shared/utils";
 import { db } from "./db";
 import { hashPassword, verifyPassword } from "./auth";
-import { syncMarathonSourceOnce, syncNowOnce } from "./syncScheduler";
+import {
+  AUTO_UPDATE_DISABLED_NEXT_CHECK_AT,
+  isAutoUpdateDisabled,
+  syncMarathonSourceOnce,
+  syncNowOnce,
+} from "./syncScheduler";
 import { braveWebSearch } from "./braveSearch";
 import { upsertEditionWithMerge } from "./editionMerge";
 import { aiGenerateExtractTemplateFromHtml, previewExtractTemplate } from "./aiRuleTemplate";
@@ -853,7 +859,12 @@ export async function registerRoutes(
       }
       
       if (params.country) {
-        conditions.push(eq(marathons.country, params.country));
+        // All China aliases are normalized to "China" in the database
+        if (isChinaCountry(params.country)) {
+          conditions.push(eq(marathons.country, "China"));
+        } else {
+          conditions.push(eq(marathons.country, params.country));
+        }
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1169,11 +1180,15 @@ export async function registerRoutes(
   app.post("/api/marathons", async (req, res, next) => {
     try {
       const database = ensureDatabase();
-      const payload = insertMarathonSchema.parse({
+      const parsed = insertMarathonSchema.parse({
         ...req.body,
         canonicalName:
           req.body.canonicalName ?? canonicalizeName(req.body.name ?? ""),
       });
+      const payload = {
+        ...parsed,
+        country: canonicalCountryValue(parsed.country),
+      };
 
       const [record] = await database
         .insert(marathons)
@@ -1241,7 +1256,7 @@ export async function registerRoutes(
         author?.username ??
         req.session.displayName ??
         req.session.username ??
-        "匿名用户";
+        "鍖垮悕鐢ㄦ埛";
       const [record] = await database
         .insert(marathonReviews)
         .values({
@@ -1533,6 +1548,84 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/admin/sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const sourceId = z.string().uuid().parse(req.params.id);
+      const force = z
+        .preprocess((value) => {
+          if (value === undefined) return false;
+          if (value === "true" || value === "1") return true;
+          if (value === "false" || value === "0") return false;
+          return value;
+        }, z.boolean())
+        .parse(req.query.force);
+
+      const [sourceRecord] = await database
+        .select({ id: sources.id, name: sources.name })
+        .from(sources)
+        .where(eq(sources.id, sourceId))
+        .limit(1);
+      if (!sourceRecord) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+
+      const [linkedMarathonSources] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(marathonSources)
+        .where(eq(marathonSources.sourceId, sourceId));
+      const [linkedSyncRuns] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(marathonSyncRuns)
+        .where(eq(marathonSyncRuns.sourceId, sourceId));
+      const [linkedRawCrawls] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.sourceId, sourceId));
+
+      const linkedCount =
+        (linkedMarathonSources?.count ?? 0) +
+        (linkedSyncRuns?.count ?? 0) +
+        (linkedRawCrawls?.count ?? 0);
+
+      if (linkedCount > 0) {
+        if (!force) {
+          return res.status(409).json({
+            message:
+              "Source is still referenced and cannot be deleted directly. Retry with force=true to remove related bindings and historical crawl/sync records.",
+            details: {
+              marathonSources: linkedMarathonSources?.count ?? 0,
+              syncRuns: linkedSyncRuns?.count ?? 0,
+              rawCrawl: linkedRawCrawls?.count ?? 0,
+            },
+          });
+        }
+
+        await database.transaction(async (tx) => {
+          await tx.delete(marathonSources).where(eq(marathonSources.sourceId, sourceId));
+          await tx.delete(marathonSyncRuns).where(eq(marathonSyncRuns.sourceId, sourceId));
+          await tx.delete(rawCrawlData).where(eq(rawCrawlData.sourceId, sourceId));
+          await tx.delete(sources).where(eq(sources.id, sourceId));
+        });
+        return res.json({
+          success: true,
+          deleted: {
+            sourceId,
+            marathonSources: linkedMarathonSources?.count ?? 0,
+            syncRuns: linkedSyncRuns?.count ?? 0,
+            rawCrawl: linkedRawCrawls?.count ?? 0,
+          },
+        });
+      }
+
+      await database.delete(sources).where(eq(sources.id, sourceId));
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/admin/sync/run-all", async (req, res, next) => {
     try {
       requireAdmin(req);
@@ -1560,6 +1653,7 @@ export async function registerRoutes(
           sourceId: marathonSources.sourceId,
           sourceUrl: marathonSources.sourceUrl,
           lastHash: marathonSources.lastHash,
+          nextCheckAt: marathonSources.nextCheckAt,
           source: sources,
         })
         .from(marathonSources)
@@ -1576,6 +1670,7 @@ export async function registerRoutes(
         marathonSourceId: record.msId,
         sourceUrl: record.sourceUrl,
         lastHash: record.lastHash,
+        autoUpdateEnabled: !isAutoUpdateDisabled(record.nextCheckAt),
       });
 
       res.json({ data: result });
@@ -1678,12 +1773,43 @@ export async function registerRoutes(
 
       if (!row) return res.status(404).json({ message: "Raw crawl not found" });
 
+      const [marathonInfo] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(eq(marathons.id, row.marathonId))
+        .limit(1);
+
+      const [latestEdition] = await database
+        .select({
+          id: marathonEditions.id,
+          year: marathonEditions.year,
+          raceDate: marathonEditions.raceDate,
+          registrationStatus: marathonEditions.registrationStatus,
+          registrationUrl: marathonEditions.registrationUrl,
+          publishStatus: marathonEditions.publishStatus,
+          updatedAt: marathonEditions.updatedAt,
+        })
+        .from(marathonEditions)
+        .where(eq(marathonEditions.marathonId, row.marathonId))
+        .orderBy(desc(marathonEditions.year))
+        .limit(1);
+
       const rawContent = full ? row.rawContent : (row.rawContent ?? "").slice(0, 5000);
       res.json({
         data: {
           ...row,
           rawContent,
           rawContentTruncated: !full && Boolean(row.rawContent && row.rawContent.length > 5000),
+          marathon: marathonInfo ?? null,
+          latestEdition: latestEdition ?? null,
         },
       });
     } catch (error) {
@@ -1888,12 +2014,24 @@ export async function registerRoutes(
           registrationUrl: z.string().trim().url().nullable().optional(),
           note: z.string().trim().max(2000).optional(),
           publish: z.coerce.boolean().optional(),
+          name: z.string().trim().min(1).max(200).optional(),
+          canonicalName: z.string().trim().min(1).max(200).optional(),
+          city: z.string().trim().min(1).max(100).nullable().optional(),
+          country: z.string().trim().min(1).max(100).nullable().optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          websiteUrl: z.string().trim().url().nullable().optional(),
         })
         .refine(
           (p) =>
             Boolean(p.raceDate) ||
             p.registrationStatus !== undefined ||
-            p.registrationUrl !== undefined,
+            p.registrationUrl !== undefined ||
+            p.name !== undefined ||
+            p.canonicalName !== undefined ||
+            p.city !== undefined ||
+            p.country !== undefined ||
+            p.description !== undefined ||
+            p.websiteUrl !== undefined,
           { message: "At least one field is required" },
         )
         .parse(req.body);
@@ -1912,32 +2050,101 @@ export async function registerRoutes(
 
       if (!raw) return res.status(404).json({ message: "Raw crawl not found" });
 
+      const hasEditionInput =
+        Boolean(payload.raceDate) ||
+        payload.registrationStatus !== undefined ||
+        payload.registrationUrl !== undefined;
+
       const year =
         payload.raceDate && payload.raceDate.length >= 4
           ? Number(payload.raceDate.slice(0, 4))
           : payload.year;
-      if (!year || !Number.isFinite(year)) {
+      if (hasEditionInput && (!year || !Number.isFinite(year))) {
         return res.status(400).json({ message: "year is required when raceDate is not provided" });
       }
 
-      const merge = await upsertEditionWithMerge({
-        database,
-        marathonId: raw.marathonId,
-        year,
-        incoming: {
-          ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
-          ...(payload.registrationStatus !== undefined
-            ? { registrationStatus: payload.registrationStatus }
-            : {}),
-          ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
-        },
-        source: {
-          sourceId: raw.sourceId,
-          sourceType: "manual",
-          priority: 999,
-        },
-        publish: payload.publish ? { status: "published" } : undefined,
-      });
+      let merge: Awaited<ReturnType<typeof upsertEditionWithMerge>> | null = null;
+      if (hasEditionInput) {
+        merge = await upsertEditionWithMerge({
+          database,
+          marathonId: raw.marathonId,
+          year: year!,
+          incoming: {
+            ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
+            ...(payload.registrationStatus !== undefined
+              ? { registrationStatus: payload.registrationStatus }
+              : {}),
+            ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
+          },
+          source: {
+            sourceId: raw.sourceId,
+            sourceType: "manual",
+            priority: 999,
+          },
+          publish: payload.publish !== undefined ? (payload.publish ? { status: "published" } : { status: "draft" }) : undefined,
+        });
+      }
+
+      const hasMarathonBaseInput =
+        payload.name !== undefined ||
+        payload.canonicalName !== undefined ||
+        payload.city !== undefined ||
+        payload.country !== undefined ||
+        payload.description !== undefined ||
+        payload.websiteUrl !== undefined;
+      let marathonUpdate: Record<string, unknown> | null = null;
+      if (hasMarathonBaseInput) {
+        const [marathonRecord] = await database
+          .select({
+            id: marathons.id,
+            name: marathons.name,
+            canonicalName: marathons.canonicalName,
+          })
+          .from(marathons)
+          .where(eq(marathons.id, raw.marathonId))
+          .limit(1);
+        if (!marathonRecord) {
+          return res.status(404).json({ message: "Marathon not found" });
+        }
+
+        if (payload.name && payload.name !== marathonRecord.name) {
+          const [nameConflict] = await database
+            .select({ id: marathons.id })
+            .from(marathons)
+            .where(and(eq(marathons.name, payload.name), ne(marathons.id, raw.marathonId)))
+            .limit(1);
+          if (nameConflict) {
+            return res.status(409).json({ message: "Marathon name already exists" });
+          }
+        }
+        if (payload.canonicalName && payload.canonicalName !== marathonRecord.canonicalName) {
+          const [canonicalConflict] = await database
+            .select({ id: marathons.id })
+            .from(marathons)
+            .where(
+              and(
+                eq(marathons.canonicalName, payload.canonicalName),
+                ne(marathons.id, raw.marathonId),
+              ),
+            )
+            .limit(1);
+          if (canonicalConflict) {
+            return res.status(409).json({ message: "Canonical name already exists" });
+          }
+        }
+
+        marathonUpdate = {
+          updatedAt: new Date(),
+          ...(payload.name !== undefined ? { name: payload.name } : {}),
+          ...(payload.canonicalName !== undefined ? { canonicalName: payload.canonicalName } : {}),
+          ...(payload.city !== undefined ? { city: payload.city ?? null } : {}),
+          ...(payload.country !== undefined ? { country: canonicalCountryValue(payload.country) } : {}),
+          ...(payload.description !== undefined ? { description: payload.description ?? null } : {}),
+          ...(payload.websiteUrl !== undefined ? { websiteUrl: payload.websiteUrl ?? null } : {}),
+        };
+
+        await database.update(marathons).set(marathonUpdate).where(eq(marathons.id, raw.marathonId));
+      }
 
       await database
         .update(rawCrawlData)
@@ -1950,11 +2157,19 @@ export async function registerRoutes(
               at: new Date().toISOString(),
               note: payload.note ?? null,
               incoming: {
-                year,
+                year: year ?? null,
                 raceDate: payload.raceDate ?? null,
                 registrationStatus:
                   payload.registrationStatus !== undefined ? payload.registrationStatus : null,
                 registrationUrl: payload.registrationUrl !== undefined ? payload.registrationUrl : null,
+                marathon: {
+                  name: payload.name ?? null,
+                  canonicalName: payload.canonicalName ?? null,
+                  city: payload.city ?? null,
+                  country: payload.country ?? null,
+                  description: payload.description ?? null,
+                  websiteUrl: payload.websiteUrl ?? null,
+                },
               },
               merge,
             },
@@ -1962,7 +2177,7 @@ export async function registerRoutes(
         })
         .where(eq(rawCrawlData.id, id));
 
-      res.json({ data: merge });
+      res.json({ data: { merge, marathonUpdated: Boolean(hasMarathonBaseInput) } });
     } catch (error) {
       next(error);
     }
@@ -1975,12 +2190,16 @@ export async function registerRoutes(
       const params = z
         .object({
           limit: z.coerce.number().int().min(1).max(200).default(50),
+          marathonId: z.string().uuid().optional(),
           sourceId: z.string().uuid().optional(),
           search: z.string().trim().min(1).max(200).optional(),
         })
         .parse(req.query);
 
       const conditions = [];
+      if (params.marathonId) {
+        conditions.push(eq(marathonSources.marathonId, params.marathonId));
+      }
       if (params.sourceId) {
         conditions.push(eq(marathonSources.sourceId, params.sourceId));
       }
@@ -2002,6 +2221,7 @@ export async function registerRoutes(
           sourceId: marathonSources.sourceId,
           sourceUrl: marathonSources.sourceUrl,
           isPrimary: marathonSources.isPrimary,
+          sourceType: sources.type,
           lastCheckedAt: marathonSources.lastCheckedAt,
           nextCheckAt: marathonSources.nextCheckAt,
           lastHttpStatus: marathonSources.lastHttpStatus,
@@ -2017,7 +2237,12 @@ export async function registerRoutes(
         .orderBy(desc(marathonSources.isPrimary), desc(marathonSources.lastCheckedAt))
         .limit(params.limit);
 
-      res.json({ data: records });
+      res.json({
+        data: records.map((item) => ({
+          ...item,
+          autoUpdateEnabled: !isAutoUpdateDisabled(item.nextCheckAt),
+        })),
+      });
     } catch (error) {
       next(error);
     }
@@ -2083,6 +2308,7 @@ export async function registerRoutes(
           canonicalName: marathons.canonicalName,
           city: marathons.city,
           country: marathons.country,
+          description: marathons.description,
           websiteUrl: marathons.websiteUrl,
         })
         .from(marathons)
@@ -2091,6 +2317,331 @@ export async function registerRoutes(
         .limit(params.limit);
 
       res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/marathons", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          name: z.string().trim().min(1).max(200),
+          canonicalName: z.string().trim().min(1).max(200).optional(),
+          city: z.string().trim().min(1).max(100).nullable().optional(),
+          country: z.string().trim().min(1).max(100).nullable().optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          websiteUrl: z.string().url().nullable().optional(),
+        })
+        .parse(req.body);
+      const normalizedCountry = canonicalCountryValue(payload.country);
+
+      const [existingByName] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(eq(marathons.name, payload.name))
+        .limit(1);
+      if (existingByName) {
+        return res.json({ data: existingByName, created: false });
+      }
+
+      const canonicalSeed = payload.canonicalName ?? payload.name;
+      const canonicalBase = (canonicalizeName(canonicalSeed) || "marathon")
+        .replace(/[^a-z0-9\u4e00-\u9fff-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+      let canonicalCandidate = canonicalBase || `marathon-${Date.now().toString(36)}`;
+      let suffix = 2;
+      while (true) {
+        const [exists] = await database
+          .select({ id: marathons.id })
+          .from(marathons)
+          .where(eq(marathons.canonicalName, canonicalCandidate))
+          .limit(1);
+        if (!exists) break;
+        canonicalCandidate = `${canonicalBase || "marathon"}-${suffix}`;
+        suffix += 1;
+      }
+
+      const [created] = await database
+        .insert(marathons)
+        .values({
+          name: payload.name,
+          canonicalName: canonicalCandidate,
+          city: payload.city ?? null,
+          country: normalizedCountry,
+          description: payload.description ?? null,
+          websiteUrl: payload.websiteUrl ?? null,
+          updatedAt: new Date(),
+        })
+        .returning({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        });
+
+      res.status(201).json({ data: created, created: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathons/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          name: z.string().trim().min(1).max(200).optional(),
+          canonicalName: z.string().trim().min(1).max(200).optional(),
+          city: z.string().trim().min(1).max(100).nullable().optional(),
+          country: z.string().trim().min(1).max(100).nullable().optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          websiteUrl: z.string().url().nullable().optional(),
+        })
+        .parse(req.body);
+      const normalizedCountry =
+        payload.country !== undefined ? canonicalCountryValue(payload.country) : undefined;
+
+      const hasAnyField = Object.keys(payload).length > 0;
+      if (!hasAnyField) {
+        return res.status(400).json({ message: "At least one field is required" });
+      }
+
+      const [existing] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+        })
+        .from(marathons)
+        .where(eq(marathons.id, id))
+        .limit(1);
+
+      if (!existing) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      if (payload.name && payload.name !== existing.name) {
+        const [nameConflict] = await database
+          .select({ id: marathons.id })
+          .from(marathons)
+          .where(and(eq(marathons.name, payload.name), ne(marathons.id, id)))
+          .limit(1);
+        if (nameConflict) {
+          return res.status(409).json({ message: "Marathon name already exists" });
+        }
+      }
+
+      if (payload.canonicalName && payload.canonicalName !== existing.canonicalName) {
+        const [canonicalConflict] = await database
+          .select({ id: marathons.id })
+          .from(marathons)
+          .where(and(eq(marathons.canonicalName, payload.canonicalName), ne(marathons.id, id)))
+          .limit(1);
+        if (canonicalConflict) {
+          return res.status(409).json({ message: "Canonical name already exists" });
+        }
+      }
+
+      const updateData: Record<string, unknown> = {
+        updatedAt: new Date(),
+      };
+      if (payload.name !== undefined) updateData.name = payload.name;
+      if (payload.canonicalName !== undefined) updateData.canonicalName = payload.canonicalName;
+      if (payload.city !== undefined) updateData.city = payload.city ?? null;
+      if (payload.country !== undefined) updateData.country = normalizedCountry ?? null;
+      if (payload.description !== undefined) updateData.description = payload.description ?? null;
+      if (payload.websiteUrl !== undefined) updateData.websiteUrl = payload.websiteUrl ?? null;
+
+      const [updated] = await database
+        .update(marathons)
+        .set(updateData)
+        .where(eq(marathons.id, id))
+        .returning({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        });
+
+      if (!updated) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      res.json({ data: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathons/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [record] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(eq(marathons.id, id))
+        .limit(1);
+
+      if (!record) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      res.json({ data: record });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathons/:id/edition", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const marathonId = z.string().uuid().parse(req.params.id);
+      const params = z
+        .object({
+          year: z.coerce.number().int().min(2000).max(2100).optional(),
+        })
+        .parse(req.query);
+
+      const [latest] = await database
+        .select({
+          year: marathonEditions.year,
+        })
+        .from(marathonEditions)
+        .where(eq(marathonEditions.marathonId, marathonId))
+        .orderBy(desc(marathonEditions.year))
+        .limit(1);
+
+      const fallbackYear = new Date().getFullYear();
+      const targetYear = params.year ?? latest?.year ?? fallbackYear;
+
+      const [edition] = await database
+        .select({
+          id: marathonEditions.id,
+          marathonId: marathonEditions.marathonId,
+          year: marathonEditions.year,
+          raceDate: marathonEditions.raceDate,
+          registrationStatus: marathonEditions.registrationStatus,
+          registrationUrl: marathonEditions.registrationUrl,
+          publishStatus: marathonEditions.publishStatus,
+          publishedAt: marathonEditions.publishedAt,
+          updatedAt: marathonEditions.updatedAt,
+        })
+        .from(marathonEditions)
+        .where(
+          and(
+            eq(marathonEditions.marathonId, marathonId),
+            eq(marathonEditions.year, targetYear),
+          ),
+        )
+        .limit(1);
+
+      res.json({
+        data: {
+          marathonId,
+          targetYear,
+          edition: edition ?? null,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathons/:id/edition", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const marathonId = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          year: z.coerce.number().int().min(2000).max(2100).optional(),
+          raceDate: z.string().trim().min(4).optional(),
+          registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
+          registrationUrl: z.string().trim().url().nullable().optional(),
+          publish: z.coerce.boolean().optional(),
+        })
+        .refine(
+          (p) =>
+            Boolean(p.raceDate) ||
+            p.registrationStatus !== undefined ||
+            p.registrationUrl !== undefined,
+          { message: "At least one field is required" },
+        )
+        .parse(req.body);
+
+      const year =
+        payload.raceDate && payload.raceDate.length >= 4
+          ? Number(payload.raceDate.slice(0, 4))
+          : payload.year;
+      if (!year || !Number.isFinite(year)) {
+        return res.status(400).json({ message: "year is required when raceDate is not provided" });
+      }
+
+      const [binding] = await database
+        .select({
+          sourceId: marathonSources.sourceId,
+        })
+        .from(marathonSources)
+        .where(eq(marathonSources.marathonId, marathonId))
+        .orderBy(desc(marathonSources.isPrimary), asc(marathonSources.createdAt))
+        .limit(1);
+
+      if (!binding) {
+        return res.status(400).json({ message: "Please bind at least one source before editing edition fields" });
+      }
+
+      const merge = await upsertEditionWithMerge({
+        database,
+        marathonId,
+        year,
+        incoming: {
+          ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
+          ...(payload.registrationStatus !== undefined
+            ? { registrationStatus: payload.registrationStatus }
+            : {}),
+          ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
+        },
+        source: {
+          sourceId: binding.sourceId,
+          sourceType: "manual",
+          priority: 999,
+        },
+        publish: payload.publish !== undefined ? (payload.publish ? { status: "published" } : { status: "draft" }) : undefined,
+      });
+
+      res.json({ data: merge });
     } catch (error) {
       next(error);
     }
@@ -2109,25 +2660,163 @@ export async function registerRoutes(
         })
         .parse(req.body);
 
+      const [sourceRecord] = await database
+        .select({ id: sources.id, type: sources.type })
+        .from(sources)
+        .where(eq(sources.id, payload.sourceId))
+        .limit(1);
+      if (!sourceRecord) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+
+      const isThirdPartySource = sourceRecord.type !== "official";
+      const nextIsPrimary = isThirdPartySource ? false : Boolean(payload.isPrimary);
+
+      if (nextIsPrimary) {
+        await database
+          .update(marathonSources)
+          .set({ isPrimary: false })
+          .where(eq(marathonSources.marathonId, payload.marathonId));
+      }
+
       const [row] = await database
         .insert(marathonSources)
         .values({
           marathonId: payload.marathonId,
           sourceId: payload.sourceId,
           sourceUrl: payload.sourceUrl,
-          isPrimary: Boolean(payload.isPrimary),
+          isPrimary: nextIsPrimary,
           lastCheckedAt: null,
         })
         .onConflictDoUpdate({
           target: [marathonSources.marathonId, marathonSources.sourceId],
           set: {
             sourceUrl: payload.sourceUrl,
-            isPrimary: Boolean(payload.isPrimary),
+            isPrimary: nextIsPrimary,
           },
         })
         .returning();
 
       res.json({ data: row });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathon-sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          sourceUrl: z.string().url().optional(),
+          isPrimary: z.boolean().optional(),
+        })
+        .parse(req.body);
+
+      const [existing] = await database
+        .select({
+          id: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+          sourceType: sources.type,
+        })
+        .from(marathonSources)
+        .innerJoin(sources, eq(sources.id, marathonSources.sourceId))
+        .where(eq(marathonSources.id, id))
+        .limit(1);
+      if (!existing) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+
+      const sourceIsThirdParty = existing.sourceType !== "official";
+      const nextIsPrimary = sourceIsThirdParty
+        ? false
+        : payload.isPrimary ?? existing.isPrimary;
+      const nextSourceUrl = payload.sourceUrl ?? existing.sourceUrl;
+
+      if (nextIsPrimary) {
+        await database
+          .update(marathonSources)
+          .set({ isPrimary: false })
+          .where(
+            and(
+              eq(marathonSources.marathonId, existing.marathonId),
+              ne(marathonSources.id, existing.id),
+            ),
+          );
+      }
+
+      const [updated] = await database
+        .update(marathonSources)
+        .set({
+          sourceUrl: nextSourceUrl,
+          isPrimary: Boolean(nextIsPrimary),
+        })
+        .where(eq(marathonSources.id, id))
+        .returning();
+
+      res.json({ data: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathon-sources/:id/auto-update", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          enabled: z.coerce.boolean(),
+        })
+        .parse(req.body);
+
+      const [updated] = await database
+        .update(marathonSources)
+        .set({
+          nextCheckAt: payload.enabled ? null : AUTO_UPDATE_DISABLED_NEXT_CHECK_AT,
+        })
+        .where(eq(marathonSources.id, id))
+        .returning({
+          id: marathonSources.id,
+          nextCheckAt: marathonSources.nextCheckAt,
+        });
+
+      if (!updated) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+
+      res.json({
+        data: {
+          ...updated,
+          autoUpdateEnabled: !isAutoUpdateDisabled(updated.nextCheckAt),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/admin/marathon-sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [deleted] = await database
+        .delete(marathonSources)
+        .where(eq(marathonSources.id, id))
+        .returning({ id: marathonSources.id });
+
+      if (!deleted) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+      res.json({ success: true });
     } catch (error) {
       next(error);
     }

@@ -72,7 +72,10 @@ export function MarathonTable({
 
     const { dated, tbd } = data.data
       .filter((marathon) => {
-        if (region === "Overseas" && marathon.country === "China") {
+        if (region === "China" && !isChinaCountry(marathon.country)) {
+          return false;
+        }
+        if (region === "Overseas" && isChinaCountry(marathon.country)) {
           return false;
         }
         if (showMineOnly && !favoriteMarathonIds.has(marathon.id)) {
