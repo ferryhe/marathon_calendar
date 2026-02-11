@@ -721,14 +721,38 @@ export default function AdminDataPage() {
           </TabsContent>
 
           <TabsContent value="binding" className="mt-4 space-y-6">
+            <Card className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+              <CardHeader>
+                <CardTitle>💡 赛事绑定说明</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div>
+                  <span className="font-medium">什么是赛事绑定？</span>
+                  赛事绑定是将具体的数据源URL与系统中的赛事关联起来，建立后系统会定期从该URL抓取最新的赛事信息。
+                </div>
+                <div>
+                  <span className="font-medium">操作步骤：</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1 pl-2">
+                  <li>使用"方法1"或"方法2"发现候选的赛事链接</li>
+                  <li>点击"作为绑定 URL"按钮，将链接填充到绑定表单</li>
+                  <li>在"创建赛事绑定"卡片中搜索并选择对应的赛事</li>
+                  <li>选择数据源和是否设为主数据源</li>
+                  <li>点击"绑定"完成关联</li>
+                </ol>
+                <div className="text-xs text-muted-foreground pt-2 border-t">
+                  <span className="font-medium">提示：</span>Primary（主数据源）的数据优先级更高，当多个数据源信息冲突时，会优先采用主数据源的信息。每个赛事通常只设置一个主数据源。
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
-                <CardTitle>平台列表发现（HTML）</CardTitle>
+                <CardTitle>方法1：从列表页批量发现赛事</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="text-xs text-muted-foreground">
-                  从“列表页”批量发现详情页链接（需要在对应 Source 的 `config.discovery.list.itemLink.selector` 配置 CSS selector）。
-                  示例：Zuicool 可用 `https://www.zuicool.com/events`。
+                  从赛事列表页批量发现详情页链接。适合从报名平台（如最酷、马拉马拉）批量导入赛事。
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -803,7 +827,7 @@ export default function AdminDataPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Marathon Sources</CardTitle>
+                <CardTitle>已绑定的赛事列表</CardTitle>
               </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-col md:flex-row gap-2">
@@ -860,9 +884,12 @@ export default function AdminDataPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Discovery (Brave Search)</CardTitle>
+            <CardTitle>方法2：搜索引擎发现赛事</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+                <div className="text-xs text-muted-foreground">
+                  使用搜索引擎查找赛事。适合发现新赛事或查找特定赛事的官网链接。
+                </div>
             <div className="flex flex-col md:flex-row gap-2">
               <Input
                 placeholder="Search query (admin-only)"
@@ -917,21 +944,21 @@ export default function AdminDataPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Bind Marathon Source</CardTitle>
+            <CardTitle>创建赛事绑定</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="text-xs text-muted-foreground">
-              先用 Discovery 找到候选链接，再在这里绑定到具体赛事与数据源（用于后续定时抓取）。
+              使用上面发现的链接，将赛事URL与系统中的赛事关联，建立后系统会自动定期抓取该链接的最新信息。
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <Input
-                placeholder="搜索赛事（name/canonicalName）"
+                placeholder="搜索并选择赛事"
                 value={bindMarathonSearch}
                 onChange={(e) => setBindMarathonSearch(e.target.value)}
               />
               <Input
-                placeholder="已选择 marathonId"
+                placeholder="已选择的赛事ID"
                 value={bindMarathonId}
                 onChange={(e) => setBindMarathonId(e.target.value)}
               />
@@ -960,7 +987,7 @@ export default function AdminDataPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">选择 Source</div>
+                <div className="text-xs text-muted-foreground">选择数据源平台</div>
                 <select
                   className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   value={bindSourceId}
@@ -976,7 +1003,7 @@ export default function AdminDataPage() {
               </div>
 
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">绑定 URL</div>
+                <div className="text-xs text-muted-foreground">赛事详情页URL</div>
                 <Input
                   placeholder="https://..."
                   value={bindUrl}
