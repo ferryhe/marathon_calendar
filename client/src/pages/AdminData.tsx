@@ -490,21 +490,21 @@ export default function AdminDataPage() {
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="rounded-xl border p-3">
-                        <div className="text-xs text-muted-foreground">Sources</div>
+                        <div className="text-xs text-muted-foreground">数据源平台</div>
                         <div className="text-lg font-bold mt-1">
                           {stats?.sources.active ?? "-"} / {stats?.sources.total ?? "-"}
                         </div>
-                        <div className="text-xs text-muted-foreground mt-1">active / total</div>
+                        <div className="text-xs text-muted-foreground mt-1">启用 / 总数</div>
                       </div>
                       <div className="rounded-xl border p-3">
-                        <div className="text-xs text-muted-foreground">Marathon Sources</div>
+                        <div className="text-xs text-muted-foreground">赛事绑定</div>
                         <div className="text-lg font-bold mt-1">
                           {stats?.marathonSources.total ?? "-"}
                         </div>
-                        <div className="text-xs text-muted-foreground mt-1">绑定总数</div>
+                        <div className="text-xs text-muted-foreground mt-1">已绑定的赛事数</div>
                       </div>
                       <div className="rounded-xl border p-3">
-                        <div className="text-xs text-muted-foreground">一次性触发</div>
+                        <div className="text-xs text-muted-foreground">手动同步</div>
                         <div className="mt-2">
                           <Button
                             size="sm"
@@ -515,13 +515,16 @@ export default function AdminDataPage() {
                           </Button>
                         </div>
                         <div className="text-xs text-muted-foreground mt-2">
-                          这是“单次触发”。定期更新见 “定期更新” Tab。
+                          单次触发所有绑定。定期更新见「自动更新」标签。
                         </div>
                       </div>
                     </div>
 
                     <div className="rounded-xl border p-3 space-y-2">
-                      <div className="text-sm font-medium">Raw Crawl 状态</div>
+                      <div className="text-sm font-medium">数据抓取状态</div>
+                      <div className="text-xs text-muted-foreground mb-2">
+                        needs_review = 需要人工审核确认的数据
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         {(stats?.raw.byStatus ?? []).map((x) => (
                           <Badge
@@ -546,7 +549,7 @@ export default function AdminDataPage() {
                     </div>
 
                     <div className="rounded-xl border p-3 space-y-2">
-                      <div className="text-sm font-medium">Sync Runs（近 24h）</div>
+                      <div className="text-sm font-medium">同步记录（近 24h）</div>
                       <div className="flex flex-wrap gap-2">
                         {(stats?.runs.last24hByStatus ?? []).map((x) => (
                           <Badge key={x.status} variant="outline">
