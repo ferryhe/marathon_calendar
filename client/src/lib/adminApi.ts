@@ -119,6 +119,7 @@ export type AdminMarathon = {
   canonicalName: string;
   city: string | null;
   country: string | null;
+  description: string | null;
   websiteUrl: string | null;
 };
 
@@ -300,10 +301,11 @@ export async function resolveAdminRawCrawl(
 
 export async function listAdminMarathonSources(
   token: string,
-  params?: { limit?: number; sourceId?: string; search?: string },
+  params?: { limit?: number; marathonId?: string; sourceId?: string; search?: string },
 ) {
   const query = new URLSearchParams();
   if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.marathonId) query.set("marathonId", params.marathonId);
   if (params?.sourceId) query.set("sourceId", params.sourceId);
   if (params?.search) query.set("search", params.search);
   const qs = query.toString();
@@ -337,6 +339,24 @@ export async function createAdminMarathon(
 ) {
   return adminRequest<{ data: AdminMarathon; created: boolean }>(token, "/admin/marathons", {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminMarathon(
+  token: string,
+  id: string,
+  payload: {
+    name?: string;
+    canonicalName?: string;
+    city?: string | null;
+    country?: string | null;
+    description?: string | null;
+    websiteUrl?: string | null;
+  },
+) {
+  return adminRequest<{ data: AdminMarathon }>(token, `/admin/marathons/${id}`, {
+    method: "PUT",
     body: JSON.stringify(payload),
   });
 }

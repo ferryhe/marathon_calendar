@@ -140,6 +140,39 @@ function canonicalizeName(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, "-");
 }
 
+const CHINA_COUNTRY_ALIASES = [
+  "china",
+  "cn",
+  "chn",
+  "中国",
+  "中国大陆",
+  "中华人民共和国",
+  "mainland china",
+  "people's republic of china",
+  "prc",
+];
+
+function normalizeCountryText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s._-]+/g, " ")
+    .replace(/[’']/g, "'");
+}
+
+function isChinaCountry(value?: string | null) {
+  if (!value) return false;
+  const normalized = normalizeCountryText(value);
+  return CHINA_COUNTRY_ALIASES.some((alias) => normalizeCountryText(alias) === normalized);
+}
+
+function canonicalCountryValue(value?: string | null) {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return isChinaCountry(trimmed) ? "China" : trimmed;
+}
+
 function toAuthUser(user: {
   id: string;
   username: string;
@@ -853,7 +886,22 @@ export async function registerRoutes(
       }
       
       if (params.country) {
-        conditions.push(eq(marathons.country, params.country));
+        if (isChinaCountry(params.country)) {
+          conditions.push(
+            or(
+              eq(marathons.country, "China"),
+              eq(marathons.country, "中国"),
+              eq(marathons.country, "CN"),
+              eq(marathons.country, "CHN"),
+              eq(marathons.country, "中国大陆"),
+              eq(marathons.country, "中华人民共和国"),
+              eq(marathons.country, "Mainland China"),
+              eq(marathons.country, "PRC"),
+            ),
+          );
+        } else {
+          conditions.push(eq(marathons.country, params.country));
+        }
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1169,11 +1217,15 @@ export async function registerRoutes(
   app.post("/api/marathons", async (req, res, next) => {
     try {
       const database = ensureDatabase();
-      const payload = insertMarathonSchema.parse({
+      const parsed = insertMarathonSchema.parse({
         ...req.body,
         canonicalName:
           req.body.canonicalName ?? canonicalizeName(req.body.name ?? ""),
       });
+      const payload = {
+        ...parsed,
+        country: canonicalCountryValue(parsed.country),
+      };
 
       const [record] = await database
         .insert(marathons)
@@ -2046,12 +2098,16 @@ export async function registerRoutes(
       const params = z
         .object({
           limit: z.coerce.number().int().min(1).max(200).default(50),
+          marathonId: z.string().uuid().optional(),
           sourceId: z.string().uuid().optional(),
           search: z.string().trim().min(1).max(200).optional(),
         })
         .parse(req.query);
 
       const conditions = [];
+      if (params.marathonId) {
+        conditions.push(eq(marathonSources.marathonId, params.marathonId));
+      }
       if (params.sourceId) {
         conditions.push(eq(marathonSources.sourceId, params.sourceId));
       }
@@ -2155,6 +2211,7 @@ export async function registerRoutes(
           canonicalName: marathons.canonicalName,
           city: marathons.city,
           country: marathons.country,
+          description: marathons.description,
           websiteUrl: marathons.websiteUrl,
         })
         .from(marathons)
@@ -2182,6 +2239,7 @@ export async function registerRoutes(
           websiteUrl: z.string().url().nullable().optional(),
         })
         .parse(req.body);
+      const normalizedCountry = canonicalCountryValue(payload.country);
 
       const [existingByName] = await database
         .select({
@@ -2190,6 +2248,7 @@ export async function registerRoutes(
           canonicalName: marathons.canonicalName,
           city: marathons.city,
           country: marathons.country,
+          description: marathons.description,
           websiteUrl: marathons.websiteUrl,
         })
         .from(marathons)
@@ -2223,7 +2282,7 @@ export async function registerRoutes(
           name: payload.name,
           canonicalName: canonicalCandidate,
           city: payload.city ?? null,
-          country: payload.country ?? null,
+          country: normalizedCountry,
           description: payload.description ?? null,
           websiteUrl: payload.websiteUrl ?? null,
           updatedAt: new Date(),
@@ -2234,10 +2293,104 @@ export async function registerRoutes(
           canonicalName: marathons.canonicalName,
           city: marathons.city,
           country: marathons.country,
+          description: marathons.description,
           websiteUrl: marathons.websiteUrl,
         });
 
       res.status(201).json({ data: created, created: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathons/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          name: z.string().trim().min(1).max(200).optional(),
+          canonicalName: z.string().trim().min(1).max(200).optional(),
+          city: z.string().trim().min(1).max(100).nullable().optional(),
+          country: z.string().trim().min(1).max(100).nullable().optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          websiteUrl: z.string().url().nullable().optional(),
+        })
+        .parse(req.body);
+      const normalizedCountry =
+        payload.country !== undefined ? canonicalCountryValue(payload.country) : undefined;
+
+      const hasAnyField = Object.keys(payload).length > 0;
+      if (!hasAnyField) {
+        return res.status(400).json({ message: "At least one field is required" });
+      }
+
+      const [existing] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+        })
+        .from(marathons)
+        .where(eq(marathons.id, id))
+        .limit(1);
+
+      if (!existing) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      if (payload.name && payload.name !== existing.name) {
+        const [nameConflict] = await database
+          .select({ id: marathons.id })
+          .from(marathons)
+          .where(and(eq(marathons.name, payload.name), ne(marathons.id, id)))
+          .limit(1);
+        if (nameConflict) {
+          return res.status(409).json({ message: "Marathon name already exists" });
+        }
+      }
+
+      if (payload.canonicalName && payload.canonicalName !== existing.canonicalName) {
+        const [canonicalConflict] = await database
+          .select({ id: marathons.id })
+          .from(marathons)
+          .where(and(eq(marathons.canonicalName, payload.canonicalName), ne(marathons.id, id)))
+          .limit(1);
+        if (canonicalConflict) {
+          return res.status(409).json({ message: "Canonical name already exists" });
+        }
+      }
+
+      const updateData: Record<string, unknown> = {
+        updatedAt: new Date(),
+      };
+      if (payload.name !== undefined) updateData.name = payload.name;
+      if (payload.canonicalName !== undefined) updateData.canonicalName = payload.canonicalName;
+      if (payload.city !== undefined) updateData.city = payload.city ?? null;
+      if (payload.country !== undefined) updateData.country = normalizedCountry ?? null;
+      if (payload.description !== undefined) updateData.description = payload.description ?? null;
+      if (payload.websiteUrl !== undefined) updateData.websiteUrl = payload.websiteUrl ?? null;
+
+      const [updated] = await database
+        .update(marathons)
+        .set(updateData)
+        .where(eq(marathons.id, id))
+        .returning({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        });
+
+      if (!updated) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      res.json({ data: updated });
     } catch (error) {
       next(error);
     }

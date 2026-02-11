@@ -25,6 +25,7 @@ import {
   updateAdminMarathonSource,
   deleteAdminMarathonSource,
   upsertAdminMarathonSource,
+  updateAdminMarathon,
   updateAdminSource,
 } from "@/lib/adminApi";
 import { useToast } from "@/hooks/use-toast";
@@ -90,6 +91,32 @@ function formatRawStatusLabel(status: string): string {
   }
 }
 
+const CHINA_COUNTRY_ALIASES = new Set([
+  "china",
+  "cn",
+  "chn",
+  "中国",
+  "中国大陆",
+  "中华人民共和国",
+  "mainland china",
+  "people's republic of china",
+  "prc",
+]);
+
+function normalizeCountryText(value?: string | null): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s._-]+/g, " ")
+    .replace(/[’']/g, "'");
+}
+
+function isChinaCountry(value?: string | null): boolean {
+  const normalized = normalizeCountryText(value);
+  if (!normalized) return false;
+  return CHINA_COUNTRY_ALIASES.has(normalized);
+}
+
 export default function AdminDataPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -111,6 +138,27 @@ export default function AdminDataPage() {
   const [editingMarathonSourceId, setEditingMarathonSourceId] = useState<string | null>(null);
   const [editingMarathonSourceUrl, setEditingMarathonSourceUrl] = useState("");
   const [editingMarathonSourcePrimary, setEditingMarathonSourcePrimary] = useState(false);
+
+  const [manageMarathonSearch, setManageMarathonSearch] = useState("");
+  const [manageMarathonId, setManageMarathonId] = useState("");
+  const [manageMarathonName, setManageMarathonName] = useState("");
+  const [manageMarathonCanonicalName, setManageMarathonCanonicalName] = useState("");
+  const [manageMarathonRegion, setManageMarathonRegion] = useState<"China" | "Overseas">("China");
+  const [manageMarathonCity, setManageMarathonCity] = useState("");
+  const [manageMarathonCountry, setManageMarathonCountry] = useState("");
+  const [manageMarathonWebsiteUrl, setManageMarathonWebsiteUrl] = useState("");
+  const [manageMarathonDescription, setManageMarathonDescription] = useState("");
+  const [manageCanonicalUnlocked, setManageCanonicalUnlocked] = useState(false);
+  const [manageMarathonSnapshot, setManageMarathonSnapshot] = useState<{
+    id: string;
+    name: string;
+    canonicalName: string;
+    region: "China" | "Overseas";
+    city: string;
+    country: string;
+    description: string;
+    websiteUrl: string;
+  } | null>(null);
 
   const [listDiscoverySourceId, setListDiscoverySourceId] = useState("");
   const [listDiscoveryUrl, setListDiscoveryUrl] = useState("");
@@ -178,6 +226,37 @@ export default function AdminDataPage() {
       description: canPrefillName
         ? "已填充 URL 和赛事名，请确认自动匹配结果后点击绑定"
         : "已填充 URL，请继续搜索并选择赛事",
+    });
+  };
+
+  const applyMarathonBaseToForm = (marathon: {
+    id: string;
+    name: string;
+    canonicalName: string;
+    city: string | null;
+    country: string | null;
+    description?: string | null;
+    websiteUrl: string | null;
+  }) => {
+    const region: "China" | "Overseas" = isChinaCountry(marathon.country) ? "China" : "Overseas";
+    setManageMarathonId(marathon.id);
+    setManageMarathonName(marathon.name);
+    setManageMarathonCanonicalName(marathon.canonicalName);
+    setManageMarathonRegion(region);
+    setManageMarathonCity(marathon.city ?? "");
+    setManageMarathonCountry(region === "China" ? "" : marathon.country ?? "");
+    setManageMarathonWebsiteUrl(marathon.websiteUrl ?? "");
+    setManageMarathonDescription(marathon.description ?? "");
+    setManageCanonicalUnlocked(false);
+    setManageMarathonSnapshot({
+      id: marathon.id,
+      name: marathon.name,
+      canonicalName: marathon.canonicalName,
+      region,
+      city: marathon.city ?? "",
+      country: region === "China" ? "" : marathon.country ?? "",
+      description: marathon.description ?? "",
+      websiteUrl: marathon.websiteUrl ?? "",
     });
   };
 
@@ -278,6 +357,26 @@ export default function AdminDataPage() {
         search: bindMarathonSearch.trim(),
       }),
     enabled: hasToken && tab === "binding" && bindMarathonSearch.trim().length > 0,
+  });
+
+  const manageMarathonsQuery = useQuery({
+    queryKey: ["admin", "marathons-manage", token, manageMarathonSearch],
+    queryFn: () =>
+      listAdminMarathons(token, {
+        limit: 30,
+        search: manageMarathonSearch.trim() ? manageMarathonSearch.trim() : undefined,
+      }),
+    enabled: hasToken && tab === "binding",
+  });
+
+  const manageMarathonSourcesQuery = useQuery({
+    queryKey: ["admin", "marathon-sources", "by-marathon", token, manageMarathonId],
+    queryFn: () =>
+      listAdminMarathonSources(token, {
+        limit: 100,
+        marathonId: manageMarathonId,
+      }),
+    enabled: hasToken && tab === "binding" && Boolean(manageMarathonId),
   });
 
   useEffect(() => {
@@ -452,6 +551,102 @@ export default function AdminDataPage() {
     onError: (error) => {
       toast({
         title: "绑定失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateMarathonMutation = useMutation({
+    mutationFn: async () => {
+      if (!manageMarathonId.trim()) throw new Error("请先选择赛事");
+      const name = manageMarathonName.trim();
+      const canonicalName = manageMarathonCanonicalName.trim();
+      if (!name) throw new Error("赛事名称不能为空");
+      if (!canonicalName) throw new Error("canonicalName 不能为空");
+      if (
+        manageMarathonSnapshot &&
+        canonicalName !== manageMarathonSnapshot.canonicalName &&
+        !manageCanonicalUnlocked
+      ) {
+        throw new Error("请先解锁 canonicalName 编辑，再进行修改");
+      }
+
+      const country =
+        manageMarathonRegion === "China" ? "China" : manageMarathonCountry.trim();
+      if (manageMarathonRegion === "Overseas" && !country) {
+        throw new Error("海外赛事必须填写国家（例如：Japan、USA）");
+      }
+      if (manageMarathonRegion === "Overseas" && isChinaCountry(country)) {
+        throw new Error("海外赛事国家不能是 China，请改为真实国家名");
+      }
+
+      return updateAdminMarathon(token, manageMarathonId, {
+        name,
+        canonicalName,
+        city: manageMarathonCity.trim() ? manageMarathonCity.trim() : null,
+        country,
+        description: manageMarathonDescription.trim() ? manageMarathonDescription.trim() : null,
+        websiteUrl: manageMarathonWebsiteUrl.trim() ? manageMarathonWebsiteUrl.trim() : null,
+      });
+    },
+    onSuccess: async (result) => {
+      applyMarathonBaseToForm(result.data);
+      toast({ title: "已保存赛事基础信息" });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathons"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathons-manage"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] }),
+      ]);
+    },
+    onError: (error) => {
+      toast({
+        title: "保存失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const runMarathonSourceMutation = useMutation({
+    mutationFn: async (marathonSourceId: string) => runAdminSyncMarathonSource(token, marathonSourceId),
+    onSuccess: async () => {
+      toast({ title: "已触发单条同步" });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "sync-runs"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "raw-crawl"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] }),
+      ]);
+    },
+    onError: (error) => {
+      toast({
+        title: "触发同步失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const runSelectedMarathonAllSourcesMutation = useMutation({
+    mutationFn: async () => {
+      const rows = manageMarathonSourcesQuery.data?.data ?? [];
+      if (!rows.length) {
+        throw new Error("当前赛事还没有绑定数据源");
+      }
+      await Promise.all(rows.map((item) => runAdminSyncMarathonSource(token, item.id)));
+      return rows.length;
+    },
+    onSuccess: async (count) => {
+      toast({ title: `已触发同步：${count} 条绑定` });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "sync-runs"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "raw-crawl"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] }),
+      ]);
+    },
+    onError: (error) => {
+      toast({
+        title: "批量同步失败",
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -1045,6 +1240,333 @@ export default function AdminDataPage() {
                 <div className="text-xs text-muted-foreground pt-2 border-t">
                   <span className="font-medium">提示：</span>主要数据源的优先级更高，当多个来源信息冲突时，会优先采用主要来源的信息。每个赛事通常只设置一个主要数据源。
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>赛事资料中心（统一编辑）</CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    manageMarathonsQuery.refetch();
+                    if (manageMarathonId) {
+                      manageMarathonSourcesQuery.refetch();
+                    }
+                  }}
+                  disabled={!hasToken}
+                >
+                  刷新
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="text-xs text-muted-foreground">
+                  在这里统一处理单个赛事：先搜索并选择赛事，再维护基础信息（地点/国家/简介/官网），也可一键同步该赛事的所有已绑定来源。
+                </div>
+
+                <div className="flex flex-col md:flex-row gap-2">
+                  <Input
+                    placeholder="搜索赛事名称（可留空查看前 30 条）"
+                    value={manageMarathonSearch}
+                    onChange={(e) => setManageMarathonSearch(e.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => manageMarathonsQuery.refetch()}
+                    disabled={!hasToken || manageMarathonsQuery.isFetching}
+                  >
+                    搜索
+                  </Button>
+                </div>
+
+                {manageMarathonsQuery.error ? (
+                  <p className="text-sm text-destructive">
+                    {getFriendlyErrorMessage(manageMarathonsQuery.error)}
+                  </p>
+                ) : null}
+
+                {manageMarathonsQuery.data?.data?.length ? (
+                  <div className="rounded-xl border p-2 max-h-56 overflow-y-auto space-y-1">
+                    {manageMarathonsQuery.data.data.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className="w-full text-left text-sm px-2 py-1 rounded-lg hover:bg-muted"
+                        onClick={() => {
+                          applyMarathonBaseToForm(m);
+                          setManageMarathonSearch(m.name);
+                          toast({ title: `已选择赛事：${m.name}` });
+                        }}
+                      >
+                        <div className="font-medium truncate">{m.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {m.canonicalName} / {m.city ?? "-"} / {m.country ?? "-"}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : manageMarathonsQuery.isSuccess ? (
+                  <div className="text-sm text-muted-foreground">未找到赛事</div>
+                ) : null}
+
+                {manageMarathonId ? (
+                  <div className="rounded-xl border p-3 space-y-3">
+                    <div className="text-xs text-muted-foreground break-all">
+                      当前赛事 ID：{manageMarathonId}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <Input
+                        placeholder="赛事名称（必填）"
+                        value={manageMarathonName}
+                        onChange={(e) => setManageMarathonName(e.target.value)}
+                      />
+                      <Input
+                        placeholder="canonicalName（必填，建议小写+连字符，如 beijing-marathon）"
+                        value={manageMarathonCanonicalName}
+                        onChange={(e) => setManageMarathonCanonicalName(e.target.value)}
+                        readOnly={!manageCanonicalUnlocked}
+                      />
+                      <Input
+                        placeholder="地点/城市（可选）"
+                        value={manageMarathonCity}
+                        onChange={(e) => setManageMarathonCity(e.target.value)}
+                      />
+                      <select
+                        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                        value={manageMarathonRegion}
+                        onChange={(e) => {
+                          const next = e.target.value as "China" | "Overseas";
+                          setManageMarathonRegion(next);
+                          if (next === "China") {
+                            setManageMarathonCountry("");
+                          }
+                        }}
+                      >
+                        <option value="China">中国</option>
+                        <option value="Overseas">非中国（海外）</option>
+                      </select>
+                      <Input
+                        placeholder={
+                          manageMarathonRegion === "China"
+                            ? "国家/地区将自动保存为 China"
+                            : "国家（必填，例如：Japan、USA、Germany）"
+                        }
+                        value={manageMarathonCountry}
+                        onChange={(e) => setManageMarathonCountry(e.target.value)}
+                        disabled={manageMarathonRegion === "China"}
+                      />
+                      <Input
+                        placeholder="官网 URL（可选）"
+                        value={manageMarathonWebsiteUrl}
+                        onChange={(e) => setManageMarathonWebsiteUrl(e.target.value)}
+                      />
+                    </div>
+
+                    <Textarea
+                      placeholder="赛事简介（可选）"
+                      value={manageMarathonDescription}
+                      onChange={(e) => setManageMarathonDescription(e.target.value)}
+                      rows={3}
+                    />
+
+                    <div className="text-xs text-muted-foreground">
+                      `canonicalName` 是系列赛事内部唯一标识（跨年份复用）。已有赛事一般不建议修改，避免影响去重与历史关联。
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={manageCanonicalUnlocked ? "default" : "outline"}
+                        type="button"
+                        onClick={() => setManageCanonicalUnlocked((v) => !v)}
+                      >
+                        {manageCanonicalUnlocked ? "已解锁 canonicalName 编辑" : "解锁 canonicalName 编辑"}
+                      </Button>
+                      <div className="text-xs text-muted-foreground">
+                        新增赛事请规范填写；后续年份应绑定到同一 `canonicalName` 下的同一赛事主体。
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        onClick={() => updateMarathonMutation.mutate()}
+                        disabled={!hasToken || updateMarathonMutation.isPending}
+                      >
+                        保存赛事基础信息
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => runSelectedMarathonAllSourcesMutation.mutate()}
+                        disabled={
+                          !hasToken ||
+                          runSelectedMarathonAllSourcesMutation.isPending ||
+                          !manageMarathonId
+                        }
+                      >
+                        同步该赛事全部来源
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          if (!manageMarathonSnapshot) return;
+                          setManageMarathonName(manageMarathonSnapshot.name);
+                          setManageMarathonCanonicalName(manageMarathonSnapshot.canonicalName);
+                          setManageMarathonRegion(manageMarathonSnapshot.region);
+                          setManageMarathonCity(manageMarathonSnapshot.city);
+                          setManageMarathonCountry(manageMarathonSnapshot.country);
+                          setManageMarathonWebsiteUrl(manageMarathonSnapshot.websiteUrl);
+                          setManageMarathonDescription(manageMarathonSnapshot.description);
+                          setManageCanonicalUnlocked(false);
+                        }}
+                        disabled={!manageMarathonSnapshot}
+                      >
+                        重置为已加载值
+                      </Button>
+                    </div>
+
+                    <div className="rounded-lg border p-2 space-y-2">
+                      <div className="text-xs text-muted-foreground">
+                        当前赛事已绑定来源（可直接单条同步）
+                      </div>
+                      {manageMarathonSourcesQuery.isFetching ? (
+                        <div className="text-xs text-muted-foreground">加载中...</div>
+                      ) : null}
+                      {manageMarathonSourcesQuery.error ? (
+                        <div className="text-xs text-destructive">
+                          {getFriendlyErrorMessage(manageMarathonSourcesQuery.error)}
+                        </div>
+                      ) : null}
+                      {(manageMarathonSourcesQuery.data?.data ?? []).length === 0 ? (
+                        <div className="text-xs text-muted-foreground">该赛事暂无绑定来源</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {(manageMarathonSourcesQuery.data?.data ?? []).map((item) => (
+                            <div key={item.id} className="rounded border p-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium truncate">{item.sourceName}</div>
+                                  <div className="text-xs text-muted-foreground break-all">{item.sourceUrl}</div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={item.isPrimary ? "default" : "secondary"}>
+                                    {item.isPrimary ? "主要" : "次要"}
+                                  </Badge>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setEditingMarathonSourceId(item.id);
+                                      setEditingMarathonSourceUrl(item.sourceUrl);
+                                      setEditingMarathonSourcePrimary(Boolean(item.isPrimary));
+                                    }}
+                                    disabled={
+                                      updateMarathonSourceMutation.isPending ||
+                                      deleteMarathonSourceMutation.isPending
+                                    }
+                                  >
+                                    修改
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => runMarathonSourceMutation.mutate(item.id)}
+                                    disabled={!hasToken || runMarathonSourceMutation.isPending}
+                                  >
+                                    单条同步
+                                  </Button>
+                                </div>
+                              </div>
+                              {editingMarathonSourceId === item.id ? (
+                                <div className="mt-2 space-y-2 rounded-lg border p-2">
+                                  <div className="text-xs text-muted-foreground">
+                                    来源类型：{item.sourceType ?? "-"} / sourceId：{item.sourceId}
+                                  </div>
+                                  <Input
+                                    value={editingMarathonSourceUrl}
+                                    onChange={(e) => setEditingMarathonSourceUrl(e.target.value)}
+                                    placeholder="https://..."
+                                  />
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant={editingMarathonSourcePrimary ? "default" : "outline"}
+                                      onClick={() => setEditingMarathonSourcePrimary((v) => !v)}
+                                      disabled={
+                                        item.sourceType !== "official" ||
+                                        updateMarathonSourceMutation.isPending
+                                      }
+                                    >
+                                      {editingMarathonSourcePrimary ? "主要" : "次要"}
+                                    </Button>
+                                    {item.sourceType !== "official" ? (
+                                      <span className="text-xs text-muted-foreground">
+                                        第三方来源固定为次要
+                                      </span>
+                                    ) : null}
+                                    <Button
+                                      size="sm"
+                                      onClick={() =>
+                                        updateMarathonSourceMutation.mutate({
+                                          id: item.id,
+                                          sourceUrl: editingMarathonSourceUrl.trim(),
+                                          isPrimary: editingMarathonSourcePrimary,
+                                        })
+                                      }
+                                      disabled={
+                                        updateMarathonSourceMutation.isPending ||
+                                        !editingMarathonSourceUrl.trim()
+                                      }
+                                    >
+                                      保存修改
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => {
+                                        const ok = window.confirm(
+                                          `确认删除这条绑定？\n${item.marathonName} <- ${item.sourceName}`,
+                                        );
+                                        if (!ok) return;
+                                        deleteMarathonSourceMutation.mutate(item.id);
+                                      }}
+                                      disabled={
+                                        updateMarathonSourceMutation.isPending ||
+                                        deleteMarathonSourceMutation.isPending
+                                      }
+                                    >
+                                      删除绑定
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setEditingMarathonSourceId(null)}
+                                      disabled={updateMarathonSourceMutation.isPending}
+                                    >
+                                      取消
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                              <div className="text-xs text-muted-foreground mt-1">
+                                上次检查：{formatDateTime(item.lastCheckedAt)} / 下次检查：
+                                {formatDateTime(item.nextCheckAt)} / HTTP={item.lastHttpStatus ?? "-"}
+                              </div>
+                              {item.lastError ? (
+                                <div className="text-xs text-destructive mt-1 break-all">{item.lastError}</div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">
+                    先从上面的搜索结果里选择一个赛事，再进行基础信息编辑与单赛事同步。
+                  </div>
+                )}
               </CardContent>
             </Card>
 
