@@ -224,6 +224,7 @@ export async function resolveAdminRawCrawl(
     registrationStatus?: string | null;
     registrationUrl?: string | null;
     note?: string;
+    publish?: boolean;
   },
 ) {
   return adminRequest<{ data: any }>(token, `/admin/raw-crawl/${id}/resolve`, {

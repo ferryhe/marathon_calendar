@@ -240,6 +240,8 @@ async function main() {
         raceDate: null,
         registrationStatus: null,
         registrationUrl: null,
+        publishStatus: "draft",
+        publishedAt: null,
         updatedAt: now,
       })
       .onConflictDoNothing({

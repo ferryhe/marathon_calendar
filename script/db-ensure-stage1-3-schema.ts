@@ -131,12 +131,32 @@ async function ensureMarathonEditionsColumns(pool: pg.Pool) {
   // Added for Stage 1.3 merge/conflict resolution (field-level provenance).
   const columns: Array<{ name: string; ddl: string }> = [
     { name: "field_sources", ddl: "jsonb" },
+    { name: "publish_status", ddl: "text" },
+    { name: "published_at", ddl: "timestamptz" },
   ];
 
   for (const col of columns) {
     if (!(await columnExists(pool, table, col.name))) {
       await pool.query(`alter table ${table} add column ${col.name} ${col.ddl}`);
     }
+  }
+
+  // Backfill publish status for existing rows (best-effort):
+  // - race_date is null => draft
+  // - otherwise => published
+  if (await columnExists(pool, table, "publish_status")) {
+    await pool.query(`
+      update marathon_editions
+      set publish_status = case when race_date is null then 'draft' else 'published' end
+      where publish_status is null
+    `);
+    await pool.query(`
+      update marathon_editions
+      set published_at = coalesce(published_at, now())
+      where publish_status = 'published' and published_at is null
+    `);
+    await pool.query(`alter table marathon_editions alter column publish_status set default 'draft'`);
+    await pool.query(`alter table marathon_editions alter column publish_status set not null`);
   }
 }
 

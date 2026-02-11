@@ -63,6 +63,7 @@ export default function AdminDataPage() {
   const [resolveStatus, setResolveStatus] = useState("");
   const [resolveRegUrl, setResolveRegUrl] = useState("");
   const [resolveNote, setResolveNote] = useState("");
+  const [resolvePublish, setResolvePublish] = useState(true);
 
   useEffect(() => {
     setToken(getAdminToken());
@@ -141,6 +142,7 @@ export default function AdminDataPage() {
       setResolveRaceDate(typeof ext.raceDate === "string" ? ext.raceDate : "");
       setResolveStatus(typeof ext.registrationStatus === "string" ? ext.registrationStatus : "");
       setResolveRegUrl(typeof ext.registrationUrl === "string" ? ext.registrationUrl : "");
+      setResolvePublish(true);
       if (typeof ext.raceDate === "string" && ext.raceDate.length >= 4) {
         setResolveYear(ext.raceDate.slice(0, 4));
       }
@@ -252,6 +254,7 @@ export default function AdminDataPage() {
         ...(resolveStatus.trim() ? { registrationStatus: resolveStatus.trim() } : {}),
         ...(resolveRegUrl.trim() ? { registrationUrl: resolveRegUrl.trim() } : {}),
         note: resolveNote.trim() ? resolveNote.trim() : undefined,
+        publish: resolvePublish,
       }),
     onSuccess: async () => {
       toast({ title: "已回填并标记为 processed" });
@@ -871,6 +874,7 @@ export default function AdminDataPage() {
                         setResolveStatus("");
                         setResolveRegUrl("");
                         setResolveNote("");
+                        setResolvePublish(true);
                       }}
                       disabled={!hasToken}
                     >
@@ -967,6 +971,20 @@ export default function AdminDataPage() {
                     onChange={(e) => setResolveNote(e.target.value)}
                     rows={2}
                   />
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant={resolvePublish ? "default" : "outline"}
+                      onClick={() => setResolvePublish((v) => !v)}
+                      type="button"
+                    >
+                      {resolvePublish ? "回填后发布：是" : "回填后发布：否"}
+                    </Button>
+                    <div className="text-xs text-muted-foreground">
+                      关闭后会只回填数据但保持 draft（前台不可见）。
+                    </div>
+                  </div>
 
                   <div className="flex items-center gap-2">
                     <Button

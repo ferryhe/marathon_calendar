@@ -505,6 +505,8 @@ async function seed() {
           .values({
             marathonId: marathon.id,
             ...edition,
+            publishStatus: "published",
+            publishedAt: new Date(),
             updatedAt: new Date(),
           })
           .onConflictDoNothing();

@@ -421,6 +421,12 @@ export async function syncMarathonSourceOnce(params: {
               sourceType: params.source.type,
               priority: params.source.priority,
             },
+            // Auto-publish only when the race date is extracted and there are no conflicts,
+            // and the source is an official site.
+            publish:
+              params.source.type === "official"
+                ? { status: "published" as const }
+                : { status: "draft" as const },
           });
 
           if (merge.action === "updated" || merge.action === "inserted") {

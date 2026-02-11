@@ -69,6 +69,9 @@ export const marathonEditions = pgTable(
     registrationUrl: text("registration_url"),
     registrationOpenDate: date("registration_open_date"),
     registrationCloseDate: date("registration_close_date"),
+    // Publishing state: front-end only shows published editions by default.
+    publishStatus: text("publish_status").default("draft").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
     // Per-field provenance for merge/conflict resolution.
     // Example: { raceDate: { sourceId, sourceType, priority, rank, at }, ... }
     fieldSources: jsonb("field_sources").$type<Record<string, unknown> | null>(),

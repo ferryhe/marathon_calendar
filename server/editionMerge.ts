@@ -34,6 +34,11 @@ export type MergeResult = {
   conflicts: MergeConflict[];
 };
 
+export type PublishDecision = {
+  status: "draft" | "published";
+  at?: Date;
+};
+
 function sourceTypeWeight(sourceType: string) {
   switch (sourceType) {
     case "manual":
@@ -103,6 +108,7 @@ export async function upsertEditionWithMerge(params: {
   year: number;
   incoming: EditionIncomingFields;
   source: MergeSource;
+  publish?: PublishDecision;
 }) : Promise<MergeResult> {
   const now = new Date();
   const sourceType = params.source.sourceType ?? "unknown";
@@ -159,6 +165,11 @@ export async function upsertEditionWithMerge(params: {
       raceDate: params.incoming.raceDate ?? null,
       registrationStatus: params.incoming.registrationStatus ?? null,
       registrationUrl: params.incoming.registrationUrl ?? null,
+      publishStatus: params.publish?.status ?? "draft",
+      publishedAt:
+        (params.publish?.status ?? "draft") === "published"
+          ? (params.publish?.at ?? now)
+          : null,
       fieldSources: Object.keys(fieldSources).length > 0 ? fieldSources : null,
       lastSyncedAt: now,
       updatedAt: now,
@@ -271,6 +282,16 @@ export async function upsertEditionWithMerge(params: {
 
   set.fieldSources = Object.keys(nextFieldSources).length > 0 ? nextFieldSources : null;
 
+  if (params.publish) {
+    if (params.publish.status === "published") {
+      set.publishStatus = "published";
+      set.publishedAt = params.publish.at ?? now;
+    } else {
+      set.publishStatus = "draft";
+      set.publishedAt = null;
+    }
+  }
+
   await params.database.update(marathonEditions).set(set).where(eq(marathonEditions.id, row.id));
 
   return {
@@ -279,4 +300,3 @@ export async function upsertEditionWithMerge(params: {
     conflicts,
   };
 }
-

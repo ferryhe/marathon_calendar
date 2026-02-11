@@ -877,6 +877,7 @@ export async function registerRoutes(
 
       const marathonIds = baseMarathons.map((marathon) => marathon.id);
       const editionConditions = [inArray(marathonEditions.marathonId, marathonIds)];
+      editionConditions.push(eq(marathonEditions.publishStatus, "published"));
 
       if (params.year) {
         editionConditions.push(eq(marathonEditions.year, params.year));
@@ -1016,7 +1017,12 @@ export async function registerRoutes(
         })
         .from(marathons)
         .innerJoin(marathonEditions, eq(marathons.id, marathonEditions.marathonId))
-        .where(sql`${marathonEditions.raceDate} >= CURRENT_DATE`)
+        .where(
+          and(
+            eq(marathonEditions.publishStatus, "published"),
+            sql`${marathonEditions.raceDate} >= CURRENT_DATE`,
+          ),
+        )
         .orderBy(asc(marathonEditions.raceDate))
         .limit(limit);
       
@@ -1113,7 +1119,12 @@ export async function registerRoutes(
       const editions = await database
         .select()
         .from(marathonEditions)
-        .where(eq(marathonEditions.marathonId, req.params.id))
+        .where(
+          and(
+            eq(marathonEditions.marathonId, req.params.id),
+            eq(marathonEditions.publishStatus, "published"),
+          ),
+        )
         .orderBy(desc(marathonEditions.year));
       
       // Get reviews with user profile data for avatar/display name rendering.
@@ -1714,6 +1725,7 @@ export async function registerRoutes(
           registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
           registrationUrl: z.string().trim().url().nullable().optional(),
           note: z.string().trim().max(2000).optional(),
+          publish: z.coerce.boolean().optional(),
         })
         .refine(
           (p) =>
@@ -1762,6 +1774,7 @@ export async function registerRoutes(
           sourceType: "manual",
           priority: 999,
         },
+        publish: payload.publish ? { status: "published" } : undefined,
       });
 
       await database
