@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { RefreshCw, Shield, Terminal, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   adminDiscoveryWebSearch,
   adminDiscoveryList,
+  createAdminMarathon,
+  deleteAdminSource,
   generateAdminAiRuleTemplate,
   getAdminToken,
   getAdminStats,
@@ -51,7 +53,7 @@ export default function AdminDataPage() {
   const [token, setToken] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [search, setSearch] = useState("");
-  const [discoveryQuery, setDiscoveryQuery] = useState("");
+  const [discoveryQ, setDiscoveryQ] = useState("");
   const [configDraftById, setConfigDraftById] = useState<Record<string, string>>({});
   const [rawStatus, setRawStatus] = useState<string>("needs_review");
   const [selectedRawId, setSelectedRawId] = useState<string | null>(null);
@@ -60,6 +62,8 @@ export default function AdminDataPage() {
   const [bindMarathonId, setBindMarathonId] = useState("");
   const [bindSourceId, setBindSourceId] = useState("");
   const [bindUrl, setBindUrl] = useState("");
+  const bindMarathonSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const bindUrlInputRef = useRef<HTMLInputElement | null>(null);
   const [bindPrimary, setBindPrimary] = useState(false);
 
   const [listDiscoverySourceId, setListDiscoverySourceId] = useState("");
@@ -72,6 +76,51 @@ export default function AdminDataPage() {
   const [resolveNote, setResolveNote] = useState("");
   const [resolvePublish, setResolvePublish] = useState(true);
   const [aiTemplateDraft, setAiTemplateDraft] = useState<string>("");
+
+  const isThirdPartySourceType = (sourceType?: string | null) =>
+    Boolean(sourceType && sourceType !== "official");
+
+  const isNoisyDiscoveryTitle = (value: string) => {
+    const t = value.trim();
+    if (!t) return true;
+    const compact = t.replace(/\s+/g, "");
+    return ["点此报名", "立即报名", "马上报名", "即将报名", "报名中", "去报名"].includes(compact);
+  };
+
+  const applyDiscoveredUrlToBinding = (params: {
+    url: string;
+    sourceId?: string;
+    title?: string | null;
+  }) => {
+    setBindUrl(params.url);
+    if (params.sourceId) {
+      setBindSourceId(params.sourceId);
+      const selectedSource = sources.find((s) => s.id === params.sourceId);
+      if (isThirdPartySourceType(selectedSource?.type)) {
+        setBindPrimary(false);
+      }
+    }
+
+    const normalizedTitle = (params.title ?? "").replace(/\s+/g, " ").trim();
+    const canPrefillName = normalizedTitle.length > 0 && !isNoisyDiscoveryTitle(normalizedTitle);
+    if (canPrefillName) {
+      setBindMarathonSearch(normalizedTitle);
+      setBindMarathonId("");
+    }
+
+    setTimeout(() => {
+      const targetInput = canPrefillName ? bindMarathonSearchInputRef.current : bindUrlInputRef.current;
+      targetInput?.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetInput?.focus();
+    }, 0);
+
+    toast({
+      title: "已填充绑定表单",
+      description: canPrefillName
+        ? "已填充 URL 和赛事名，请确认自动匹配结果后点击绑定"
+        : "已填充 URL，请继续搜索并选择赛事",
+    });
+  };
 
   useEffect(() => {
     setToken(getAdminToken());
@@ -168,6 +217,16 @@ export default function AdminDataPage() {
     enabled: hasToken && tab === "binding" && bindMarathonSearch.trim().length > 0,
   });
 
+  useEffect(() => {
+    if (!hasToken || tab !== "binding") return;
+    if (bindMarathonId.trim()) return;
+    const rows = marathonsQuery.data?.data ?? [];
+    if (rows.length !== 1) return;
+    const only = rows[0];
+    setBindMarathonId(only.id);
+    toast({ title: `已自动匹配赛事：${only.name}` });
+  }, [hasToken, tab, bindMarathonId, marathonsQuery.data, toast]);
+
   const runAllMutation = useMutation({
     mutationFn: () => runAdminSyncAll(token),
     onSuccess: async () => {
@@ -231,17 +290,69 @@ export default function AdminDataPage() {
     },
   });
 
-  const bindMutation = useMutation({
-    mutationFn: async () =>
-      upsertAdminMarathonSource(token, {
-        marathonId: bindMarathonId,
-        sourceId: bindSourceId,
-        sourceUrl: bindUrl.trim(),
-        isPrimary: bindPrimary,
-      }),
+  const deleteSourceMutation = useMutation({
+    mutationFn: async (id: string) => deleteAdminSource(token, id, { force: true }),
     onSuccess: async () => {
-      toast({ title: "已绑定 Marathon Source" });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "sources"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "stats"] }),
+      ]);
+      toast({ title: "已删除 source" });
+    },
+    onError: (error) => {
+      toast({
+        title: "删除失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const bindMutation = useMutation({
+    mutationFn: async () => {
+      const source = sources.find((s) => s.id === bindSourceId) ?? null;
+      if (!source) throw new Error("请先选择数据源平台");
+      const sourceIsThirdParty = isThirdPartySourceType(source.type);
+      const url = bindUrl.trim();
+
+      let marathonId = bindMarathonId.trim();
+      let createdMarathonName: string | null = null;
+      if (!marathonId) {
+        const name = bindMarathonSearch.trim();
+        if (!name) throw new Error("请先输入赛事名称或从发现结果中选择");
+        const created = await createAdminMarathon(token, {
+          name,
+          websiteUrl: sourceIsThirdParty ? null : url,
+        });
+        marathonId = created.data.id;
+        createdMarathonName = created.data.name;
+      }
+
+      await upsertAdminMarathonSource(token, {
+        marathonId,
+        sourceId: bindSourceId,
+        sourceUrl: url,
+        // Third-party platform links must stay secondary.
+        isPrimary: sourceIsThirdParty ? false : bindPrimary,
+      });
+
+      return {
+        marathonId,
+        createdMarathonName,
+        sourceIsThirdParty,
+      };
+    },
+    onSuccess: async (result) => {
+      setBindMarathonId(result.marathonId);
+      const title = result.createdMarathonName
+        ? `已自动创建赛事并绑定：${result.createdMarathonName}`
+        : "已绑定赛事来源";
+      const description = result.sourceIsThirdParty
+        ? "第三方来源已自动按“次要”保存"
+        : undefined;
+      toast({ title, ...(description ? { description } : {}) });
       await queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "marathons"] });
     },
     onError: (error) => {
       toast({
@@ -386,6 +497,16 @@ export default function AdminDataPage() {
   const sources = sourcesQuery.data?.data ?? [];
   const sourceOptions = useMemo(() => sources.map((s) => ({ id: s.id, name: s.name })), [sources]);
   const stats = statsQuery.data?.data;
+
+  useEffect(() => {
+    if (!bindSourceId) return;
+    const source = sources.find((s) => s.id === bindSourceId);
+    if (!source) return;
+    if (!isThirdPartySourceType(source.type)) return;
+    if (!bindPrimary) return;
+    setBindPrimary(false);
+    toast({ title: "第三方来源已自动设置为“次要”" });
+  }, [bindSourceId, bindPrimary, sources, toast]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -613,9 +734,23 @@ export default function AdminDataPage() {
                                     isActive: !source.isActive,
                                   })
                                 }
-                                disabled={updateSourceMutation.isPending}
+                                disabled={updateSourceMutation.isPending || deleteSourceMutation.isPending}
                               >
                                 {source.isActive ? "启用中" : "已停用"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => {
+                                  const ok = window.confirm(
+                                    `确认删除 Source「${source.name}」？\n将同时删除关联绑定与历史抓取/同步记录，此操作不可撤销。`,
+                                  );
+                                  if (!ok) return;
+                                  deleteSourceMutation.mutate(source.id);
+                                }}
+                                disabled={updateSourceMutation.isPending || deleteSourceMutation.isPending}
+                              >
+                                删除
                               </Button>
                             </div>
                           </div>
@@ -631,6 +766,7 @@ export default function AdminDataPage() {
                                 })
                               }
                               className="md:w-40"
+                              disabled={deleteSourceMutation.isPending}
                             />
                             <Input value={source.baseUrl ?? ""} disabled placeholder="baseUrl" />
                           </div>
@@ -667,7 +803,7 @@ export default function AdminDataPage() {
                                   });
                                 }
                               }}
-                              disabled={updateSourceMutation.isPending}
+                              disabled={updateSourceMutation.isPending || deleteSourceMutation.isPending}
                             >
                               保存 config
                             </Button>
@@ -770,14 +906,118 @@ export default function AdminDataPage() {
                   <span className="font-medium">操作步骤：</span>
                 </div>
                 <ol className="list-decimal list-inside space-y-1 pl-2">
-                  <li>使用"方法1"或"方法2"发现候选的赛事链接</li>
+                  <li>使用"方法1"、"方法2"或"方法3"准备候选的赛事链接</li>
                   <li>点击"作为绑定 URL"按钮，将链接填充到绑定表单</li>
                   <li>在"创建赛事绑定"卡片中搜索并选择对应的赛事</li>
                   <li>选择数据源和是否设为主数据源</li>
                   <li>点击"绑定"完成关联</li>
                 </ol>
                 <div className="text-xs text-muted-foreground pt-2 border-t">
-                  <span className="font-medium">提示：</span>Primary（主数据源）的数据优先级更高，当多个数据源信息冲突时，会优先采用主数据源的信息。每个赛事通常只设置一个主数据源。
+                  <span className="font-medium">提示：</span>主要（Primary）数据源的优先级更高，当多个数据源信息冲突时，会优先采用主要来源的信息。每个赛事通常只设置一个主要数据源。
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>创建赛事绑定</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="text-xs text-muted-foreground">
+                  使用下面方法准备好链接后，在这里将赛事URL与系统中的赛事关联，建立后系统会自动定期抓取该链接的最新信息。
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <Input
+                    ref={bindMarathonSearchInputRef}
+                    placeholder="搜索并选择赛事"
+                    value={bindMarathonSearch}
+                    onChange={(e) => {
+                      setBindMarathonSearch(e.target.value);
+                      setBindMarathonId("");
+                    }}
+                  />
+                  <Input
+                    placeholder="赛事ID（系统自动生成）"
+                    value={bindMarathonId}
+                    readOnly
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  赛事ID为系统唯一标识（UUID）。无需手工编写，选中赛事后会自动填充。
+                </div>
+
+                {marathonsQuery.data?.data?.length ? (
+                  <div className="rounded-xl border p-2 max-h-56 overflow-y-auto space-y-1">
+                    {marathonsQuery.data.data.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className="w-full text-left text-sm px-2 py-1 rounded-lg hover:bg-muted"
+                        onClick={() => {
+                          setBindMarathonId(m.id);
+                          setBindMarathonSearch(m.name);
+                          toast({ title: `已选择：${m.name}` });
+                        }}
+                      >
+                        <div className="font-medium truncate">{m.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">{m.canonicalName}</div>
+                      </button>
+                    ))}
+                  </div>
+                ) : bindMarathonSearch.trim() ? (
+                  <div className="text-sm text-muted-foreground">无匹配赛事</div>
+                ) : null}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">选择数据源平台</div>
+                    <select
+                      className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                      value={bindSourceId}
+                      onChange={(e) => setBindSourceId(e.target.value)}
+                    >
+                      <option value="">请选择</option>
+                      {sourceOptions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">赛事详情页URL</div>
+                    <Input
+                      ref={bindUrlInputRef}
+                      placeholder="https://..."
+                      value={bindUrl}
+                      onChange={(e) => setBindUrl(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant={bindPrimary ? "default" : "outline"}
+                    onClick={() => setBindPrimary((v) => !v)}
+                  >
+                    {bindPrimary ? "主要" : "次要"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => bindMutation.mutate()}
+                    disabled={
+                      !hasToken ||
+                      bindMutation.isPending ||
+                      (!bindMarathonId.trim() && !bindMarathonSearch.trim()) ||
+                      !bindSourceId.trim() ||
+                      !bindUrl.trim()
+                    }
+                  >
+                    绑定
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -850,7 +1090,17 @@ export default function AdminDataPage() {
                         </a>
                         <div className="text-xs text-muted-foreground mt-1 break-all">{r.url}</div>
                         <div className="mt-2">
-                          <Button size="sm" variant="outline" onClick={() => setBindUrl(r.url)}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              applyDiscoveredUrlToBinding({
+                                url: r.url,
+                                sourceId: listDiscoverySourceId,
+                                title: r.title,
+                              })
+                            }
+                          >
                             作为绑定 URL
                           </Button>
                         </div>
@@ -863,215 +1113,145 @@ export default function AdminDataPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>已绑定的赛事列表</CardTitle>
+                <CardTitle>方法2：搜索引擎发现赛事</CardTitle>
               </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-col md:flex-row gap-2">
-              <Input
-                placeholder="搜索（赛事名/canonical/url）"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <Input
-                placeholder="sourceId 过滤（可选）"
-                value={sourceFilter}
-                onChange={(e) => setSourceFilter(e.target.value)}
-                className="md:w-80"
-              />
-              <Button variant="outline" onClick={() => marathonSourcesQuery.refetch()} disabled={!hasToken}>
-                刷新
-              </Button>
-            </div>
-
-            {marathonSourcesQuery.error ? (
-              <p className="text-sm text-destructive">
-                {getFriendlyErrorMessage(marathonSourcesQuery.error)}
-              </p>
-            ) : null}
-
-            <div className="space-y-2">
-              {(marathonSourcesQuery.data?.data ?? []).map((item) => (
-                <div key={item.id} className="rounded-xl border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">
-                        {item.marathonName}{" "}
-                        <span className="text-xs text-muted-foreground">({item.canonicalName})</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate">{item.sourceName}</div>
-                    </div>
-                    <Badge variant={item.isPrimary ? "default" : "secondary"}>
-                      {item.isPrimary ? "primary" : "secondary"}
-                    </Badge>
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-2 break-all">{item.sourceUrl}</div>
-                  <div className="text-xs text-muted-foreground mt-2">
-                    lastCheckedAt={formatDateTime(item.lastCheckedAt)} / nextCheckAt=
-                    {formatDateTime(item.nextCheckAt)} / status={item.lastHttpStatus ?? "-"}
-                  </div>
-                  {item.lastError ? (
-                    <div className="text-xs text-destructive mt-2 break-all">{item.lastError}</div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>方法2：搜索引擎发现赛事</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+              <CardContent className="space-y-3">
                 <div className="text-xs text-muted-foreground">
                   使用搜索引擎查找赛事。适合发现新赛事或查找特定赛事的官网链接。
                 </div>
-            <div className="flex flex-col md:flex-row gap-2">
-              <Input
-                placeholder="Search query (admin-only)"
-                value={discoveryQ}
-                onChange={(e) => setDiscoveryQ(e.target.value)}
-              />
-              <Button
-                variant="outline"
-                onClick={() => discoveryMutation.mutate()}
-                disabled={!hasToken || discoveryMutation.isPending || !discoveryQ.trim()}
-              >
-                Search
-              </Button>
-            </div>
-
-            {discoveryMutation.data?.data?.length ? (
-              <div className="space-y-2">
-                {discoveryMutation.data.data.map((r) => (
-                  <div key={r.url} className="rounded-xl border p-3">
-                    <a
-                      href={r.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-sm font-medium underline underline-offset-2"
-                    >
-                      {r.title}
-                    </a>
-                    {r.description ? (
-                      <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                        {r.description}
-                      </div>
-                    ) : null}
-                    <div className="text-xs text-muted-foreground mt-1 break-all">{r.url}</div>
-                    <div className="mt-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setBindUrl(r.url)}
-                        disabled={!hasToken}
-                      >
-                        作为绑定 URL
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : discoveryMutation.isSuccess ? (
-              <p className="text-sm text-muted-foreground">No results</p>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>创建赛事绑定</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="text-xs text-muted-foreground">
-              使用上面发现的链接，将赛事URL与系统中的赛事关联，建立后系统会自动定期抓取该链接的最新信息。
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <Input
-                placeholder="搜索并选择赛事"
-                value={bindMarathonSearch}
-                onChange={(e) => setBindMarathonSearch(e.target.value)}
-              />
-              <Input
-                placeholder="已选择的赛事ID"
-                value={bindMarathonId}
-                onChange={(e) => setBindMarathonId(e.target.value)}
-              />
-            </div>
-
-            {marathonsQuery.data?.data?.length ? (
-              <div className="rounded-xl border p-2 max-h-56 overflow-y-auto space-y-1">
-                {marathonsQuery.data.data.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    className="w-full text-left text-sm px-2 py-1 rounded-lg hover:bg-muted"
-                    onClick={() => {
-                      setBindMarathonId(m.id);
-                      toast({ title: `已选择：${m.name}` });
-                    }}
+                <div className="flex flex-col md:flex-row gap-2">
+                  <Input
+                    placeholder="Search query (admin-only)"
+                    value={discoveryQ}
+                    onChange={(e) => setDiscoveryQ(e.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => discoveryMutation.mutate()}
+                    disabled={!hasToken || discoveryMutation.isPending || !discoveryQ.trim()}
                   >
-                    <div className="font-medium truncate">{m.name}</div>
-                    <div className="text-xs text-muted-foreground truncate">{m.canonicalName}</div>
-                  </button>
-                ))}
-              </div>
-            ) : bindMarathonSearch.trim() ? (
-              <div className="text-sm text-muted-foreground">无匹配赛事</div>
-            ) : null}
+                    Search
+                  </Button>
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">选择数据源平台</div>
-                <select
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  value={bindSourceId}
-                  onChange={(e) => setBindSourceId(e.target.value)}
-                >
-                  <option value="">请选择</option>
-                  {sourceOptions.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
+                {discoveryMutation.data?.data?.length ? (
+                  <div className="space-y-2">
+                    {discoveryMutation.data.data.map((r) => (
+                      <div key={r.url} className="rounded-xl border p-3">
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm font-medium underline underline-offset-2"
+                        >
+                          {r.title}
+                        </a>
+                        {r.description ? (
+                          <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                            {r.description}
+                          </div>
+                        ) : null}
+                        <div className="text-xs text-muted-foreground mt-1 break-all">{r.url}</div>
+                        <div className="mt-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              applyDiscoveredUrlToBinding({
+                                url: r.url,
+                                title: r.title,
+                              })
+                            }
+                            disabled={!hasToken}
+                          >
+                            作为绑定 URL
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : discoveryMutation.isSuccess ? (
+                  <p className="text-sm text-muted-foreground">No results</p>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>方法3：手动录入赛事链接</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-xs text-muted-foreground">
+                <div>如果方法1/2未找到合适链接，可直接在上方“创建赛事绑定”里手动粘贴赛事详情页 URL。</div>
+                <div>建议填写详情页而不是列表页，并选择对应平台 Source，避免后续抓取规则失配。</div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>已绑定的赛事列表</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex flex-col md:flex-row gap-2">
+                  <Input
+                    placeholder="搜索（赛事名/canonical/url）"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                  <Input
+                    placeholder="sourceId 过滤（可选）"
+                    value={sourceFilter}
+                    onChange={(e) => setSourceFilter(e.target.value)}
+                    className="md:w-80"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => marathonSourcesQuery.refetch()}
+                    disabled={!hasToken}
+                  >
+                    刷新
+                  </Button>
+                </div>
+
+                {marathonSourcesQuery.error ? (
+                  <p className="text-sm text-destructive">
+                    {getFriendlyErrorMessage(marathonSourcesQuery.error)}
+                  </p>
+                ) : null}
+
+                <div className="space-y-2">
+                  {(marathonSourcesQuery.data?.data ?? []).map((item) => (
+                    <div key={item.id} className="rounded-xl border p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">
+                            {item.marathonName}{" "}
+                            <span className="text-xs text-muted-foreground">
+                              ({item.canonicalName})
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {item.sourceName}
+                          </div>
+                        </div>
+                        <Badge variant={item.isPrimary ? "default" : "secondary"}>
+                          {item.isPrimary ? "主要" : "次要"}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-2 break-all">
+                        {item.sourceUrl}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-2">
+                        lastCheckedAt={formatDateTime(item.lastCheckedAt)} / nextCheckAt=
+                        {formatDateTime(item.nextCheckAt)} / status={item.lastHttpStatus ?? "-"}
+                      </div>
+                      {item.lastError ? (
+                        <div className="text-xs text-destructive mt-2 break-all">{item.lastError}</div>
+                      ) : null}
+                    </div>
                   ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">赛事详情页URL</div>
-                <Input
-                  placeholder="https://..."
-                  value={bindUrl}
-                  onChange={(e) => setBindUrl(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant={bindPrimary ? "default" : "outline"}
-                onClick={() => setBindPrimary((v) => !v)}
-              >
-                {bindPrimary ? "Primary" : "Secondary"}
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => bindMutation.mutate()}
-                disabled={
-                  !hasToken ||
-                  bindMutation.isPending ||
-                  !bindMarathonId.trim() ||
-                  !bindSourceId.trim() ||
-                  !bindUrl.trim()
-                }
-              >
-                绑定
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+                </div>
+              </CardContent>
+            </Card>
 
           </TabsContent>
 

@@ -176,6 +176,19 @@ export async function updateAdminSource(
   });
 }
 
+export async function deleteAdminSource(
+  token: string,
+  id: string,
+  options?: { force?: boolean },
+) {
+  const query = new URLSearchParams();
+  if (options?.force) query.set("force", "true");
+  const qs = query.toString();
+  return adminRequest<{ success: boolean }>(token, `/admin/sources/${id}${qs ? `?${qs}` : ""}`, {
+    method: "DELETE",
+  });
+}
+
 export async function runAdminSyncAll(token: string) {
   return adminRequest<{ success: boolean }>(token, "/admin/sync/run-all", {
     method: "POST",
@@ -308,6 +321,23 @@ export async function listAdminMarathons(
   if (params?.search) query.set("search", params.search);
   const qs = query.toString();
   return adminRequest<{ data: AdminMarathon[] }>(token, `/admin/marathons${qs ? `?${qs}` : ""}`);
+}
+
+export async function createAdminMarathon(
+  token: string,
+  payload: {
+    name: string;
+    canonicalName?: string;
+    city?: string | null;
+    country?: string | null;
+    description?: string | null;
+    websiteUrl?: string | null;
+  },
+) {
+  return adminRequest<{ data: AdminMarathon; created: boolean }>(token, "/admin/marathons", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function upsertAdminMarathonSource(

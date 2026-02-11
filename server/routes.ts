@@ -1533,6 +1533,77 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/admin/sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const sourceId = z.string().uuid().parse(req.params.id);
+      const force = z.coerce.boolean().default(false).parse(req.query.force);
+
+      const [sourceRecord] = await database
+        .select({ id: sources.id, name: sources.name })
+        .from(sources)
+        .where(eq(sources.id, sourceId))
+        .limit(1);
+      if (!sourceRecord) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+
+      const [linkedMarathonSources] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(marathonSources)
+        .where(eq(marathonSources.sourceId, sourceId));
+      const [linkedSyncRuns] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(marathonSyncRuns)
+        .where(eq(marathonSyncRuns.sourceId, sourceId));
+      const [linkedRawCrawls] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.sourceId, sourceId));
+
+      const linkedCount =
+        (linkedMarathonSources?.count ?? 0) +
+        (linkedSyncRuns?.count ?? 0) +
+        (linkedRawCrawls?.count ?? 0);
+
+      if (linkedCount > 0) {
+        if (!force) {
+          return res.status(409).json({
+            message:
+              "Source is still referenced and cannot be deleted directly. Retry with force=true to remove related bindings and historical crawl/sync records.",
+            details: {
+              marathonSources: linkedMarathonSources?.count ?? 0,
+              syncRuns: linkedSyncRuns?.count ?? 0,
+              rawCrawl: linkedRawCrawls?.count ?? 0,
+            },
+          });
+        }
+
+        await database.transaction(async (tx) => {
+          await tx.delete(marathonSources).where(eq(marathonSources.sourceId, sourceId));
+          await tx.delete(marathonSyncRuns).where(eq(marathonSyncRuns.sourceId, sourceId));
+          await tx.delete(rawCrawlData).where(eq(rawCrawlData.sourceId, sourceId));
+          await tx.delete(sources).where(eq(sources.id, sourceId));
+        });
+        return res.json({
+          success: true,
+          deleted: {
+            sourceId,
+            marathonSources: linkedMarathonSources?.count ?? 0,
+            syncRuns: linkedSyncRuns?.count ?? 0,
+            rawCrawl: linkedRawCrawls?.count ?? 0,
+          },
+        });
+      }
+
+      await database.delete(sources).where(eq(sources.id, sourceId));
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/admin/sync/run-all", async (req, res, next) => {
     try {
       requireAdmin(req);
@@ -2091,6 +2162,81 @@ export async function registerRoutes(
         .limit(params.limit);
 
       res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/marathons", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          name: z.string().trim().min(1).max(200),
+          canonicalName: z.string().trim().min(1).max(200).optional(),
+          city: z.string().trim().min(1).max(100).nullable().optional(),
+          country: z.string().trim().min(1).max(100).nullable().optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          websiteUrl: z.string().url().nullable().optional(),
+        })
+        .parse(req.body);
+
+      const [existingByName] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(eq(marathons.name, payload.name))
+        .limit(1);
+      if (existingByName) {
+        return res.json({ data: existingByName, created: false });
+      }
+
+      const canonicalSeed = payload.canonicalName ?? payload.name;
+      const canonicalBase = (canonicalizeName(canonicalSeed) || "marathon")
+        .replace(/[^a-z0-9\u4e00-\u9fff-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+      let canonicalCandidate = canonicalBase || `marathon-${Date.now().toString(36)}`;
+      let suffix = 2;
+      while (true) {
+        const [exists] = await database
+          .select({ id: marathons.id })
+          .from(marathons)
+          .where(eq(marathons.canonicalName, canonicalCandidate))
+          .limit(1);
+        if (!exists) break;
+        canonicalCandidate = `${canonicalBase || "marathon"}-${suffix}`;
+        suffix += 1;
+      }
+
+      const [created] = await database
+        .insert(marathons)
+        .values({
+          name: payload.name,
+          canonicalName: canonicalCandidate,
+          city: payload.city ?? null,
+          country: payload.country ?? null,
+          description: payload.description ?? null,
+          websiteUrl: payload.websiteUrl ?? null,
+          updatedAt: new Date(),
+        })
+        .returning({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          websiteUrl: marathons.websiteUrl,
+        });
+
+      res.status(201).json({ data: created, created: true });
     } catch (error) {
       next(error);
     }
