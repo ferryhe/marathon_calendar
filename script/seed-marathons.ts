@@ -269,110 +269,175 @@ const sourceSeedData = [
   // Layer 1: official websites (high priority)
   {
     name: "赛事官方网站（直采）",
+    type: "official",
+    strategy: "HTML",
     baseUrl: null,
     priority: 100,
+    isActive: true,
+    // A generic extractor that works for many official marathon sites.
+    // Per-site overrides can be added later via sources.config.
+    config: {
+      extract: {
+        raceDate: {
+          selector:
+            ".race-date p, .race-date, .event-date, .simple-date, .component-hero-banner-subheading, .countdown-section-header h3, body",
+          attr: "text",
+          regex:
+            "((January|February|March|April|May|June|July|August|September|October|November|December)\\\\s+\\\\d{1,2},\\\\s+20\\\\d{2})",
+          group: 1,
+        },
+      },
+    },
     notes: "第一层核心数据源；按赛事官网直采，数据权威性最高",
   },
   {
     name: "北京马拉松官网",
+    type: "official",
+    strategy: "HTML",
     baseUrl: "https://www.beijing-marathon.com",
     priority: 95,
+    isActive: true,
     notes: "第一层核心数据源；官网示例来源于数据源调研报告",
   },
   {
     name: "上海马拉松官网",
+    type: "official",
+    strategy: "HTML",
     baseUrl: "https://www.shang-ma.com",
     priority: 95,
+    isActive: true,
     notes: "第一层核心数据源；官网示例来源于数据源调研报告",
   },
   {
     name: "厦门马拉松官网",
+    type: "official",
+    strategy: "HTML",
     baseUrl: "https://www.xmim.org",
     priority: 95,
+    isActive: true,
     notes: "第一层核心数据源；官网示例来源于数据源调研报告",
   },
   {
     name: "广州马拉松官网",
+    type: "official",
+    strategy: "HTML",
     baseUrl: "https://www.gzmarathon.com",
     priority: 95,
+    isActive: true,
     notes: "第一层核心数据源；官网示例来源于数据源调研报告",
   },
   {
     name: "杭州马拉松官网",
+    type: "official",
+    strategy: "HTML",
     baseUrl: "https://www.hzim.org",
     priority: 95,
+    isActive: true,
     notes: "第一层核心数据源；官网示例来源于数据源调研报告",
   },
   {
     name: "成都马拉松官网",
+    type: "official",
+    strategy: "HTML",
     baseUrl: "https://www.chengdumarathon.com",
     priority: 95,
+    isActive: true,
     notes: "第一层核心数据源；官网示例来源于数据源调研报告",
   },
   {
     name: "武汉马拉松官网",
+    type: "official",
+    strategy: "HTML",
     baseUrl: "https://www.wuhanmarathon.com",
     priority: 95,
+    isActive: true,
     notes: "第一层核心数据源；官网示例来源于数据源调研报告",
   },
   {
     name: "深圳马拉松官网",
+    type: "official",
+    strategy: "HTML",
     baseUrl: "https://www.szmarthon.com",
     priority: 95,
+    isActive: true,
     notes: "第一层核心数据源；官网示例来源于数据源调研报告（原文URL）",
   },
 
   // Layer 1: major registration platforms
   {
     name: "最酷体育（Zuicool）",
+    type: "platform",
+    strategy: "HTML",
     baseUrl: "https://www.zuicool.com",
     priority: 90,
+    isActive: false,
     notes: "第一层核心数据源；国内主流马拉松报名平台",
   },
   {
     name: "爱燃烧（iranshao）",
+    type: "platform",
+    strategy: "HTML",
     baseUrl: "https://iranshao.com",
     priority: 88,
+    isActive: false,
     notes: "第一层核心数据源；跑步社区+赛事报名",
   },
   {
     name: "芝华安方体育",
+    type: "platform",
+    strategy: "HTML",
     baseUrl: "https://www.zhihuianfang.com",
     priority: 86,
+    isActive: false,
     notes: "第一层核心数据源；专业赛事运营公司",
   },
 
   // Layer 2: supplementary platforms
   {
     name: "42旅（42travel）",
+    type: "platform",
+    strategy: "HTML",
     baseUrl: "https://www.42travel.com",
     priority: 75,
+    isActive: false,
     notes: "第二层补充数据源；国内外赛事聚合",
   },
   {
     name: "悦跑圈（JoyRun）",
+    type: "platform",
+    strategy: "HTML",
     baseUrl: "https://www.thejoyrun.com",
     priority: 70,
+    isActive: false,
     notes: "第二层补充数据源；跑步APP+赛事信息",
   },
 
   // Layer 3: discovery channels
   {
     name: "Google 搜索",
+    type: "search",
+    strategy: "API",
     baseUrl: "https://www.google.com/search",
     priority: 40,
+    isActive: false,
     notes: "第三层发现数据源；用于发现新增/小型赛事",
   },
   {
     name: "Bing 搜索",
+    type: "search",
+    strategy: "API",
     baseUrl: "https://www.bing.com/search",
     priority: 40,
+    isActive: false,
     notes: "第三层发现数据源；用于发现新增/小型赛事",
   },
   {
     name: "社交媒体与跑步社区",
+    type: "social",
+    strategy: "HTML",
     baseUrl: null,
     priority: 30,
+    isActive: false,
     notes: "第三层发现数据源；公众号/微博/小红书/抖音等",
   },
 ] as const;
@@ -440,6 +505,8 @@ async function seed() {
           .values({
             marathonId: marathon.id,
             ...edition,
+            publishStatus: "published",
+            publishedAt: new Date(),
             updatedAt: new Date(),
           })
           .onConflictDoNothing();
@@ -457,13 +524,20 @@ async function seed() {
     for (const sourceData of sourceSeedData) {
       const [sourceRecord] = await db
         .insert(sources)
-        .values(sourceData)
+        .values({
+          ...sourceData,
+          updatedAt: new Date(),
+        })
         .onConflictDoUpdate({
           target: sources.name,
           set: {
+            type: sourceData.type,
+            strategy: sourceData.strategy,
             baseUrl: sourceData.baseUrl,
             priority: sourceData.priority,
+            isActive: sourceData.isActive,
             notes: sourceData.notes,
+            updatedAt: new Date(),
           },
         })
         .returning();
@@ -542,37 +616,10 @@ async function seed() {
         });
         hasPrimary = true;
       }
-
-      if (marathon.country === "China") {
-        for (const platformName of [
-          "最酷体育（Zuicool）",
-          "爱燃烧（iranshao）",
-          "芝华安方体育",
-          "悦跑圈（JoyRun）",
-        ]) {
-          const platform = sourceMap.get(platformName);
-          if (!platform?.baseUrl) {
-            continue;
-          }
-          plannedLinks.push({
-            sourceName: platform.name,
-            sourceUrl: platform.baseUrl,
-            isPrimary: false,
-          });
-        }
-      } else {
-        for (const platformName of ["42旅（42travel）", "爱燃烧（iranshao）"]) {
-          const platform = sourceMap.get(platformName);
-          if (!platform?.baseUrl) {
-            continue;
-          }
-          plannedLinks.push({
-            sourceName: platform.name,
-            sourceUrl: platform.baseUrl,
-            isPrimary: false,
-          });
-        }
-      }
+      // Note:
+      // Registration platforms/search engines are kept in the source catalog,
+      // but should not be linked to every marathon as a single baseUrl.
+      // They belong to a later "discovery" pipeline (search -> match -> bind).
 
       if (!hasPrimary && plannedLinks.length > 0) {
         plannedLinks[0].isPrimary = true;

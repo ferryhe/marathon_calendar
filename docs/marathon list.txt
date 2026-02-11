@@ -1,0 +1,73 @@
+# 🌍 全球马拉松官方网站与赛事信息汇总 (2026最新版)
+
+> **最后更新时间**: 2026年2月
+> **重要更新**: 
+> 1. **悉尼马拉松** 已正式成为世界马拉松大满贯第7站。
+> 2. **开普敦马拉松** 目前为大满贯候选赛事。
+> 3. **中国国内赛事** 官网常用于信息发布，实际报名强烈建议使用“数字心动”APP（田协官方）、“马拉马拉”APP或“最酷”等平台，部分官网在非赛季可能无法访问。
+
+---
+
+## 🏅 世界马拉松大满贯 (Abbott World Marathon Majors) - 七大满贯
+
+| 赛事名称 (中/英) | 特色与评价 | 官方网站 URL | 报名方式 |
+| :--- | :--- | :--- | :--- |
+| **悉尼马拉松** ⭐ **(新晋)**<br>TCS Sydney Marathon | **特色**: 2025年正式晋升为第7大满贯。跑过海港大桥，终点歌剧院。<br>**评价**: 全球风景最美的大满贯之一，赛道有一定起伏，南半球顶级赛事。 | [https://sydneymarathon.com/](https://sydneymarathon.com/) | 官网/抽签 |
+| **东京马拉松** ⭐<br>Tokyo Marathon | **特色**: 亚洲老牌大满贯，服务极致，赛道平坦，观众热情。<br>**评价**: 体验最好的赛事之一，中签率极低，通常在3月初举行。 | [https://www.marathon.tokyo/en/](https://www.marathon.tokyo/en/) | 官网抽签 |
+| **波士顿马拉松** ⭐<br>Boston Marathon | **特色**: 殿堂级赛事，门槛极高(BQ)，跑者的朝圣之地。<br>**评价**: 赛道有起伏（心碎坡），氛围神圣，4月爱国者日举行。 | [https://www.baa.org/](https://www.baa.org/) | 官网 (需达BQ) |
+| **伦敦马拉松** ⭐<br>TCS London Marathon | **特色**: 慈善募捐全球第一，Cosplay文化浓厚，赛道经过众多地标。<br>**评价**: 中签率全球最低（约4%），通常在4月举行。 | [https://www.tcslondonmarathon.com/](https://www.tcslondonmarathon.com/) | 官网抽签 (Ballot) |
+| **柏林马拉松** ⭐<br>BMW Berlin Marathon | **特色**: "世界最快赛道"，PB圣地，经过勃兰登堡门。<br>**评价**: 组织严谨，赛道极其平坦宽阔，9月底举行。 | [https://www.bmw-berlin-marathon.com/en/](https://www.bmw-berlin-marathon.com/en/) | 官网抽签 |
+| **芝加哥马拉松** ⭐<br>Bank of America Chicago Marathon | **特色**: 环形赛道，起终点都在格兰特公园，风大但平坦。<br>**评价**: 城市景观极佳，观众气氛热烈，10月举行。 | [https://www.chicagomarathon.com/](https://www.chicagomarathon.com/) | 官网抽签 |
+| **纽约马拉松** ⭐<br>TCS New York City Marathon | **特色**: 穿越五大区，终点在中央公园，规模全球最大。<br>**评价**: 赛道有难度（桥梁多），气氛最嗨，11月初举行。 | [https://www.nyrr.org/tcsnycmarathon](https://www.nyrr.org/tcsnycmarathon) | 官网抽签 |
+
+---
+
+## 🔜 大满贯候选赛事 (Candidate Race)
+
+| 赛事名称 (中/英) | 特色与评价 | 官方网站 URL |
+| :--- | :--- | :--- |
+| **开普敦马拉松**<br>Sanlam Cape Town Marathon | **特色**: 非洲首个冲击大满贯的赛事，桌山脚下奔跑，风景壮丽。<br>**评价**: 致力于成为非洲首个大满贯，赛道优化中，体验独特。 | [https://capetownmarathon.com/](https://capetownmarathon.com/) |
+
+---
+
+## 🇨🇳 中国核心赛事 (白金标/双金/热门)
+
+*注：以下排名不分先后，涵盖了顶级热门及特色省会赛事。*
+
+| 赛事名称 | 特色与评价 | 官方网站 URL | 备注 |
+| :--- | :--- | :--- | :--- |
+| **北京马拉松** | **国马**: 仪式感最强，从天安门跑向奥森，全马门槛高。 | [http://www.beijing-marathon.com/](http://www.beijing-marathon.com/) | 报名：数字心动/马拉马拉 |
+| **上海马拉松** | **海派**: 白金标赛事，服务专业，外滩景观，成绩含金量高。 | [https://www.shang-ma.com/](https://www.shang-ma.com/) | 报名：上马APP |
+| **厦门马拉松** | **最美赛道**: 全程环岛路海景，年初首场大戏，风大坡多。 | [https://www.xmim.org/](https://www.xmim.org/) | 报名：数字心动 |
+| **香港马拉松** | **魔鬼赛道**: "三桥三隧"挑战极大，奖金丰厚，气氛国际化。 | [https://www.hkmarathon.com/](https://www.hkmarathon.com/) | 官网抽签 |
+| **无锡马拉松** | **零差评**: 樱花季最美赛道，汇跑运营体验极佳，PB首选。 | [http://www.wuximarathon.com/](http://www.wuximarathon.com/) | 报名：数字心动 |
+| **武汉马拉松** | **最热情**: "一城两江三镇四桥五湖"，观众热情度国内第一。 | [http://www.wuhanmarathon.org/](http://www.wuhanmarathon.org/) | 报名：马拉马拉 |
+| **广州马拉松** | **羊城**: 沿珠江两岸奔跑，补给丰富，12月天气适宜。 | [http://www.guangzhou-marathon.com/](http://www.guangzhou-marathon.com/) | 报名：数字心动 |
+| **成都马拉松** | **熊猫与美食**: 唯一的世界大满贯候选(曾)，赛道经过熊猫基地，终点有火锅补给。 | [http://chengdu-marathon.mararun.com/](http://chengdu-marathon.mararun.com/) | 运营：万达体育 |
+| **杭州马拉松** | **风景**: 跑过西湖与钱塘江，路线近年优化，兼顾风景与竞技。 | [http://www.hzim.org/](http://www.hzim.org/) | 报名：数字心动 |
+| **重庆马拉松** | **火锅马**: 滨江路折返，极其平坦，但风景稍显单一。 | [http://www.cqmarathon.com/](http://www.cqmarathon.com/) | 报名：数字心动 |
+| **兰州马拉松** | **亚高原**: 沿着黄河跑，观众热情极高，6月举办考验耐热。 | [http://www.lzmarathon.com/](http://www.lzmarathon.com/) | 报名：官网 |
+| **西安马拉松** | **穿越古今**: 跑过城墙、钟楼、大唐芙蓉园，文化体验满分。 | [http://www.xi-ma.com/](http://www.xi-ma.com/) | 报名：曲江体育 |
+| **长沙马拉松** | **山水洲城**: 跑过橘子洲头，赛道有起伏，湘味十足。 | [http://www.marathonchangsha.com/](http://www.marathonchangsha.com/) | 报名：数字心动 |
+| **南京马拉松** | **古都**: 经过中山陵、玄武湖，赛道优美，部分路段有坡。 | [http://www.nj-marathon.org/](http://www.nj-marathon.org/) | 备用：nanjing.marathon.org.cn |
+| **合肥马拉松** | **巢湖**: 沿巢湖岸边奔跑，路宽人少，近年来口碑上升。 | [http://www.hefeimarathon.com/](http://www.hefeimarathon.com/) | |
+| **太原马拉松** | **汾河**: 沿着汾河两岸跑，九月举办气候凉爽，容易出成绩。 | [http://www.tymarathon.cn/](http://www.tymarathon.cn/) | |
+| **济南马拉松** | **泉城**: 经过大明湖、趵突泉等核心景区，近年来组织进步明显。 | [http://www.jinan-marathon.com/](http://www.jinan-marathon.com/) | |
+| **南昌马拉松** | **英雄城**: 跑过八一广场、赣江两岸，红色文化特色。 | [http://www.nanchangmarathon.cn/](http://www.nanchangmarathon.cn/) | |
+| **哈尔滨马拉松** | **风情**: 8月底举办，欧式建筑风格，补给超级豪华(红肠/格瓦斯)。 | [http://www.hrb-marathon.chinarun.com/](http://www.hrb-marathon.chinarun.com/) | 报名：数字心动 |
+| **石家庄马拉松** | **新星**: 赛道平坦宽阔，近年来城市更新后赛道体验大幅提升。 | [http://www.sjz-marathon.com/](http://www.sjz-marathon.com/) | |
+| **大连马拉松** | **老牌**: 国内历史最悠久赛事之一，有坡度，5月槐花飘香。 | [http://www.dlmls.org/](http://www.dlmls.org/) | |
+| **扬州鉴真半马** | **半马金标**: 国内少有的纯半马金标赛事，氛围极好，需抽签。 | [http://www.yzmls.com/](http://www.yzmls.com/) | 专注半程 |
+| **黄河口(东营)** | **湿地**: 赛道极其平坦宽阔（一马平川），经过黄河入海口湿地。 | [http://www.hhkmls.com/](http://www.hhkmls.com/) | 适合PB |
+| **苏州太湖马拉松** | **湖景**: 区别于"苏马"（古城），此赛事主要围绕太湖，风景开阔优美。 | [http://www.runsuzhou.com/](http://www.runsuzhou.com/) | 勿与"苏州马拉松"混淆 |
+
+---
+
+## 🇺🇸🇨🇦 北美精选赛事 (除大满贯外)
+
+| 赛事名称 (中/英) | 特色与评价 | 官方网站 URL |
+| :--- | :--- | :--- |
+| **海洋陆战队马拉松**<br>Marine Corps Marathon | **特色**: 华盛顿特区举办，终点海军陆战队士兵挂奖牌，爱国氛围浓厚。 | [https://www.marinemarathon.com/](https://www.marinemarathon.com/) |
+| **火奴鲁鲁马拉松**<br>Honolulu Marathon | **特色**: 夏威夷举办，无关门时间，气氛如度假，可看钻石头山日出。 | [https://www.honolulumarathon.org/](https://www.honolulumarathon.org/) |
+| **多伦多滨水马拉松**<br>TCS Toronto Waterfront Marathon | **特色**: 加拿大顶级赛事，安大略湖边赛道，精英云集，10月举办。 | [https://www.torontowaterfrontmarathon.com/](https://www.torontowaterfrontmarathon.com/) |
+| **温哥华马拉松**<br>BMO Vancouver Marathon | **特色**: 5月举办，跑过斯坦利公园海堤，被誉为"世界最美马拉松"之一。 | [https://bmovanmarathon.ca/](https://bmovanmarathon.ca/) |

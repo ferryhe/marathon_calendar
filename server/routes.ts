@@ -15,11 +15,19 @@ import {
   marathonReviews,
   reviewLikes,
   reviewReports,
+  sources,
+  marathonSources,
+  marathonSyncRuns,
+  rawCrawlData,
   marathons,
   marathonEditions,
 } from "@shared/schema";
 import { db } from "./db";
 import { hashPassword, verifyPassword } from "./auth";
+import { syncMarathonSourceOnce, syncNowOnce } from "./syncScheduler";
+import { braveWebSearch } from "./braveSearch";
+import { upsertEditionWithMerge } from "./editionMerge";
+import { aiGenerateExtractTemplateFromHtml, previewExtractTemplate } from "./aiRuleTemplate";
 
 const reviewPayloadSchema = insertReviewSchema.omit({
   marathonId: true,
@@ -101,6 +109,22 @@ function ensureDatabase() {
   }
 
   return db;
+}
+
+function requireAdmin(req: Request) {
+  const expected = process.env.ADMIN_API_TOKEN;
+  if (!expected) {
+    const error = new Error("Admin API is not enabled");
+    (error as Error & { status?: number }).status = 404;
+    throw error;
+  }
+
+  const headerValue = req.header("x-admin-token") ?? "";
+  if (headerValue !== expected) {
+    const error = new Error("Admin authentication required");
+    (error as Error & { status?: number }).status = 401;
+    throw error;
+  }
 }
 
 async function regenerateSession(req: Request) {
@@ -854,6 +878,7 @@ export async function registerRoutes(
 
       const marathonIds = baseMarathons.map((marathon) => marathon.id);
       const editionConditions = [inArray(marathonEditions.marathonId, marathonIds)];
+      editionConditions.push(eq(marathonEditions.publishStatus, "published"));
 
       if (params.year) {
         editionConditions.push(eq(marathonEditions.year, params.year));
@@ -876,7 +901,12 @@ export async function registerRoutes(
         .select()
         .from(marathonEditions)
         .where(editionWhereClause)
-        .orderBy(asc(marathonEditions.raceDate), desc(marathonEditions.year));
+        // Null raceDate means "TBD": keep them at the end so upcoming lists remain useful.
+        .orderBy(
+          sql`case when ${marathonEditions.raceDate} is null then 1 else 0 end`,
+          asc(marathonEditions.raceDate),
+          desc(marathonEditions.year),
+        );
 
       const editionsByMarathon = new Map<string, typeof editionRecords>();
       for (const edition of editionRecords) {
@@ -988,7 +1018,12 @@ export async function registerRoutes(
         })
         .from(marathons)
         .innerJoin(marathonEditions, eq(marathons.id, marathonEditions.marathonId))
-        .where(sql`${marathonEditions.raceDate} >= CURRENT_DATE`)
+        .where(
+          and(
+            eq(marathonEditions.publishStatus, "published"),
+            sql`${marathonEditions.raceDate} >= CURRENT_DATE`,
+          ),
+        )
         .orderBy(asc(marathonEditions.raceDate))
         .limit(limit);
       
@@ -1085,7 +1120,12 @@ export async function registerRoutes(
       const editions = await database
         .select()
         .from(marathonEditions)
-        .where(eq(marathonEditions.marathonId, req.params.id))
+        .where(
+          and(
+            eq(marathonEditions.marathonId, req.params.id),
+            eq(marathonEditions.publishStatus, "published"),
+          ),
+        )
         .orderBy(desc(marathonEditions.year));
       
       // Get reviews with user profile data for avatar/display name rendering.
@@ -1362,6 +1402,754 @@ export async function registerRoutes(
         .returning();
 
       res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // --- Admin-only: data collection/sync management (Stage 1.3) ---
+  app.get("/api/admin/stats", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+
+      const now = new Date();
+      const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      const [sourceCounts] = await database
+        .select({
+          total: sql<number>`count(*)::int`,
+          active: sql<number>`sum(case when ${sources.isActive} then 1 else 0 end)::int`,
+        })
+        .from(sources);
+
+      const [marathonSourceCounts] = await database
+        .select({
+          total: sql<number>`count(*)::int`,
+        })
+        .from(marathonSources);
+
+      const rawByStatus = await database
+        .select({
+          status: rawCrawlData.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(rawCrawlData)
+        .groupBy(rawCrawlData.status);
+
+      const rawLast24hByStatus = await database
+        .select({
+          status: rawCrawlData.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(rawCrawlData)
+        .where(sql`${rawCrawlData.fetchedAt} >= ${since24h}`)
+        .groupBy(rawCrawlData.status);
+
+      const runsLast24hByStatus = await database
+        .select({
+          status: marathonSyncRuns.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(marathonSyncRuns)
+        .where(sql`${marathonSyncRuns.startedAt} >= ${since24h}`)
+        .groupBy(marathonSyncRuns.status);
+
+      res.json({
+        data: {
+          now: now.toISOString(),
+          since24h: since24h.toISOString(),
+          sources: {
+            total: sourceCounts?.total ?? 0,
+            active: sourceCounts?.active ?? 0,
+          },
+          marathonSources: {
+            total: marathonSourceCounts?.total ?? 0,
+          },
+          raw: {
+            byStatus: rawByStatus,
+            last24hByStatus: rawLast24hByStatus,
+          },
+          runs: {
+            last24hByStatus: runsLast24hByStatus,
+          },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/sources", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const records = await database
+        .select()
+        .from(sources)
+        .orderBy(desc(sources.priority), asc(sources.name));
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          name: z.string().trim().min(1).max(200).optional(),
+          type: z.string().trim().min(1).max(50).optional(),
+          strategy: z.string().trim().min(1).max(50).optional(),
+          baseUrl: z.string().url().nullable().optional(),
+          priority: z.number().int().min(0).max(1000).optional(),
+          isActive: z.boolean().optional(),
+          retryMax: z.number().int().min(1).max(10).optional(),
+          retryBackoffSeconds: z.number().int().min(1).max(3600).optional(),
+          requestTimeoutMs: z.number().int().min(1000).max(120000).optional(),
+          minIntervalSeconds: z.number().int().min(0).max(7 * 24 * 3600).optional(),
+          notes: z.string().max(2000).nullable().optional(),
+          config: z.record(z.string(), z.unknown()).nullable().optional(),
+        })
+        .parse(req.body);
+
+      const [updated] = await database
+        .update(sources)
+        .set({
+          ...payload,
+          updatedAt: new Date(),
+        })
+        .where(eq(sources.id, req.params.id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+      res.json({ data: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/sync/run-all", async (req, res, next) => {
+    try {
+      requireAdmin(req);
+      await syncNowOnce();
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/sync/run-marathon-source", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          marathonSourceId: z.string().uuid(),
+        })
+        .parse(req.body);
+
+      const [record] = await database
+        .select({
+          msId: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          lastHash: marathonSources.lastHash,
+          source: sources,
+        })
+        .from(marathonSources)
+        .innerJoin(sources, eq(sources.id, marathonSources.sourceId))
+        .where(eq(marathonSources.id, payload.marathonSourceId));
+
+      if (!record) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+
+      const result = await syncMarathonSourceOnce({
+        source: record.source,
+        marathonId: record.marathonId,
+        marathonSourceId: record.msId,
+        sourceUrl: record.sourceUrl,
+        lastHash: record.lastHash,
+      });
+
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/sync/runs", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const limit = z
+        .preprocess(
+          (value) => (Array.isArray(value) ? value[0] : value),
+          z.coerce.number().int().min(1).max(200).default(50),
+        )
+        .parse(req.query.limit);
+      const records = await database
+        .select()
+        .from(marathonSyncRuns)
+        .orderBy(desc(marathonSyncRuns.startedAt))
+        .limit(limit);
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/raw-crawl", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(200).default(50),
+          status: z.string().trim().min(1).max(50).optional(),
+          marathonId: z.string().uuid().optional(),
+          sourceId: z.string().uuid().optional(),
+        })
+        .parse(req.query);
+
+      const conditions = [];
+      if (params.status) conditions.push(eq(rawCrawlData.status, params.status));
+      if (params.marathonId) conditions.push(eq(rawCrawlData.marathonId, params.marathonId));
+      if (params.sourceId) conditions.push(eq(rawCrawlData.sourceId, params.sourceId));
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const records = await database
+        .select({
+          id: rawCrawlData.id,
+          marathonId: rawCrawlData.marathonId,
+          sourceId: rawCrawlData.sourceId,
+          sourceUrl: rawCrawlData.sourceUrl,
+          httpStatus: rawCrawlData.httpStatus,
+          contentType: rawCrawlData.contentType,
+          contentHash: rawCrawlData.contentHash,
+          status: rawCrawlData.status,
+          fetchedAt: rawCrawlData.fetchedAt,
+          processedAt: rawCrawlData.processedAt,
+          metadata: rawCrawlData.metadata,
+        })
+        .from(rawCrawlData)
+        .where(whereClause)
+        .orderBy(desc(rawCrawlData.fetchedAt))
+        .limit(params.limit);
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/raw-crawl/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const full = z
+        .preprocess((v) => (Array.isArray(v) ? v[0] : v), z.coerce.boolean().default(false))
+        .parse(req.query.full);
+
+      const [row] = await database
+        .select({
+          id: rawCrawlData.id,
+          marathonId: rawCrawlData.marathonId,
+          sourceId: rawCrawlData.sourceId,
+          sourceUrl: rawCrawlData.sourceUrl,
+          httpStatus: rawCrawlData.httpStatus,
+          contentType: rawCrawlData.contentType,
+          contentHash: rawCrawlData.contentHash,
+          status: rawCrawlData.status,
+          fetchedAt: rawCrawlData.fetchedAt,
+          processedAt: rawCrawlData.processedAt,
+          metadata: rawCrawlData.metadata,
+          rawContent: rawCrawlData.rawContent,
+        })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.id, id))
+        .limit(1);
+
+      if (!row) return res.status(404).json({ message: "Raw crawl not found" });
+
+      const rawContent = full ? row.rawContent : (row.rawContent ?? "").slice(0, 5000);
+      res.json({
+        data: {
+          ...row,
+          rawContent,
+          rawContentTruncated: !full && Boolean(row.rawContent && row.rawContent.length > 5000),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/discovery/list", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+
+      const payload = z
+        .object({
+          sourceId: z.string().uuid(),
+          listUrl: z.string().url(),
+          maxResults: z.coerce.number().int().min(1).max(200).default(40),
+        })
+        .parse(req.body);
+
+      const [sourceRecord] = await database
+        .select({
+          id: sources.id,
+          name: sources.name,
+          requestTimeoutMs: sources.requestTimeoutMs,
+          config: sources.config,
+        })
+        .from(sources)
+        .where(eq(sources.id, payload.sourceId))
+        .limit(1);
+
+      if (!sourceRecord) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+
+      const cfg = (sourceRecord.config ?? {}) as any;
+      const listCfg = cfg?.discovery?.list ?? null;
+      const itemLink = listCfg?.itemLink ?? null;
+      if (!itemLink || typeof itemLink !== "object" || typeof itemLink.selector !== "string") {
+        return res.status(400).json({
+          message:
+            "Source config missing discovery.list.itemLink.selector (configure in sources.config)",
+        });
+      }
+
+      const selector = String(itemLink.selector);
+      const attr = typeof itemLink.attr === "string" ? itemLink.attr : "href";
+      const regex = typeof itemLink.regex === "string" ? itemLink.regex : null;
+      const group = typeof itemLink.group === "number" ? itemLink.group : 1;
+
+      const controller = new AbortController();
+      const timeoutMs =
+        Number.isFinite(sourceRecord.requestTimeoutMs) && sourceRecord.requestTimeoutMs
+          ? sourceRecord.requestTimeoutMs
+          : 15000;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      let html = "";
+      try {
+        const response = await fetch(payload.listUrl, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "marathon-calendar/1.0 (+https://github.com/ferryhe/marathon_calendar)",
+          },
+        });
+        html = await response.text();
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const { load } = await import("cheerio");
+      const $ = load(html);
+
+      const seen = new Set<string>();
+      const results: Array<{ url: string; title: string | null }> = [];
+
+      $(selector).each((_i, el) => {
+        if (results.length >= payload.maxResults) return;
+        const node = $(el);
+        const rawValue =
+          attr === "text" ? node.text() : attr === "html" ? node.html() ?? "" : node.attr(attr) ?? "";
+        let value = String(rawValue ?? "").trim();
+        if (!value) return;
+
+        if (regex) {
+          try {
+            const re = new RegExp(regex, "i");
+            const m = value.match(re);
+            if (!m) return;
+            value = String(m[group] ?? "").trim();
+            if (!value) return;
+          } catch {
+            return;
+          }
+        }
+
+        if (value.startsWith("javascript:") || value === "#" || value.startsWith("mailto:")) return;
+
+        let absolute: string;
+        try {
+          absolute = new URL(value, payload.listUrl).toString();
+        } catch {
+          return;
+        }
+        if (!absolute.startsWith("http://") && !absolute.startsWith("https://")) return;
+        if (seen.has(absolute)) return;
+        seen.add(absolute);
+
+        const titleText = node.text().trim();
+        results.push({ url: absolute, title: titleText || null });
+      });
+
+      res.json({
+        data: {
+          sourceId: sourceRecord.id,
+          sourceName: sourceRecord.name,
+          listUrl: payload.listUrl,
+          count: results.length,
+          results,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/raw-crawl/:id/ai-rule-template", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [raw] = await database
+        .select({
+          id: rawCrawlData.id,
+          sourceUrl: rawCrawlData.sourceUrl,
+          rawContent: rawCrawlData.rawContent,
+        })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.id, id))
+        .limit(1);
+
+      if (!raw) return res.status(404).json({ message: "Raw crawl not found" });
+      if (!raw.rawContent) {
+        return res.status(400).json({ message: "rawContent is empty; cannot generate template" });
+      }
+
+      const template = await aiGenerateExtractTemplateFromHtml({
+        pageUrl: raw.sourceUrl,
+        html: raw.rawContent,
+      });
+      const preview = previewExtractTemplate({
+        pageUrl: raw.sourceUrl,
+        html: raw.rawContent,
+        template,
+      });
+
+      res.json({
+        data: {
+          template,
+          preview,
+          model: process.env.AI_MODEL ?? null,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/raw-crawl/:id/ignore", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [updated] = await database
+        .update(rawCrawlData)
+        .set({
+          status: "ignored",
+          processedAt: new Date(),
+        })
+        .where(eq(rawCrawlData.id, id))
+        .returning({ id: rawCrawlData.id });
+
+      if (!updated) return res.status(404).json({ message: "Raw crawl not found" });
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/raw-crawl/:id/resolve", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const payload = z
+        .object({
+          year: z.coerce.number().int().min(2000).max(2100).optional(),
+          raceDate: z.string().trim().min(4).optional(),
+          registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
+          registrationUrl: z.string().trim().url().nullable().optional(),
+          note: z.string().trim().max(2000).optional(),
+          publish: z.coerce.boolean().optional(),
+        })
+        .refine(
+          (p) =>
+            Boolean(p.raceDate) ||
+            p.registrationStatus !== undefined ||
+            p.registrationUrl !== undefined,
+          { message: "At least one field is required" },
+        )
+        .parse(req.body);
+
+      const [raw] = await database
+        .select({
+          id: rawCrawlData.id,
+          marathonId: rawCrawlData.marathonId,
+          sourceId: rawCrawlData.sourceId,
+          sourceUrl: rawCrawlData.sourceUrl,
+          metadata: rawCrawlData.metadata,
+        })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.id, id))
+        .limit(1);
+
+      if (!raw) return res.status(404).json({ message: "Raw crawl not found" });
+
+      const year =
+        payload.raceDate && payload.raceDate.length >= 4
+          ? Number(payload.raceDate.slice(0, 4))
+          : payload.year;
+      if (!year || !Number.isFinite(year)) {
+        return res.status(400).json({ message: "year is required when raceDate is not provided" });
+      }
+
+      const merge = await upsertEditionWithMerge({
+        database,
+        marathonId: raw.marathonId,
+        year,
+        incoming: {
+          ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
+          ...(payload.registrationStatus !== undefined
+            ? { registrationStatus: payload.registrationStatus }
+            : {}),
+          ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
+        },
+        source: {
+          sourceId: raw.sourceId,
+          sourceType: "manual",
+          priority: 999,
+        },
+        publish: payload.publish ? { status: "published" } : undefined,
+      });
+
+      await database
+        .update(rawCrawlData)
+        .set({
+          status: "processed",
+          processedAt: new Date(),
+          metadata: {
+            ...(typeof raw.metadata === "object" && raw.metadata ? raw.metadata : {}),
+            manualResolve: {
+              at: new Date().toISOString(),
+              note: payload.note ?? null,
+              incoming: {
+                year,
+                raceDate: payload.raceDate ?? null,
+                registrationStatus:
+                  payload.registrationStatus !== undefined ? payload.registrationStatus : null,
+                registrationUrl: payload.registrationUrl !== undefined ? payload.registrationUrl : null,
+              },
+              merge,
+            },
+          },
+        })
+        .where(eq(rawCrawlData.id, id));
+
+      res.json({ data: merge });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathon-sources", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(200).default(50),
+          sourceId: z.string().uuid().optional(),
+          search: z.string().trim().min(1).max(200).optional(),
+        })
+        .parse(req.query);
+
+      const conditions = [];
+      if (params.sourceId) {
+        conditions.push(eq(marathonSources.sourceId, params.sourceId));
+      }
+      if (params.search) {
+        conditions.push(
+          or(
+            like(marathons.name, `%${params.search}%`),
+            like(marathons.canonicalName, `%${params.search}%`),
+            like(marathonSources.sourceUrl, `%${params.search}%`),
+          ),
+        );
+      }
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const records = await database
+        .select({
+          id: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+          lastCheckedAt: marathonSources.lastCheckedAt,
+          nextCheckAt: marathonSources.nextCheckAt,
+          lastHttpStatus: marathonSources.lastHttpStatus,
+          lastError: marathonSources.lastError,
+          marathonName: marathons.name,
+          canonicalName: marathons.canonicalName,
+          sourceName: sources.name,
+        })
+        .from(marathonSources)
+        .innerJoin(marathons, eq(marathons.id, marathonSources.marathonId))
+        .innerJoin(sources, eq(sources.id, marathonSources.sourceId))
+        .where(whereClause)
+        .orderBy(desc(marathonSources.isPrimary), desc(marathonSources.lastCheckedAt))
+        .limit(params.limit);
+
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathon-sources/lookup", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          marathonId: z.string().uuid(),
+          sourceId: z.string().uuid(),
+        })
+        .parse(req.query);
+
+      const [record] = await database
+        .select({
+          id: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+        })
+        .from(marathonSources)
+        .where(
+          and(
+            eq(marathonSources.marathonId, params.marathonId),
+            eq(marathonSources.sourceId, params.sourceId),
+          ),
+        )
+        .limit(1);
+
+      if (!record) return res.status(404).json({ message: "Marathon source not found" });
+      res.json({ data: record });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathons", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(50).default(20),
+          search: z.string().trim().min(1).max(200).optional(),
+        })
+        .parse(req.query);
+
+      const whereClause = params.search
+        ? or(
+            like(marathons.name, `%${params.search}%`),
+            like(marathons.canonicalName, `%${params.search}%`),
+          )
+        : undefined;
+
+      const records = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(whereClause)
+        .orderBy(asc(marathons.name))
+        .limit(params.limit);
+
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/marathon-sources", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          marathonId: z.string().uuid(),
+          sourceId: z.string().uuid(),
+          sourceUrl: z.string().url(),
+          isPrimary: z.boolean().optional().default(false),
+        })
+        .parse(req.body);
+
+      const [row] = await database
+        .insert(marathonSources)
+        .values({
+          marathonId: payload.marathonId,
+          sourceId: payload.sourceId,
+          sourceUrl: payload.sourceUrl,
+          isPrimary: Boolean(payload.isPrimary),
+          lastCheckedAt: null,
+        })
+        .onConflictDoUpdate({
+          target: [marathonSources.marathonId, marathonSources.sourceId],
+          set: {
+            sourceUrl: payload.sourceUrl,
+            isPrimary: Boolean(payload.isPrimary),
+          },
+        })
+        .returning();
+
+      res.json({ data: row });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // --- Admin-only: discovery workflow (Stage 1.3) ---
+  app.get("/api/admin/discovery/web-search", async (req, res, next) => {
+    try {
+      requireAdmin(req);
+      const params = z
+        .object({
+          q: z.string().trim().min(1).max(200),
+          count: z.coerce.number().int().min(1).max(20).optional(),
+        })
+        .parse(req.query);
+
+      const results = await braveWebSearch({
+        query: params.q,
+        count: params.count ?? 10,
+      });
+
+      res.json({ data: results });
     } catch (error) {
       next(error);
     }

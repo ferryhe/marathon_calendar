@@ -70,7 +70,7 @@ AI_API_KEY=your-ai-api-key
 
 ```bash
 npm install
-npm run db:push
+npm run db:ensure
 ```
 
 5. 启动开发服务（前后端一体）：
@@ -111,7 +111,7 @@ AI_API_KEY=your-ai-api-key
 
 ```bash
 npm install
-npm run db:push
+npm run db:ensure
 ```
 
 5. 启动开发服务：

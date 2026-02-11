@@ -1,37 +1,38 @@
-// Schema extensions for crawler features
+// Schema extensions for crawler features.
+// Note: these are lightweight in-memory helpers; canonical state lives in Postgres.
 
-// 1. Pending Changes Tracking
-const pendingChanges = {
-    // Track changes that are yet to be applied
-    changes: [],
-    addChange(change) {
-        this.changes.push(change);
-    },
-    clearChanges() {
-        this.changes = [];
-    },
+export type PendingChange = Record<string, unknown>;
+
+export const pendingChanges = {
+  changes: [] as PendingChange[],
+  addChange(change: PendingChange) {
+    pendingChanges.changes.push(change);
+  },
+  clearChanges() {
+    pendingChanges.changes = [];
+  },
 };
 
-// 2. Change Detection Logs
-const changeDetectionLogs = {
-    logs: [],
-    logChange(changeDetail) {
-        this.logs.push({
-            ...changeDetail,
-            timestamp: new Date().toISOString(),
-        });
-    },
-    clearLogs() {
-        this.logs = [];
-    },
+export type ChangeLogDetail = Record<string, unknown>;
+
+export const changeDetectionLogs = {
+  logs: [] as Array<ChangeLogDetail & { timestamp: string }>,
+  logChange(changeDetail: ChangeLogDetail) {
+    changeDetectionLogs.logs.push({
+      ...changeDetail,
+      timestamp: new Date().toISOString(),
+    });
+  },
+  clearLogs() {
+    changeDetectionLogs.logs = [];
+  },
 };
 
-// 3. Data Verification Status
-const dataVerificationStatus = {
-    status: 'pending', // can be 'pending', 'verified', 'failed'
-    setStatus(newStatus) {
-        this.status = newStatus;
-    },
-};
+export type VerificationStatus = "pending" | "verified" | "failed";
 
-export { pendingChanges, changeDetectionLogs, dataVerificationStatus };
+export const dataVerificationStatus = {
+  status: "pending" as VerificationStatus,
+  setStatus(newStatus: VerificationStatus) {
+    dataVerificationStatus.status = newStatus;
+  },
+};

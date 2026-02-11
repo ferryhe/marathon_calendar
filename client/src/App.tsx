@@ -8,6 +8,7 @@ import MarathonDetailPage from "@/pages/MarathonDetail";
 import MyFavoritesPage from "@/pages/MyFavorites";
 import ProfilePage from "@/pages/Profile";
 import MyReviewsPage from "@/pages/MyReviews";
+import AdminDataPage from "@/pages/AdminData";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -18,6 +19,7 @@ function Router() {
       <Route path="/my-favorites" component={MyFavoritesPage} />
       <Route path="/profile" component={ProfilePage} />
       <Route path="/my-reviews" component={MyReviewsPage} />
+      <Route path="/admin/data" component={AdminDataPage} />
       <Route component={NotFound} />
     </Switch>
   );
