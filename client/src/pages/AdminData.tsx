@@ -49,6 +49,47 @@ function formatDateTime(value?: string | null) {
   return date.toLocaleString("zh-CN");
 }
 
+const REGISTRATION_STATUS_OPTIONS = [
+  { value: "报名中", label: "报名中（open）" },
+  { value: "即将开始", label: "即将开始（upcoming）" },
+  { value: "已截止", label: "已截止（closed）" },
+] as const;
+
+function normalizeRegistrationStatus(input?: string | null): string {
+  const raw = (input ?? "").trim();
+  if (!raw) return "";
+
+  // Keep existing canonical Chinese values.
+  if (REGISTRATION_STATUS_OPTIONS.some((x) => x.value === raw)) {
+    return raw;
+  }
+
+  // Map common English/raw variants into canonical values.
+  const normalized = raw.toLowerCase().replace(/[_\s-]+/g, "");
+  if (["open", "registering", "registrationopen"].includes(normalized)) return "报名中";
+  if (["upcoming", "notopen", "comingsoon", "notyetopen"].includes(normalized)) return "即将开始";
+  if (["closed", "close", "deadlinepassed", "soldout", "ended"].includes(normalized)) return "已截止";
+
+  return "";
+}
+
+function formatRawStatusLabel(status: string): string {
+  switch (status) {
+    case "needs_review":
+      return "待审核";
+    case "processed":
+      return "已处理";
+    case "pending":
+      return "待处理";
+    case "ignored":
+      return "已忽略";
+    case "failed":
+      return "失败";
+    default:
+      return status;
+  }
+}
+
 export default function AdminDataPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -215,7 +256,11 @@ export default function AdminDataPage() {
     const ext = meta?.extraction;
     if (ext && typeof ext === "object") {
       setResolveRaceDate(typeof ext.raceDate === "string" ? ext.raceDate : "");
-      setResolveStatus(typeof ext.registrationStatus === "string" ? ext.registrationStatus : "");
+      setResolveStatus(
+        normalizeRegistrationStatus(
+          typeof ext.registrationStatus === "string" ? ext.registrationStatus : "",
+        ),
+      );
       setResolveRegUrl(typeof ext.registrationUrl === "string" ? ext.registrationUrl : "");
       setResolvePublish(true);
       setAiTemplateDraft("");
@@ -468,7 +513,7 @@ export default function AdminDataPage() {
       resolveAdminRawCrawl(token, id, {
         ...(resolveYear.trim() ? { year: Number(resolveYear) } : {}),
         ...(resolveRaceDate.trim() ? { raceDate: resolveRaceDate.trim() } : {}),
-        ...(resolveStatus.trim() ? { registrationStatus: resolveStatus.trim() } : {}),
+        ...(resolveStatus.trim() ? { registrationStatus: normalizeRegistrationStatus(resolveStatus) } : {}),
         ...(resolveRegUrl.trim() ? { registrationUrl: resolveRegUrl.trim() } : {}),
         note: resolveNote.trim() ? resolveNote.trim() : undefined,
         publish: resolvePublish,
@@ -1491,7 +1536,7 @@ export default function AdminDataPage() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <Badge variant={row.status === "needs_review" ? "destructive" : "secondary"}>
-                        {row.status}
+                        {formatRawStatusLabel(row.status)}
                       </Badge>
                       {method ? <Badge variant="outline">{String(method)}</Badge> : null}
                     </div>
@@ -1629,6 +1674,18 @@ export default function AdminDataPage() {
                     <strong className="text-foreground">审核提示：</strong>请仔细核对以下信息，特别是比赛日期、报名状态和报名网址。如果信息准确无误，填写必要字段后即可保存并发布。
                   </div>
 
+                  <div className="rounded-lg border bg-background p-3 space-y-2 text-sm">
+                    <div className="font-medium">字段说明</div>
+                    <ul className="list-disc list-inside text-muted-foreground space-y-1">
+                      <li>`比赛日期` 建议使用 `YYYY-MM-DD`。</li>
+                      <li>`报名状态` 必须从选项中选择（用于前台状态筛选与展示）。</li>
+                      <li>`报名网址` 建议填写可直接报名或查看报名信息的详情页。</li>
+                    </ul>
+                    <div className="text-xs text-muted-foreground">
+                      metadata（只读）是本次抓取过程的机器结果快照（提取值、方法、合并结果等），不等于你最终保存值；最终以你在本弹窗保存的数据为准。
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     <Input
                       placeholder="赛事年份（如果没有完整日期则必填，例如：2026）"
@@ -1640,11 +1697,18 @@ export default function AdminDataPage() {
                       value={resolveRaceDate}
                       onChange={(e) => setResolveRaceDate(e.target.value)}
                     />
-                    <Input
-                      placeholder="报名状态（例如：报名中、未开始、已截止）"
+                    <select
+                      className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                       value={resolveStatus}
                       onChange={(e) => setResolveStatus(e.target.value)}
-                    />
+                    >
+                      <option value="">报名状态（请选择）</option>
+                      {REGISTRATION_STATUS_OPTIONS.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
                     <Input
                       placeholder="报名网址（完整网址，例如：https://...）"
                       value={resolveRegUrl}
@@ -1703,6 +1767,10 @@ export default function AdminDataPage() {
                     <div className="text-sm font-medium">AI 规则模板生成器（sources.config.extract）</div>
                     <div className="text-xs text-muted-foreground">
                       需要在服务器 `.env` 设置 `AI_API_KEY`/`AI_MODEL` 且 `AI_ENABLE_RULE_GEN=true`。
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      用途：基于当前 rawContent 自动生成 `sources.config.extract` 的选择器规则（不是直接修改 metadata）。
+                      你需要先点“生成模板”查看预览，再点“写入到数据源配置”，最后可点“保存并验证（单条同步）”验证规则是否可用。
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
