@@ -4,6 +4,7 @@ import { RefreshCw, Shield, Terminal, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   adminDiscoveryWebSearch,
+  adminDiscoveryList,
   generateAdminAiRuleTemplate,
   getAdminToken,
   getAdminStats,
@@ -60,6 +61,9 @@ export default function AdminDataPage() {
   const [bindSourceId, setBindSourceId] = useState("");
   const [bindUrl, setBindUrl] = useState("");
   const [bindPrimary, setBindPrimary] = useState(false);
+
+  const [listDiscoverySourceId, setListDiscoverySourceId] = useState("");
+  const [listDiscoveryUrl, setListDiscoveryUrl] = useState("");
 
   const [resolveYear, setResolveYear] = useState("");
   const [resolveRaceDate, setResolveRaceDate] = useState("");
@@ -189,6 +193,18 @@ export default function AdminDataPage() {
     onError: (error) => {
       toast({
         title: "Search failed",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const listDiscoveryMutation = useMutation({
+    mutationFn: async () =>
+      adminDiscoveryList(token, { sourceId: listDiscoverySourceId, listUrl: listDiscoveryUrl.trim() }),
+    onError: (error) => {
+      toast({
+        title: "列表发现失败",
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -706,9 +722,89 @@ export default function AdminDataPage() {
 
           <TabsContent value="binding" className="mt-4 space-y-6">
             <Card>
-          <CardHeader>
-            <CardTitle>Marathon Sources</CardTitle>
-          </CardHeader>
+              <CardHeader>
+                <CardTitle>平台列表发现（HTML）</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="text-xs text-muted-foreground">
+                  从“列表页”批量发现详情页链接（需要在对应 Source 的 `config.discovery.list.itemLink.selector` 配置 CSS selector）。
+                  示例：Zuicool 可用 `https://www.zuicool.com/events`。
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">选择平台 Source</div>
+                    <select
+                      className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                      value={listDiscoverySourceId}
+                      onChange={(e) => setListDiscoverySourceId(e.target.value)}
+                    >
+                      <option value="">请选择</option>
+                      {sourceOptions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">列表页 URL</div>
+                    <Input
+                      placeholder="https://..."
+                      value={listDiscoveryUrl}
+                      onChange={(e) => setListDiscoveryUrl(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => listDiscoveryMutation.mutate()}
+                    disabled={
+                      !hasToken ||
+                      listDiscoveryMutation.isPending ||
+                      !listDiscoverySourceId.trim() ||
+                      !listDiscoveryUrl.trim()
+                    }
+                  >
+                    发现链接
+                  </Button>
+                  {listDiscoveryMutation.data?.data ? (
+                    <Badge variant="secondary">count: {listDiscoveryMutation.data.data.count}</Badge>
+                  ) : null}
+                </div>
+
+                {listDiscoveryMutation.data?.data?.results?.length ? (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {listDiscoveryMutation.data.data.results.map((r) => (
+                      <div key={r.url} className="rounded-xl border p-3">
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm font-medium underline underline-offset-2"
+                        >
+                          {r.title ?? r.url}
+                        </a>
+                        <div className="text-xs text-muted-foreground mt-1 break-all">{r.url}</div>
+                        <div className="mt-2">
+                          <Button size="sm" variant="outline" onClick={() => setBindUrl(r.url)}>
+                            作为绑定 URL
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Marathon Sources</CardTitle>
+              </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-col md:flex-row gap-2">
               <Input

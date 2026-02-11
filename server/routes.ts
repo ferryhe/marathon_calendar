@@ -1691,6 +1691,124 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/discovery/list", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+
+      const payload = z
+        .object({
+          sourceId: z.string().uuid(),
+          listUrl: z.string().url(),
+          maxResults: z.coerce.number().int().min(1).max(200).default(40),
+        })
+        .parse(req.body);
+
+      const [sourceRecord] = await database
+        .select({
+          id: sources.id,
+          name: sources.name,
+          requestTimeoutMs: sources.requestTimeoutMs,
+          config: sources.config,
+        })
+        .from(sources)
+        .where(eq(sources.id, payload.sourceId))
+        .limit(1);
+
+      if (!sourceRecord) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+
+      const cfg = (sourceRecord.config ?? {}) as any;
+      const listCfg = cfg?.discovery?.list ?? null;
+      const itemLink = listCfg?.itemLink ?? null;
+      if (!itemLink || typeof itemLink !== "object" || typeof itemLink.selector !== "string") {
+        return res.status(400).json({
+          message:
+            "Source config missing discovery.list.itemLink.selector (configure in sources.config)",
+        });
+      }
+
+      const selector = String(itemLink.selector);
+      const attr = typeof itemLink.attr === "string" ? itemLink.attr : "href";
+      const regex = typeof itemLink.regex === "string" ? itemLink.regex : null;
+      const group = typeof itemLink.group === "number" ? itemLink.group : 1;
+
+      const controller = new AbortController();
+      const timeoutMs =
+        Number.isFinite(sourceRecord.requestTimeoutMs) && sourceRecord.requestTimeoutMs
+          ? sourceRecord.requestTimeoutMs
+          : 15000;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      let html = "";
+      try {
+        const response = await fetch(payload.listUrl, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "marathon-calendar/1.0 (+https://github.com/ferryhe/marathon_calendar)",
+          },
+        });
+        html = await response.text();
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const { load } = await import("cheerio");
+      const $ = load(html);
+
+      const seen = new Set<string>();
+      const results: Array<{ url: string; title: string | null }> = [];
+
+      $(selector).each((_i, el) => {
+        if (results.length >= payload.maxResults) return;
+        const node = $(el);
+        const rawValue =
+          attr === "text" ? node.text() : attr === "html" ? node.html() ?? "" : node.attr(attr) ?? "";
+        let value = String(rawValue ?? "").trim();
+        if (!value) return;
+
+        if (regex) {
+          try {
+            const re = new RegExp(regex, "i");
+            const m = value.match(re);
+            if (!m) return;
+            value = String(m[group] ?? "").trim();
+            if (!value) return;
+          } catch {
+            return;
+          }
+        }
+
+        if (value.startsWith("javascript:") || value === "#" || value.startsWith("mailto:")) return;
+
+        let absolute: string;
+        try {
+          absolute = new URL(value, payload.listUrl).toString();
+        } catch {
+          return;
+        }
+        if (!absolute.startsWith("http://") && !absolute.startsWith("https://")) return;
+        if (seen.has(absolute)) return;
+        seen.add(absolute);
+
+        const titleText = node.text().trim();
+        results.push({ url: absolute, title: titleText || null });
+      });
+
+      res.json({
+        data: {
+          sourceId: sourceRecord.id,
+          sourceName: sourceRecord.name,
+          listUrl: payload.listUrl,
+          count: results.length,
+          results,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/admin/raw-crawl/:id/ai-rule-template", async (req, res, next) => {
     try {
       const database = ensureDatabase();

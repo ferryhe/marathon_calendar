@@ -332,3 +332,18 @@ export async function adminDiscoveryWebSearch(
     `/admin/discovery/web-search?${query.toString()}`,
   );
 }
+
+export type AdminDiscoveryListResponse = {
+  sourceId: string;
+  sourceName: string;
+  listUrl: string;
+  count: number;
+  results: Array<{ url: string; title: string | null }>;
+};
+
+export async function adminDiscoveryList(token: string, payload: { sourceId: string; listUrl: string }) {
+  return adminRequest<{ data: AdminDiscoveryListResponse }>(token, "/admin/discovery/list", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}

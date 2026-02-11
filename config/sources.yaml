@@ -152,7 +152,12 @@ sources:
     requestTimeoutMs: 15000
     minIntervalSeconds: 21600
     notes: "国内主流马拉松报名平台之一"
-    config: {}
+    config:
+      discovery:
+        list:
+          itemLink:
+            selector: "a.event-a[href*='/event/']"
+            attr: "href"
 
   - name: 芝华安方体育
     type: platform
@@ -178,7 +183,15 @@ sources:
     requestTimeoutMs: 15000
     minIntervalSeconds: 21600
     notes: "跑步社区+赛事报名"
-    config: {}
+    config:
+      discovery:
+        list:
+          # iranshao.com is a content site; category pages list race/event posts.
+          # Example list URL:
+          # - https://iranshao.com/category/race/%e9%a9%ac%e6%8b%89%e6%9d%be
+          itemLink:
+            selector: "a[rel='bookmark'][href$='.html']"
+            attr: "href"
 
   - name: 42旅（42travel）
     type: platform
