@@ -68,6 +68,7 @@ export type AdminMarathonSource = {
   sourceId: string;
   sourceUrl: string;
   isPrimary: boolean;
+  autoUpdateEnabled?: boolean;
   sourceType?: string;
   lastCheckedAt: string | null;
   nextCheckAt: string | null;
@@ -111,6 +112,16 @@ export type AdminRawCrawl = {
 export type AdminRawCrawlDetail = AdminRawCrawl & {
   rawContent: string | null;
   rawContentTruncated: boolean;
+  marathon?: AdminMarathon | null;
+  latestEdition?: {
+    id: string;
+    year: number;
+    raceDate: string | null;
+    registrationStatus: string | null;
+    registrationUrl: string | null;
+    publishStatus: string;
+    updatedAt: string;
+  } | null;
 };
 
 export type AdminMarathon = {
@@ -291,6 +302,12 @@ export async function resolveAdminRawCrawl(
     registrationUrl?: string | null;
     note?: string;
     publish?: boolean;
+    name?: string;
+    canonicalName?: string;
+    city?: string | null;
+    country?: string | null;
+    description?: string | null;
+    websiteUrl?: string | null;
   },
 ) {
   return adminRequest<{ data: any }>(token, `/admin/raw-crawl/${id}/resolve`, {
@@ -361,6 +378,56 @@ export async function updateAdminMarathon(
   });
 }
 
+export async function getAdminMarathon(token: string, id: string) {
+  return adminRequest<{ data: AdminMarathon }>(token, `/admin/marathons/${id}`);
+}
+
+export type AdminMarathonEdition = {
+  id: string;
+  marathonId: string;
+  year: number;
+  raceDate: string | null;
+  registrationStatus: string | null;
+  registrationUrl: string | null;
+  publishStatus: string;
+  publishedAt: string | null;
+  updatedAt: string;
+};
+
+export async function getAdminMarathonEdition(
+  token: string,
+  marathonId: string,
+  params?: { year?: number },
+) {
+  const query = new URLSearchParams();
+  if (params?.year) query.set("year", String(params.year));
+  const qs = query.toString();
+  return adminRequest<{
+    data: {
+      marathonId: string;
+      targetYear: number;
+      edition: AdminMarathonEdition | null;
+    };
+  }>(token, `/admin/marathons/${marathonId}/edition${qs ? `?${qs}` : ""}`);
+}
+
+export async function updateAdminMarathonEdition(
+  token: string,
+  marathonId: string,
+  payload: {
+    year?: number;
+    raceDate?: string;
+    registrationStatus?: string | null;
+    registrationUrl?: string | null;
+    publish?: boolean;
+  },
+) {
+  return adminRequest<{ data: any }>(token, `/admin/marathons/${marathonId}/edition`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function upsertAdminMarathonSource(
   token: string,
   payload: { marathonId: string; sourceId: string; sourceUrl: string; isPrimary?: boolean },
@@ -379,6 +446,19 @@ export async function updateAdminMarathonSource(
   return adminRequest<{ data: any }>(token, `/admin/marathon-sources/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function setAdminMarathonSourceAutoUpdate(
+  token: string,
+  id: string,
+  enabled: boolean,
+) {
+  return adminRequest<{
+    data: { id: string; nextCheckAt: string | null; autoUpdateEnabled: boolean };
+  }>(token, `/admin/marathon-sources/${id}/auto-update`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
   });
 }
 

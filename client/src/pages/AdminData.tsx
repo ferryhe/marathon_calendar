@@ -13,6 +13,7 @@ import {
   getAdminRawCrawl,
   ignoreAdminRawCrawl,
   listAdminMarathons,
+  getAdminMarathonEdition,
   listAdminMarathonSources,
   listAdminRawCrawlFiltered,
   listAdminSources,
@@ -21,7 +22,9 @@ import {
   resolveAdminRawCrawl,
   runAdminSyncAll,
   runAdminSyncMarathonSource,
+  setAdminMarathonSourceAutoUpdate,
   setAdminToken,
+  updateAdminMarathonEdition,
   updateAdminMarathonSource,
   deleteAdminMarathonSource,
   upsertAdminMarathonSource,
@@ -117,6 +120,14 @@ function isChinaCountry(value?: string | null): boolean {
   return CHINA_COUNTRY_ALIASES.has(normalized);
 }
 
+const RAW_STATUS_FILTER_OPTIONS = [
+  { value: "needs_review", label: "待审核" },
+  { value: "processed", label: "已处理" },
+  { value: "pending", label: "待处理" },
+  { value: "ignored", label: "已忽略" },
+  { value: "failed", label: "失败" },
+] as const;
+
 export default function AdminDataPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -148,6 +159,11 @@ export default function AdminDataPage() {
   const [manageMarathonCountry, setManageMarathonCountry] = useState("");
   const [manageMarathonWebsiteUrl, setManageMarathonWebsiteUrl] = useState("");
   const [manageMarathonDescription, setManageMarathonDescription] = useState("");
+  const [manageEditionYear, setManageEditionYear] = useState("");
+  const [manageEditionRaceDate, setManageEditionRaceDate] = useState("");
+  const [manageEditionStatus, setManageEditionStatus] = useState("");
+  const [manageEditionRegUrl, setManageEditionRegUrl] = useState("");
+  const [manageEditionPublish, setManageEditionPublish] = useState(true);
   const [manageCanonicalUnlocked, setManageCanonicalUnlocked] = useState(false);
   const [manageMarathonSnapshot, setManageMarathonSnapshot] = useState<{
     id: string;
@@ -167,6 +183,14 @@ export default function AdminDataPage() {
   const [resolveRaceDate, setResolveRaceDate] = useState("");
   const [resolveStatus, setResolveStatus] = useState("");
   const [resolveRegUrl, setResolveRegUrl] = useState("");
+  const [resolveName, setResolveName] = useState("");
+  const [resolveCanonicalName, setResolveCanonicalName] = useState("");
+  const [resolveRegion, setResolveRegion] = useState<"China" | "Overseas">("China");
+  const [resolveCity, setResolveCity] = useState("");
+  const [resolveCountry, setResolveCountry] = useState("");
+  const [resolveWebsiteUrl, setResolveWebsiteUrl] = useState("");
+  const [resolveDescription, setResolveDescription] = useState("");
+  const [resolveCanonicalUnlocked, setResolveCanonicalUnlocked] = useState(false);
   const [resolveNote, setResolveNote] = useState("");
   const [resolvePublish, setResolvePublish] = useState(true);
   const [aiTemplateDraft, setAiTemplateDraft] = useState<string>("");
@@ -331,17 +355,43 @@ export default function AdminDataPage() {
   useEffect(() => {
     const row = rawDetailQuery.data?.data;
     if (!row) return;
+
+    const marathon = row.marathon;
+    if (marathon) {
+      const region: "China" | "Overseas" = isChinaCountry(marathon.country) ? "China" : "Overseas";
+      setResolveName(marathon.name ?? "");
+      setResolveCanonicalName(marathon.canonicalName ?? "");
+      setResolveRegion(region);
+      setResolveCity(marathon.city ?? "");
+      setResolveCountry(region === "China" ? "" : marathon.country ?? "");
+      setResolveWebsiteUrl(marathon.websiteUrl ?? "");
+      setResolveDescription(marathon.description ?? "");
+      setResolveCanonicalUnlocked(false);
+    }
+
+    const latestEdition = row.latestEdition;
+    if (latestEdition) {
+      setResolveYear(String(latestEdition.year ?? ""));
+      setResolveRaceDate(latestEdition.raceDate ?? "");
+      setResolveStatus(normalizeRegistrationStatus(latestEdition.registrationStatus ?? ""));
+      setResolveRegUrl(latestEdition.registrationUrl ?? "");
+      setResolvePublish((latestEdition.publishStatus ?? "published") === "published");
+    }
+
     const meta = row.metadata as any;
     const ext = meta?.extraction;
     if (ext && typeof ext === "object") {
-      setResolveRaceDate(typeof ext.raceDate === "string" ? ext.raceDate : "");
+      if (typeof ext.raceDate === "string") {
+        setResolveRaceDate(ext.raceDate);
+      }
       setResolveStatus(
         normalizeRegistrationStatus(
           typeof ext.registrationStatus === "string" ? ext.registrationStatus : "",
         ),
       );
-      setResolveRegUrl(typeof ext.registrationUrl === "string" ? ext.registrationUrl : "");
-      setResolvePublish(true);
+      if (typeof ext.registrationUrl === "string") {
+        setResolveRegUrl(ext.registrationUrl);
+      }
       setAiTemplateDraft("");
       if (typeof ext.raceDate === "string" && ext.raceDate.length >= 4) {
         setResolveYear(ext.raceDate.slice(0, 4));
@@ -379,6 +429,12 @@ export default function AdminDataPage() {
     enabled: hasToken && tab === "binding" && Boolean(manageMarathonId),
   });
 
+  const manageMarathonEditionQuery = useQuery({
+    queryKey: ["admin", "marathon-edition", token, manageMarathonId],
+    queryFn: () => getAdminMarathonEdition(token, manageMarathonId),
+    enabled: hasToken && tab === "binding" && Boolean(manageMarathonId),
+  });
+
   useEffect(() => {
     if (!hasToken || tab !== "binding") return;
     if (bindMarathonId.trim()) return;
@@ -388,6 +444,19 @@ export default function AdminDataPage() {
     setBindMarathonId(only.id);
     toast({ title: `已自动匹配赛事：${only.name}` });
   }, [hasToken, tab, bindMarathonId, marathonsQuery.data, toast]);
+
+  useEffect(() => {
+    const edition = manageMarathonEditionQuery.data?.data.edition;
+    const targetYear = manageMarathonEditionQuery.data?.data.targetYear;
+    if (!manageMarathonId) return;
+    setManageEditionYear(String(edition?.year ?? targetYear ?? new Date().getFullYear()));
+    setManageEditionRaceDate(edition?.raceDate ?? "");
+    setManageEditionStatus(
+      normalizeRegistrationStatus(edition?.registrationStatus ?? ""),
+    );
+    setManageEditionRegUrl(edition?.registrationUrl ?? "");
+    setManageEditionPublish((edition?.publishStatus ?? "published") === "published");
+  }, [manageMarathonId, manageMarathonEditionQuery.data]);
 
   const runAllMutation = useMutation({
     mutationFn: () => runAdminSyncAll(token),
@@ -608,6 +677,57 @@ export default function AdminDataPage() {
     },
   });
 
+  const updateMarathonEditionMutation = useMutation({
+    mutationFn: async () => {
+      if (!manageMarathonId.trim()) throw new Error("请先选择赛事");
+      const normalizedStatus = normalizeRegistrationStatus(manageEditionStatus);
+      const year = manageEditionYear.trim() ? Number(manageEditionYear) : undefined;
+      if (!manageEditionRaceDate.trim() && !year) {
+        throw new Error("请填写比赛日期或年份");
+      }
+      return updateAdminMarathonEdition(token, manageMarathonId, {
+        ...(year ? { year } : {}),
+        ...(manageEditionRaceDate.trim() ? { raceDate: manageEditionRaceDate.trim() } : {}),
+        ...(normalizedStatus ? { registrationStatus: normalizedStatus } : {}),
+        ...(manageEditionRegUrl.trim() ? { registrationUrl: manageEditionRegUrl.trim() } : {}),
+        publish: manageEditionPublish,
+      });
+    },
+    onSuccess: async () => {
+      toast({ title: "已保存届次信息" });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-edition", token, manageMarathonId] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "raw-crawl"] }),
+      ]);
+    },
+    onError: (error) => {
+      toast({
+        title: "保存届次失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const setMarathonSourceAutoUpdateMutation = useMutation({
+    mutationFn: async (payload: { id: string; enabled: boolean }) =>
+      setAdminMarathonSourceAutoUpdate(token, payload.id, payload.enabled),
+    onSuccess: async () => {
+      toast({ title: "已更新自动更新开关" });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources", "by-marathon"] }),
+      ]);
+    },
+    onError: (error) => {
+      toast({
+        title: "更新自动更新开关失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
   const runMarathonSourceMutation = useMutation({
     mutationFn: async (marathonSourceId: string) => runAdminSyncMarathonSource(token, marathonSourceId),
     onSuccess: async () => {
@@ -662,7 +782,10 @@ export default function AdminDataPage() {
     onSuccess: async () => {
       setEditingMarathonSourceId(null);
       toast({ title: "已更新绑定" });
-      await queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources", "by-marathon"] }),
+      ]);
     },
     onError: (error) => {
       toast({
@@ -677,7 +800,10 @@ export default function AdminDataPage() {
     mutationFn: async (id: string) => deleteAdminMarathonSource(token, id),
     onSuccess: async () => {
       toast({ title: "已删除绑定" });
-      await queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources", "by-marathon"] }),
+      ]);
     },
     onError: (error) => {
       toast({
@@ -704,15 +830,42 @@ export default function AdminDataPage() {
   });
 
   const resolveRawMutation = useMutation({
-    mutationFn: async (id: string) =>
-      resolveAdminRawCrawl(token, id, {
+    mutationFn: async (id: string) => {
+      const normalizedStatus = normalizeRegistrationStatus(resolveStatus);
+      const incomingCanonical = resolveCanonicalName.trim();
+      const currentCanonical = rawDetailQuery.data?.data?.marathon?.canonicalName ?? "";
+      if (
+        incomingCanonical &&
+        currentCanonical &&
+        incomingCanonical !== currentCanonical &&
+        !resolveCanonicalUnlocked
+      ) {
+        throw new Error("请先解锁 canonicalName 编辑，再进行修改");
+      }
+
+      const country = resolveRegion === "China" ? "China" : resolveCountry.trim();
+      if (resolveRegion === "Overseas" && !country) {
+        throw new Error("海外赛事必须填写国家（例如：Japan、USA）");
+      }
+      if (resolveRegion === "Overseas" && isChinaCountry(country)) {
+        throw new Error("海外赛事国家不能是 China，请改为真实国家名");
+      }
+
+      return resolveAdminRawCrawl(token, id, {
         ...(resolveYear.trim() ? { year: Number(resolveYear) } : {}),
         ...(resolveRaceDate.trim() ? { raceDate: resolveRaceDate.trim() } : {}),
-        ...(resolveStatus.trim() ? { registrationStatus: normalizeRegistrationStatus(resolveStatus) } : {}),
+        ...(normalizedStatus ? { registrationStatus: normalizedStatus } : {}),
         ...(resolveRegUrl.trim() ? { registrationUrl: resolveRegUrl.trim() } : {}),
+        ...(resolveName.trim() ? { name: resolveName.trim() } : {}),
+        ...(incomingCanonical ? { canonicalName: incomingCanonical } : {}),
+        ...(resolveCity.trim() ? { city: resolveCity.trim() } : { city: null }),
+        ...(country ? { country } : { country: null }),
+        ...(resolveDescription.trim() ? { description: resolveDescription.trim() } : { description: null }),
+        ...(resolveWebsiteUrl.trim() ? { websiteUrl: resolveWebsiteUrl.trim() } : { websiteUrl: null }),
         note: resolveNote.trim() ? resolveNote.trim() : undefined,
         publish: resolvePublish,
-      }),
+      });
+    },
     onSuccess: async () => {
       toast({ title: "已回填并标记为 processed" });
       setSelectedRawId(null);
@@ -1264,6 +1417,9 @@ export default function AdminDataPage() {
                 <div className="text-xs text-muted-foreground">
                   在这里统一处理单个赛事：先搜索并选择赛事，再维护基础信息（地点/国家/简介/官网），也可一键同步该赛事的所有已绑定来源。
                 </div>
+                <div className="text-xs text-muted-foreground">
+                  同步主要用于抓取并提取届次字段（比赛日期/报名状态/报名链接）到待审核队列；赛事基础资料（名称、地点、国家、简介、官网）仍建议在本卡片人工维护。
+                </div>
 
                 <div className="flex flex-col md:flex-row gap-2">
                   <Input
@@ -1371,6 +1527,59 @@ export default function AdminDataPage() {
                       rows={3}
                     />
 
+                    <div className="rounded-lg border p-3 space-y-2">
+                      <div className="text-sm font-medium">届次信息（详情页展示字段）</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <Input
+                          placeholder="届次年份（如 2026）"
+                          value={manageEditionYear}
+                          onChange={(e) => setManageEditionYear(e.target.value)}
+                        />
+                        <Input
+                          placeholder="比赛日期（YYYY-MM-DD）"
+                          value={manageEditionRaceDate}
+                          onChange={(e) => setManageEditionRaceDate(e.target.value)}
+                        />
+                        <select
+                          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                          value={manageEditionStatus}
+                          onChange={(e) => setManageEditionStatus(e.target.value)}
+                        >
+                          <option value="">报名状态（请选择）</option>
+                          {REGISTRATION_STATUS_OPTIONS.map((item) => (
+                            <option key={item.value} value={item.value}>
+                              {item.label}
+                            </option>
+                          ))}
+                        </select>
+                        <Input
+                          placeholder="报名网址（完整 URL）"
+                          value={manageEditionRegUrl}
+                          onChange={(e) => setManageEditionRegUrl(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant={manageEditionPublish ? "default" : "outline"}
+                          type="button"
+                          onClick={() => setManageEditionPublish((v) => !v)}
+                        >
+                          {manageEditionPublish ? "发布状态：已发布" : "发布状态：草稿"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => updateMarathonEditionMutation.mutate()}
+                          disabled={!hasToken || updateMarathonEditionMutation.isPending}
+                        >
+                          保存届次信息
+                        </Button>
+                        {manageMarathonEditionQuery.isFetching ? (
+                          <span className="text-xs text-muted-foreground">加载中...</span>
+                        ) : null}
+                      </div>
+                    </div>
+
                     <div className="text-xs text-muted-foreground">
                       `canonicalName` 是系列赛事内部唯一标识（跨年份复用）。已有赛事一般不建议修改，避免影响去重与历史关联。
                     </div>
@@ -1419,6 +1628,7 @@ export default function AdminDataPage() {
                           setManageMarathonWebsiteUrl(manageMarathonSnapshot.websiteUrl);
                           setManageMarathonDescription(manageMarathonSnapshot.description);
                           setManageCanonicalUnlocked(false);
+                          manageMarathonEditionQuery.refetch();
                         }}
                         disabled={!manageMarathonSnapshot}
                       >
@@ -1453,6 +1663,22 @@ export default function AdminDataPage() {
                                   <Badge variant={item.isPrimary ? "default" : "secondary"}>
                                     {item.isPrimary ? "主要" : "次要"}
                                   </Badge>
+                                  <Button
+                                    size="sm"
+                                    variant={item.autoUpdateEnabled === false ? "outline" : "default"}
+                                    onClick={() =>
+                                      setMarathonSourceAutoUpdateMutation.mutate({
+                                        id: item.id,
+                                        enabled: item.autoUpdateEnabled === false,
+                                      })
+                                    }
+                                    disabled={
+                                      !hasToken ||
+                                      setMarathonSourceAutoUpdateMutation.isPending
+                                    }
+                                  >
+                                    {item.autoUpdateEnabled === false ? "自动更新：关" : "自动更新：开"}
+                                  </Button>
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -2040,12 +2266,17 @@ export default function AdminDataPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex flex-col md:flex-row gap-2">
-              <Input
-                placeholder="状态过滤（如 needs_review/processed/pending/ignored）"
+              <select
+                className="h-10 rounded-md border bg-background px-3 text-sm md:w-80"
                 value={rawStatus}
                 onChange={(e) => setRawStatus(e.target.value)}
-                className="md:w-96"
-              />
+              >
+                {RAW_STATUS_FILTER_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}（{item.value}）
+                  </option>
+                ))}
+              </select>
               <div className="text-xs text-muted-foreground flex items-center">
                 默认查看待审核（needs_review）
               </div>
@@ -2081,6 +2312,14 @@ export default function AdminDataPage() {
                         setResolveRaceDate("");
                         setResolveStatus("");
                         setResolveRegUrl("");
+                        setResolveName("");
+                        setResolveCanonicalName("");
+                        setResolveRegion("China");
+                        setResolveCity("");
+                        setResolveCountry("");
+                        setResolveWebsiteUrl("");
+                        setResolveDescription("");
+                        setResolveCanonicalUnlocked(false);
                         setResolveNote("");
                         setResolvePublish(true);
                       }}
@@ -2199,6 +2438,7 @@ export default function AdminDataPage() {
                   <div className="rounded-lg border bg-background p-3 space-y-2 text-sm">
                     <div className="font-medium">字段说明</div>
                     <ul className="list-disc list-inside text-muted-foreground space-y-1">
+                      <li>赛事基础资料（名称/地点/国家/简介/官网）在此也可直接修改。</li>
                       <li>`比赛日期` 建议使用 `YYYY-MM-DD`。</li>
                       <li>`报名状态` 必须从选项中选择（用于前台状态筛选与展示）。</li>
                       <li>`报名网址` 建议填写可直接报名或查看报名信息的详情页。</li>
@@ -2208,6 +2448,76 @@ export default function AdminDataPage() {
                     </div>
                   </div>
 
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <div className="text-sm font-medium">赛事基础资料（详情页展示）</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <Input
+                        placeholder="赛事名称（必填）"
+                        value={resolveName}
+                        onChange={(e) => setResolveName(e.target.value)}
+                      />
+                      <Input
+                        placeholder="canonicalName（建议小写+连字符）"
+                        value={resolveCanonicalName}
+                        onChange={(e) => setResolveCanonicalName(e.target.value)}
+                        readOnly={!resolveCanonicalUnlocked}
+                      />
+                      <Input
+                        placeholder="地点/城市（可选）"
+                        value={resolveCity}
+                        onChange={(e) => setResolveCity(e.target.value)}
+                      />
+                      <select
+                        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                        value={resolveRegion}
+                        onChange={(e) => {
+                          const next = e.target.value as "China" | "Overseas";
+                          setResolveRegion(next);
+                          if (next === "China") setResolveCountry("");
+                        }}
+                      >
+                        <option value="China">中国</option>
+                        <option value="Overseas">非中国（海外）</option>
+                      </select>
+                      <Input
+                        placeholder={
+                          resolveRegion === "China"
+                            ? "国家/地区将自动保存为 China"
+                            : "国家（必填，例如：Japan、USA）"
+                        }
+                        value={resolveCountry}
+                        onChange={(e) => setResolveCountry(e.target.value)}
+                        disabled={resolveRegion === "China"}
+                      />
+                      <Input
+                        placeholder="官网 URL（可选）"
+                        value={resolveWebsiteUrl}
+                        onChange={(e) => setResolveWebsiteUrl(e.target.value)}
+                      />
+                    </div>
+                    <Textarea
+                      placeholder="赛事简介（可选）"
+                      value={resolveDescription}
+                      onChange={(e) => setResolveDescription(e.target.value)}
+                      rows={3}
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={resolveCanonicalUnlocked ? "default" : "outline"}
+                        type="button"
+                        onClick={() => setResolveCanonicalUnlocked((v) => !v)}
+                      >
+                        {resolveCanonicalUnlocked ? "已解锁 canonicalName 编辑" : "解锁 canonicalName 编辑"}
+                      </Button>
+                      <div className="text-xs text-muted-foreground">
+                        已有赛事一般不建议改 canonicalName，避免影响系列赛事关联。
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <div className="text-sm font-medium">届次信息（详情页展示）</div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     <Input
                       placeholder="赛事年份（如果没有完整日期则必填，例如：2026）"
@@ -2237,6 +2547,7 @@ export default function AdminDataPage() {
                       onChange={(e) => setResolveRegUrl(e.target.value)}
                     />
                   </div>
+                  </div>
 
                   <Textarea
                     placeholder="备注（可选）"
@@ -2264,7 +2575,7 @@ export default function AdminDataPage() {
                       onClick={() => resolveRawMutation.mutate(selectedRawId!)}
                       disabled={!hasToken || resolveRawMutation.isPending}
                     >
-                      保存并发布
+                      保存审核结果
                     </Button>
                     <Button
                       variant="outline"
