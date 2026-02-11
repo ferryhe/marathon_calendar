@@ -2073,6 +2073,7 @@ export async function registerRoutes(
           sourceId: marathonSources.sourceId,
           sourceUrl: marathonSources.sourceUrl,
           isPrimary: marathonSources.isPrimary,
+          sourceType: sources.type,
           lastCheckedAt: marathonSources.lastCheckedAt,
           nextCheckAt: marathonSources.nextCheckAt,
           lastHttpStatus: marathonSources.lastHttpStatus,
@@ -2255,25 +2256,126 @@ export async function registerRoutes(
         })
         .parse(req.body);
 
+      const [sourceRecord] = await database
+        .select({ id: sources.id, type: sources.type })
+        .from(sources)
+        .where(eq(sources.id, payload.sourceId))
+        .limit(1);
+      if (!sourceRecord) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+
+      const isThirdPartySource = sourceRecord.type !== "official";
+      const nextIsPrimary = isThirdPartySource ? false : Boolean(payload.isPrimary);
+
+      if (nextIsPrimary) {
+        await database
+          .update(marathonSources)
+          .set({ isPrimary: false })
+          .where(eq(marathonSources.marathonId, payload.marathonId));
+      }
+
       const [row] = await database
         .insert(marathonSources)
         .values({
           marathonId: payload.marathonId,
           sourceId: payload.sourceId,
           sourceUrl: payload.sourceUrl,
-          isPrimary: Boolean(payload.isPrimary),
+          isPrimary: nextIsPrimary,
           lastCheckedAt: null,
         })
         .onConflictDoUpdate({
           target: [marathonSources.marathonId, marathonSources.sourceId],
           set: {
             sourceUrl: payload.sourceUrl,
-            isPrimary: Boolean(payload.isPrimary),
+            isPrimary: nextIsPrimary,
           },
         })
         .returning();
 
       res.json({ data: row });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathon-sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          sourceUrl: z.string().url().optional(),
+          isPrimary: z.boolean().optional(),
+        })
+        .parse(req.body);
+
+      const [existing] = await database
+        .select({
+          id: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+          sourceType: sources.type,
+        })
+        .from(marathonSources)
+        .innerJoin(sources, eq(sources.id, marathonSources.sourceId))
+        .where(eq(marathonSources.id, id))
+        .limit(1);
+      if (!existing) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+
+      const sourceIsThirdParty = existing.sourceType !== "official";
+      const nextIsPrimary = sourceIsThirdParty
+        ? false
+        : payload.isPrimary ?? existing.isPrimary;
+      const nextSourceUrl = payload.sourceUrl ?? existing.sourceUrl;
+
+      if (nextIsPrimary) {
+        await database
+          .update(marathonSources)
+          .set({ isPrimary: false })
+          .where(
+            and(
+              eq(marathonSources.marathonId, existing.marathonId),
+              ne(marathonSources.id, existing.id),
+            ),
+          );
+      }
+
+      const [updated] = await database
+        .update(marathonSources)
+        .set({
+          sourceUrl: nextSourceUrl,
+          isPrimary: Boolean(nextIsPrimary),
+        })
+        .where(eq(marathonSources.id, id))
+        .returning();
+
+      res.json({ data: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/admin/marathon-sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [deleted] = await database
+        .delete(marathonSources)
+        .where(eq(marathonSources.id, id))
+        .returning({ id: marathonSources.id });
+
+      if (!deleted) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+      res.json({ success: true });
     } catch (error) {
       next(error);
     }

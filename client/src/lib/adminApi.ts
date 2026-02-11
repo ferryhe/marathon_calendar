@@ -68,6 +68,7 @@ export type AdminMarathonSource = {
   sourceId: string;
   sourceUrl: string;
   isPrimary: boolean;
+  sourceType?: string;
   lastCheckedAt: string | null;
   nextCheckAt: string | null;
   lastHttpStatus: number | null;
@@ -347,6 +348,23 @@ export async function upsertAdminMarathonSource(
   return adminRequest<{ data: any }>(token, "/admin/marathon-sources", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminMarathonSource(
+  token: string,
+  id: string,
+  payload: { sourceUrl?: string; isPrimary?: boolean },
+) {
+  return adminRequest<{ data: any }>(token, `/admin/marathon-sources/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAdminMarathonSource(token: string, id: string) {
+  return adminRequest<{ success: boolean }>(token, `/admin/marathon-sources/${id}`, {
+    method: "DELETE",
   });
 }
 

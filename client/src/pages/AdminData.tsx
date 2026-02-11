@@ -22,6 +22,8 @@ import {
   runAdminSyncAll,
   runAdminSyncMarathonSource,
   setAdminToken,
+  updateAdminMarathonSource,
+  deleteAdminMarathonSource,
   upsertAdminMarathonSource,
   updateAdminSource,
 } from "@/lib/adminApi";
@@ -65,6 +67,9 @@ export default function AdminDataPage() {
   const bindMarathonSearchInputRef = useRef<HTMLInputElement | null>(null);
   const bindUrlInputRef = useRef<HTMLInputElement | null>(null);
   const [bindPrimary, setBindPrimary] = useState(false);
+  const [editingMarathonSourceId, setEditingMarathonSourceId] = useState<string | null>(null);
+  const [editingMarathonSourceUrl, setEditingMarathonSourceUrl] = useState("");
+  const [editingMarathonSourcePrimary, setEditingMarathonSourcePrimary] = useState(false);
 
   const [listDiscoverySourceId, setListDiscoverySourceId] = useState("");
   const [listDiscoveryUrl, setListDiscoveryUrl] = useState("");
@@ -79,6 +84,18 @@ export default function AdminDataPage() {
 
   const isThirdPartySourceType = (sourceType?: string | null) =>
     Boolean(sourceType && sourceType !== "official");
+
+  const stripYearFromMarathonName = (value: string) =>
+    value
+      .replace(/(^|\s)[12]\d{3}(?=\s|$)/g, " ")
+      .replace(/[（(]\s*[12]\d{3}\s*[)）]/g, " ")
+      .replace(/\b\d{4}\s*(?:年|edition|赛季)\b/gi, " ")
+      .replace(/第\s*\d+\s*届/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const normalizeMarathonNameForCompare = (value: string) =>
+    stripYearFromMarathonName(value).toLowerCase().replace(/\s+/g, "");
 
   const isNoisyDiscoveryTitle = (value: string) => {
     const t = value.trim();
@@ -102,9 +119,10 @@ export default function AdminDataPage() {
     }
 
     const normalizedTitle = (params.title ?? "").replace(/\s+/g, " ").trim();
-    const canPrefillName = normalizedTitle.length > 0 && !isNoisyDiscoveryTitle(normalizedTitle);
+    const cleanedTitle = stripYearFromMarathonName(normalizedTitle);
+    const canPrefillName = cleanedTitle.length > 0 && !isNoisyDiscoveryTitle(cleanedTitle);
     if (canPrefillName) {
-      setBindMarathonSearch(normalizedTitle);
+      setBindMarathonSearch(cleanedTitle);
       setBindMarathonId("");
     }
 
@@ -251,7 +269,7 @@ export default function AdminDataPage() {
       adminDiscoveryWebSearch(token, { q: discoveryQ.trim(), count: 10 }),
     onError: (error) => {
       toast({
-        title: "Search failed",
+        title: "搜索失败",
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -279,7 +297,7 @@ export default function AdminDataPage() {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin", "sources"] });
-      toast({ title: "已更新 source 配置" });
+      toast({ title: "已更新数据源配置" });
     },
     onError: (error) => {
       toast({
@@ -297,7 +315,7 @@ export default function AdminDataPage() {
         queryClient.invalidateQueries({ queryKey: ["admin", "sources"] }),
         queryClient.invalidateQueries({ queryKey: ["admin", "stats"] }),
       ]);
-      toast({ title: "已删除 source" });
+      toast({ title: "已删除数据源" });
     },
     onError: (error) => {
       toast({
@@ -317,15 +335,41 @@ export default function AdminDataPage() {
 
       let marathonId = bindMarathonId.trim();
       let createdMarathonName: string | null = null;
+      let reusedMarathonName: string | null = null;
       if (!marathonId) {
-        const name = bindMarathonSearch.trim();
+        const rawName = bindMarathonSearch.trim();
+        const name = stripYearFromMarathonName(rawName) || rawName;
         if (!name) throw new Error("请先输入赛事名称或从发现结果中选择");
-        const created = await createAdminMarathon(token, {
-          name,
-          websiteUrl: sourceIsThirdParty ? null : url,
+
+        const existingList = await listAdminMarathons(token, {
+          limit: 30,
+          search: name,
         });
-        marathonId = created.data.id;
-        createdMarathonName = created.data.name;
+        const normalizedIncoming = normalizeMarathonNameForCompare(name);
+        const exactMatch = existingList.data.find(
+          (m) => normalizeMarathonNameForCompare(m.name) === normalizedIncoming,
+        );
+
+        if (exactMatch) {
+          marathonId = exactMatch.id;
+          reusedMarathonName = exactMatch.name;
+        } else {
+          const created = await createAdminMarathon(token, {
+            name,
+            canonicalName: undefined,
+            city: null,
+            country: null,
+            description: null,
+            // Third-party source URL should not overwrite official website field.
+            websiteUrl: sourceIsThirdParty ? null : url,
+          });
+          marathonId = created.data.id;
+          createdMarathonName = created.data.name;
+        }
+      }
+
+      if (!marathonId) {
+        throw new Error("赛事创建或匹配失败，请重试");
       }
 
       await upsertAdminMarathonSource(token, {
@@ -339,14 +383,20 @@ export default function AdminDataPage() {
       return {
         marathonId,
         createdMarathonName,
+        reusedMarathonName,
         sourceIsThirdParty,
       };
     },
     onSuccess: async (result) => {
       setBindMarathonId(result.marathonId);
+      if (result.reusedMarathonName) {
+        setBindMarathonSearch(result.reusedMarathonName);
+      }
       const title = result.createdMarathonName
         ? `已自动创建赛事并绑定：${result.createdMarathonName}`
-        : "已绑定赛事来源";
+        : result.reusedMarathonName
+          ? `已复用赛事并绑定：${result.reusedMarathonName}`
+          : "已绑定赛事来源";
       const description = result.sourceIsThirdParty
         ? "第三方来源已自动按“次要”保存"
         : undefined;
@@ -357,6 +407,41 @@ export default function AdminDataPage() {
     onError: (error) => {
       toast({
         title: "绑定失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateMarathonSourceMutation = useMutation({
+    mutationFn: async (payload: {
+      id: string;
+      sourceUrl?: string;
+      isPrimary?: boolean;
+    }) => updateAdminMarathonSource(token, payload.id, payload),
+    onSuccess: async () => {
+      setEditingMarathonSourceId(null);
+      toast({ title: "已更新绑定" });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "更新绑定失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteMarathonSourceMutation = useMutation({
+    mutationFn: async (id: string) => deleteAdminMarathonSource(token, id),
+    onSuccess: async () => {
+      toast({ title: "已删除绑定" });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "marathon-sources"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "删除绑定失败",
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -452,7 +537,7 @@ export default function AdminDataPage() {
       return { sourceId };
     },
     onSuccess: () => {
-      toast({ title: "已写入 Source config.extract" });
+      toast({ title: "已写入数据源提取规则（config.extract）" });
     },
     onError: (error) => {
       toast({
@@ -575,10 +660,10 @@ export default function AdminDataPage() {
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="flex flex-wrap justify-start gap-2">
             <TabsTrigger value="overview">概览</TabsTrigger>
-            <TabsTrigger value="sources">Sources</TabsTrigger>
+            <TabsTrigger value="sources">数据源</TabsTrigger>
             <TabsTrigger value="runs">同步</TabsTrigger>
             <TabsTrigger value="binding">绑定/发现</TabsTrigger>
-            <TabsTrigger value="review">needs_review</TabsTrigger>
+            <TabsTrigger value="review">待审核</TabsTrigger>
             <TabsTrigger value="scheduler">定期更新</TabsTrigger>
           </TabsList>
 
@@ -688,7 +773,7 @@ export default function AdminDataPage() {
           <TabsContent value="sources" className="mt-4 space-y-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Sources</CardTitle>
+                <CardTitle>数据源</CardTitle>
                 <Button
                   variant="outline"
                   size="sm"
@@ -743,7 +828,7 @@ export default function AdminDataPage() {
                                 variant="destructive"
                                 onClick={() => {
                                   const ok = window.confirm(
-                                    `确认删除 Source「${source.name}」？\n将同时删除关联绑定与历史抓取/同步记录，此操作不可撤销。`,
+                                    `确认删除数据源「${source.name}」？\n将同时删除关联绑定与历史抓取/同步记录，此操作不可撤销。`,
                                   );
                                   if (!ok) return;
                                   deleteSourceMutation.mutate(source.id);
@@ -768,7 +853,7 @@ export default function AdminDataPage() {
                               className="md:w-40"
                               disabled={deleteSourceMutation.isPending}
                             />
-                            <Input value={source.baseUrl ?? ""} disabled placeholder="baseUrl" />
+                            <Input value={source.baseUrl ?? ""} disabled placeholder="基础 URL" />
                           </div>
 
                           <div className="space-y-2">
@@ -913,7 +998,7 @@ export default function AdminDataPage() {
                   <li>点击"绑定"完成关联</li>
                 </ol>
                 <div className="text-xs text-muted-foreground pt-2 border-t">
-                  <span className="font-medium">提示：</span>主要（Primary）数据源的优先级更高，当多个数据源信息冲突时，会优先采用主要来源的信息。每个赛事通常只设置一个主要数据源。
+                  <span className="font-medium">提示：</span>主要数据源的优先级更高，当多个来源信息冲突时，会优先采用主要来源的信息。每个赛事通常只设置一个主要数据源。
                 </div>
               </CardContent>
             </Card>
@@ -925,6 +1010,9 @@ export default function AdminDataPage() {
               <CardContent className="space-y-3">
                 <div className="text-xs text-muted-foreground">
                   使用下面方法准备好链接后，在这里将赛事URL与系统中的赛事关联，建立后系统会自动定期抓取该链接的最新信息。
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  同一赛事跨年份会优先复用同一个赛事主体（自动去除年份匹配），再写入对应年份数据。
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -1033,11 +1121,16 @@ export default function AdminDataPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">选择平台 Source</div>
+                    <div className="text-xs text-muted-foreground">选择平台数据源</div>
                     <select
                       className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                       value={listDiscoverySourceId}
-                      onChange={(e) => setListDiscoverySourceId(e.target.value)}
+                      onChange={(e) => {
+                        const nextSourceId = e.target.value;
+                        setListDiscoverySourceId(nextSourceId);
+                        const picked = sources.find((s) => s.id === nextSourceId);
+                        setListDiscoveryUrl(picked?.baseUrl ?? "");
+                      }}
                     >
                       <option value="">请选择</option>
                       {sourceOptions.map((s) => (
@@ -1054,6 +1147,7 @@ export default function AdminDataPage() {
                       value={listDiscoveryUrl}
                       onChange={(e) => setListDiscoveryUrl(e.target.value)}
                     />
+                    <div className="text-xs text-muted-foreground">选择平台后会自动填充，可手动修改。</div>
                   </div>
                 </div>
 
@@ -1072,7 +1166,7 @@ export default function AdminDataPage() {
                     发现链接
                   </Button>
                   {listDiscoveryMutation.data?.data ? (
-                    <Badge variant="secondary">count: {listDiscoveryMutation.data.data.count}</Badge>
+                    <Badge variant="secondary">发现数量：{listDiscoveryMutation.data.data.count}</Badge>
                   ) : null}
                 </div>
 
@@ -1121,7 +1215,7 @@ export default function AdminDataPage() {
                 </div>
                 <div className="flex flex-col md:flex-row gap-2">
                   <Input
-                    placeholder="Search query (admin-only)"
+                    placeholder="搜索关键词（仅管理员）"
                     value={discoveryQ}
                     onChange={(e) => setDiscoveryQ(e.target.value)}
                   />
@@ -1130,7 +1224,7 @@ export default function AdminDataPage() {
                     onClick={() => discoveryMutation.mutate()}
                     disabled={!hasToken || discoveryMutation.isPending || !discoveryQ.trim()}
                   >
-                    Search
+                    搜索
                   </Button>
                 </div>
 
@@ -1171,7 +1265,7 @@ export default function AdminDataPage() {
                     ))}
                   </div>
                 ) : discoveryMutation.isSuccess ? (
-                  <p className="text-sm text-muted-foreground">No results</p>
+                  <p className="text-sm text-muted-foreground">未找到结果</p>
                 ) : null}
               </CardContent>
             </Card>
@@ -1182,7 +1276,7 @@ export default function AdminDataPage() {
               </CardHeader>
               <CardContent className="space-y-2 text-xs text-muted-foreground">
                 <div>如果方法1/2未找到合适链接，可直接在上方“创建赛事绑定”里手动粘贴赛事详情页 URL。</div>
-                <div>建议填写详情页而不是列表页，并选择对应平台 Source，避免后续抓取规则失配。</div>
+                <div>建议填写详情页而不是列表页，并选择对应平台数据源，避免后续抓取规则失配。</div>
               </CardContent>
             </Card>
 
@@ -1233,16 +1327,106 @@ export default function AdminDataPage() {
                             {item.sourceName}
                           </div>
                         </div>
-                        <Badge variant={item.isPrimary ? "default" : "secondary"}>
-                          {item.isPrimary ? "主要" : "次要"}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={item.isPrimary ? "default" : "secondary"}>
+                            {item.isPrimary ? "主要" : "次要"}
+                          </Badge>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setEditingMarathonSourceId(item.id);
+                              setEditingMarathonSourceUrl(item.sourceUrl);
+                              setEditingMarathonSourcePrimary(Boolean(item.isPrimary));
+                            }}
+                            disabled={
+                              updateMarathonSourceMutation.isPending ||
+                              deleteMarathonSourceMutation.isPending
+                            }
+                          >
+                            修改
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => {
+                              const ok = window.confirm(
+                                `确认删除这条绑定？\n${item.marathonName} <- ${item.sourceName}`,
+                              );
+                              if (!ok) return;
+                              deleteMarathonSourceMutation.mutate(item.id);
+                            }}
+                            disabled={
+                              updateMarathonSourceMutation.isPending ||
+                              deleteMarathonSourceMutation.isPending
+                            }
+                          >
+                            删除
+                          </Button>
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-2 break-all">
-                        {item.sourceUrl}
-                      </div>
+
+                      {editingMarathonSourceId === item.id ? (
+                        <div className="mt-2 space-y-2 rounded-lg border p-2">
+                          <Input
+                            value={editingMarathonSourceUrl}
+                            onChange={(e) => setEditingMarathonSourceUrl(e.target.value)}
+                            placeholder="https://..."
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant={editingMarathonSourcePrimary ? "default" : "outline"}
+                              onClick={() =>
+                                setEditingMarathonSourcePrimary((v) => !v)
+                              }
+                              disabled={
+                                item.sourceType !== "official" ||
+                                updateMarathonSourceMutation.isPending
+                              }
+                            >
+                              {editingMarathonSourcePrimary ? "主要" : "次要"}
+                            </Button>
+                            {item.sourceType !== "official" ? (
+                              <span className="text-xs text-muted-foreground">
+                                第三方来源固定为次要
+                              </span>
+                            ) : null}
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                updateMarathonSourceMutation.mutate({
+                                  id: item.id,
+                                  sourceUrl: editingMarathonSourceUrl.trim(),
+                                  isPrimary: editingMarathonSourcePrimary,
+                                })
+                              }
+                              disabled={
+                                updateMarathonSourceMutation.isPending ||
+                                !editingMarathonSourceUrl.trim()
+                              }
+                            >
+                              保存修改
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingMarathonSourceId(null)}
+                              disabled={updateMarathonSourceMutation.isPending}
+                            >
+                              取消
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-muted-foreground mt-2 break-all">
+                          {item.sourceUrl}
+                        </div>
+                      )}
+
                       <div className="text-xs text-muted-foreground mt-2">
-                        lastCheckedAt={formatDateTime(item.lastCheckedAt)} / nextCheckAt=
-                        {formatDateTime(item.nextCheckAt)} / status={item.lastHttpStatus ?? "-"}
+                        上次检查：{formatDateTime(item.lastCheckedAt)} / 下次检查：
+                        {formatDateTime(item.nextCheckAt)} / HTTP={item.lastHttpStatus ?? "-"}
                       </div>
                       {item.lastError ? (
                         <div className="text-xs text-destructive mt-2 break-all">{item.lastError}</div>
@@ -1262,7 +1446,7 @@ export default function AdminDataPage() {
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div>
-              <strong>什么是 needs_review？</strong>
+              <strong>什么是待审核（needs_review）？</strong>
               <p className="text-muted-foreground mt-1">
                 系统自动抓取到的数据需要人工确认才能发布到前台。这些数据可能包含不完整或需要验证的信息。
               </p>
@@ -1290,13 +1474,13 @@ export default function AdminDataPage() {
           <CardContent className="space-y-2">
             <div className="flex flex-col md:flex-row gap-2">
               <Input
-                placeholder="status 过滤（例如 needs_review/processed/pending/ignored）"
+                placeholder="状态过滤（如 needs_review/processed/pending/ignored）"
                 value={rawStatus}
                 onChange={(e) => setRawStatus(e.target.value)}
                 className="md:w-96"
               />
               <div className="text-xs text-muted-foreground flex items-center">
-                默认查看 needs_review
+                默认查看待审核（needs_review）
               </div>
             </div>
 
@@ -1531,7 +1715,7 @@ export default function AdminDataPage() {
                         生成模板
                       </Button>
                       {aiTemplateMutation.data?.data?.model ? (
-                        <Badge variant="secondary">model: {aiTemplateMutation.data.data.model}</Badge>
+                        <Badge variant="secondary">模型：{aiTemplateMutation.data.data.model}</Badge>
                       ) : null}
                     </div>
 
@@ -1557,7 +1741,7 @@ export default function AdminDataPage() {
                     {aiTemplateDraft.trim() ? (
                       <div className="space-y-2">
                         <div className="text-xs text-muted-foreground">
-                          模板 JSON（可编辑；会把 `extract` 合并写入 Source config.extract）
+                          模板 JSON（可编辑；会把 `extract` 合并写入数据源配置 `config.extract`）
                         </div>
                         <Textarea
                           value={aiTemplateDraft}
@@ -1573,7 +1757,7 @@ export default function AdminDataPage() {
                             onClick={() => applyAiTemplateMutation.mutate()}
                             disabled={!hasToken || applyAiTemplateMutation.isPending}
                           >
-                            写入到 Source config
+                            写入到数据源配置
                           </Button>
                           <Button
                             size="sm"

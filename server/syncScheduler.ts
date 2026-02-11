@@ -1,7 +1,8 @@
 import crypto from "crypto";
 import { load } from "cheerio";
-import { and, asc, desc, eq, isNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import {
+  marathonEditions,
   marathons,
   marathonSources,
   marathonSyncRuns,
@@ -29,6 +30,17 @@ const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+
+function toLocalYmd(value: Date) {
+  const yyyy = value.getFullYear();
+  const mm = String(value.getMonth() + 1).padStart(2, "0");
+  const dd = String(value.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function isPastRaceDate(raceDate: string, todayYmd: string) {
+  return raceDate < todayYmd;
+}
 
 function ensureDatabase() {
   if (!db || !pool) {
@@ -301,6 +313,47 @@ export async function syncMarathonSourceOnce(params: {
 }) {
   const database = ensureDatabase();
   const startedAt = new Date();
+  const todayYmd = toLocalYmd(startedAt);
+
+  const [latestRaceDateRow] = await database
+    .select({
+      latestRaceDate: sql<string | null>`max(${marathonEditions.raceDate})`,
+    })
+    .from(marathonEditions)
+    .where(
+      and(
+        eq(marathonEditions.marathonId, params.marathonId),
+        isNotNull(marathonEditions.raceDate),
+      ),
+    );
+  const latestRaceDate = latestRaceDateRow?.latestRaceDate ?? null;
+  if (latestRaceDate && isPastRaceDate(latestRaceDate, todayYmd)) {
+    const message = `赛事已完赛（${latestRaceDate}），已停止自动更新`;
+    const [run] = await database
+      .insert(marathonSyncRuns)
+      .values({
+        marathonId: params.marathonId,
+        sourceId: params.source.id,
+        status: "skipped",
+        strategyUsed: params.source.strategy,
+        attempt: 1,
+        message,
+        startedAt,
+        finishedAt: new Date(),
+      })
+      .returning();
+
+    await database
+      .update(marathonSources)
+      .set({
+        lastCheckedAt: new Date(),
+        lastError: message,
+        nextCheckAt: null,
+      })
+      .where(eq(marathonSources.id, params.marathonSourceId));
+
+    return { runId: run.id, status: "skipped" as const };
+  }
 
   const [run] = await database
     .insert(marathonSyncRuns)
@@ -595,6 +648,7 @@ export async function syncMarathonSourceOnce(params: {
 async function syncSources() {
   const database = ensureDatabase();
   const now = new Date();
+  const todayYmd = toLocalYmd(now);
 
   const activeSources = await database
     .select()
@@ -632,7 +686,44 @@ async function syncSources() {
       )
       .orderBy(desc(marathonSources.isPrimary), asc(marathonSources.createdAt));
 
+    const marathonIds = Array.from(new Set(links.map((x) => x.marathonId)));
+    const latestRaceDateByMarathonId = new Map<string, string>();
+    if (marathonIds.length > 0) {
+      const latestRaceDateRows = await database
+        .select({
+          marathonId: marathonEditions.marathonId,
+          latestRaceDate: sql<string | null>`max(${marathonEditions.raceDate})`,
+        })
+        .from(marathonEditions)
+        .where(
+          and(
+            inArray(marathonEditions.marathonId, marathonIds),
+            isNotNull(marathonEditions.raceDate),
+          ),
+        )
+        .groupBy(marathonEditions.marathonId);
+
+      for (const row of latestRaceDateRows) {
+        if (row.latestRaceDate) {
+          latestRaceDateByMarathonId.set(row.marathonId, row.latestRaceDate);
+        }
+      }
+    }
+
     for (const link of links) {
+      const latestRaceDate = latestRaceDateByMarathonId.get(link.marathonId) ?? null;
+      if (latestRaceDate && isPastRaceDate(latestRaceDate, todayYmd)) {
+        await database
+          .update(marathonSources)
+          .set({
+            lastCheckedAt: now,
+            lastError: `赛事已完赛（${latestRaceDate}），已停止自动更新`,
+            nextCheckAt: null,
+          })
+          .where(eq(marathonSources.id, link.id));
+        continue;
+      }
+
       const urlToFetch = link.sourceUrl || link.websiteUrl;
       if (!urlToFetch) continue;
 
