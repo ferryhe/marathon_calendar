@@ -51,7 +51,7 @@ export default function AdminDataPage() {
   const [token, setToken] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [search, setSearch] = useState("");
-  const [discoveryQ, setDiscoveryQ] = useState("");
+  const [discoveryQuery, setDiscoveryQuery] = useState("");
   const [configDraftById, setConfigDraftById] = useState<Record<string, string>>({});
   const [rawStatus, setRawStatus] = useState<string>("needs_review");
   const [selectedRawId, setSelectedRawId] = useState<string | null>(null);
