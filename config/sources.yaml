@@ -235,7 +235,7 @@ sources:
 
 # Optional: bind specific marathon official pages for crawling.
 # The marathon must already exist in DB (seeded) with matching canonicalName.
-marathonSources:
+marathonSources: []
   # - marathonCanonicalName: Tokyo Marathon
   #   sourceName: 赛事官方网站（直采）
   #   sourceUrl: https://www.marathon.tokyo/en/
