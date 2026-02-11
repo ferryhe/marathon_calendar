@@ -1040,9 +1040,33 @@ export default function AdminDataPage() {
           </TabsContent>
 
           <TabsContent value="review" className="mt-4 space-y-6">
+        <Card className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+          <CardHeader>
+            <CardTitle>💡 数据审核说明</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div>
+              <strong>什么是 needs_review？</strong>
+              <p className="text-muted-foreground mt-1">
+                系统自动抓取到的数据需要人工确认才能发布到前台。这些数据可能包含不完整或需要验证的信息。
+              </p>
+            </div>
+            <div>
+              <strong>审核步骤：</strong>
+              <ol className="list-decimal list-inside space-y-1 text-muted-foreground mt-1">
+                <li>点击「审核并填写」按钮查看详细信息</li>
+                <li>重点确认：比赛日期、报名状态、报名网址是否准确</li>
+                <li>补充缺失的必填信息（如年份或完整日期）</li>
+                <li>确认无误后点击「保存并发布」</li>
+                <li>如果数据有问题或不需要，可以点击「忽略」</li>
+              </ol>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Raw Crawl</CardTitle>
+            <CardTitle>待审核的数据</CardTitle>
             <Button variant="outline" size="sm" onClick={() => rawQuery.refetch()} disabled={!hasToken}>
               刷新
             </Button>
@@ -1095,7 +1119,7 @@ export default function AdminDataPage() {
                       }}
                       disabled={!hasToken}
                     >
-                      复核/回填
+                      审核并填写
                     </Button>
                     <Button
                       size="sm"
@@ -1145,7 +1169,7 @@ export default function AdminDataPage() {
               <span className="sr-only">Close</span>
             </DialogClose>
             <div className="p-6 space-y-4">
-              <DialogTitle className="text-lg font-bold">needs_review 复核与回填</DialogTitle>
+              <DialogTitle className="text-lg font-bold">审核赛事数据</DialogTitle>
 
               {rawDetailQuery.isFetching ? (
                 <div className="text-sm text-muted-foreground">加载中...</div>
@@ -1159,24 +1183,28 @@ export default function AdminDataPage() {
                     {rawDetailQuery.data.data.sourceUrl}
                   </div>
 
+                  <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                    <strong className="text-foreground">审核提示：</strong>请仔细核对以下信息，特别是比赛日期、报名状态和报名网址。如果信息准确无误，填写必要字段后即可保存并发布。
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     <Input
-                      placeholder="year（raceDate 没有时必填）"
+                      placeholder="赛事年份（如果没有完整日期则必填，例如：2026）"
                       value={resolveYear}
                       onChange={(e) => setResolveYear(e.target.value)}
                     />
                     <Input
-                      placeholder="raceDate（YYYY-MM-DD，可选）"
+                      placeholder="比赛日期（格式：YYYY-MM-DD，例如：2026-04-15）"
                       value={resolveRaceDate}
                       onChange={(e) => setResolveRaceDate(e.target.value)}
                     />
                     <Input
-                      placeholder="registrationStatus（可选）"
+                      placeholder="报名状态（例如：报名中、未开始、已截止）"
                       value={resolveStatus}
                       onChange={(e) => setResolveStatus(e.target.value)}
                     />
                     <Input
-                      placeholder="registrationUrl（可选，需绝对 URL）"
+                      placeholder="报名网址（完整网址，例如：https://...）"
                       value={resolveRegUrl}
                       onChange={(e) => setResolveRegUrl(e.target.value)}
                     />
@@ -1196,10 +1224,10 @@ export default function AdminDataPage() {
                       onClick={() => setResolvePublish((v) => !v)}
                       type="button"
                     >
-                      {resolvePublish ? "回填后发布：是" : "回填后发布：否"}
+                      {resolvePublish ? "发布到前台：是" : "发布到前台：否"}
                     </Button>
                     <div className="text-xs text-muted-foreground">
-                      关闭后会只回填数据但保持 draft（前台不可见）。
+                      关闭后会只保存数据但保持草稿状态（前台不可见）。
                     </div>
                   </div>
 
@@ -1208,7 +1236,7 @@ export default function AdminDataPage() {
                       onClick={() => resolveRawMutation.mutate(selectedRawId!)}
                       disabled={!hasToken || resolveRawMutation.isPending}
                     >
-                      回填并标记 processed
+                      保存并发布
                     </Button>
                     <Button
                       variant="outline"
