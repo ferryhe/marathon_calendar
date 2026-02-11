@@ -4,6 +4,7 @@ import { RefreshCw, Shield, Terminal, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   adminDiscoveryWebSearch,
+  generateAdminAiRuleTemplate,
   getAdminToken,
   getAdminStats,
   getAdminRawCrawl,
@@ -64,6 +65,7 @@ export default function AdminDataPage() {
   const [resolveRegUrl, setResolveRegUrl] = useState("");
   const [resolveNote, setResolveNote] = useState("");
   const [resolvePublish, setResolvePublish] = useState(true);
+  const [aiTemplateDraft, setAiTemplateDraft] = useState<string>("");
 
   useEffect(() => {
     setToken(getAdminToken());
@@ -143,6 +145,7 @@ export default function AdminDataPage() {
       setResolveStatus(typeof ext.registrationStatus === "string" ? ext.registrationStatus : "");
       setResolveRegUrl(typeof ext.registrationUrl === "string" ? ext.registrationUrl : "");
       setResolvePublish(true);
+      setAiTemplateDraft("");
       if (typeof ext.raceDate === "string" && ext.raceDate.length >= 4) {
         setResolveYear(ext.raceDate.slice(0, 4));
       }
@@ -267,6 +270,21 @@ export default function AdminDataPage() {
     onError: (error) => {
       toast({
         title: "回填失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const aiTemplateMutation = useMutation({
+    mutationFn: async () => generateAdminAiRuleTemplate(token, selectedRawId!),
+    onSuccess: (data) => {
+      setAiTemplateDraft(JSON.stringify(data.data.template, null, 2));
+      toast({ title: "已生成规则模板（草稿）" });
+    },
+    onError: (error) => {
+      toast({
+        title: "生成失败",
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -1010,6 +1028,60 @@ export default function AdminDataPage() {
                       rows={8}
                       className="font-mono text-xs"
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">AI 规则模板生成器（sources.config.extract）</div>
+                    <div className="text-xs text-muted-foreground">
+                      需要在服务器 `.env` 设置 `AI_API_KEY`/`AI_MODEL` 且 `AI_ENABLE_RULE_GEN=true`。
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        type="button"
+                        onClick={() => aiTemplateMutation.mutate()}
+                        disabled={!hasToken || aiTemplateMutation.isPending || !selectedRawId}
+                      >
+                        生成模板
+                      </Button>
+                      {aiTemplateMutation.data?.data?.model ? (
+                        <Badge variant="secondary">model: {aiTemplateMutation.data.data.model}</Badge>
+                      ) : null}
+                    </div>
+
+                    {aiTemplateMutation.data?.data ? (
+                      <div className="rounded-xl border p-3 space-y-2">
+                        <div className="text-xs text-muted-foreground">preview（应用模板到 rawContent）</div>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="outline">
+                            raceDateRaw: {aiTemplateMutation.data.data.preview.raceDateRaw ?? "-"}
+                          </Badge>
+                          <Badge variant="outline">
+                            raceDateNormalized:{" "}
+                            {aiTemplateMutation.data.data.preview.raceDateNormalized ?? "-"}
+                          </Badge>
+                          <Badge variant="outline">
+                            registrationStatus:{" "}
+                            {aiTemplateMutation.data.data.preview.registrationStatusRaw ?? "-"}
+                          </Badge>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {aiTemplateDraft.trim() ? (
+                      <div className="space-y-2">
+                        <div className="text-xs text-muted-foreground">
+                          模板 JSON（可编辑；复制后可粘贴到 Source config 的 extract）
+                        </div>
+                        <Textarea
+                          value={aiTemplateDraft}
+                          onChange={(e) => setAiTemplateDraft(e.target.value)}
+                          rows={10}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="space-y-2">

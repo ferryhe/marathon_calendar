@@ -208,6 +208,33 @@ export async function getAdminRawCrawl(token: string, id: string, full: boolean 
   );
 }
 
+export type AdminAiRuleTemplateResponse = {
+  template: {
+    extract: {
+      raceDate?: { selector: string; attr?: string; regex?: string; group?: number };
+      registrationStatus?: { selector: string; attr?: string; regex?: string; group?: number };
+      registrationUrl?: { selector: string; attr?: string; regex?: string; group?: number };
+    };
+    notes?: string;
+    evidence?: Record<string, string | undefined>;
+  };
+  preview: {
+    raceDateRaw: string | null;
+    raceDateNormalized: string | null;
+    registrationStatusRaw: string | null;
+    registrationUrlRaw: string | null;
+  };
+  model: string | null;
+};
+
+export async function generateAdminAiRuleTemplate(token: string, rawCrawlId: string) {
+  return adminRequest<{ data: AdminAiRuleTemplateResponse }>(
+    token,
+    `/admin/raw-crawl/${rawCrawlId}/ai-rule-template`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
 export async function ignoreAdminRawCrawl(token: string, id: string) {
   return adminRequest<{ success: boolean }>(token, `/admin/raw-crawl/${id}/ignore`, {
     method: "POST",

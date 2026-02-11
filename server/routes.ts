@@ -27,6 +27,7 @@ import { hashPassword, verifyPassword } from "./auth";
 import { syncMarathonSourceOnce, syncNowOnce } from "./syncScheduler";
 import { braveWebSearch } from "./braveSearch";
 import { upsertEditionWithMerge } from "./editionMerge";
+import { aiGenerateExtractTemplateFromHtml, previewExtractTemplate } from "./aiRuleTemplate";
 
 const reviewPayloadSchema = insertReviewSchema.omit({
   marathonId: true,
@@ -1683,6 +1684,49 @@ export async function registerRoutes(
           ...row,
           rawContent,
           rawContentTruncated: !full && Boolean(row.rawContent && row.rawContent.length > 5000),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/raw-crawl/:id/ai-rule-template", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [raw] = await database
+        .select({
+          id: rawCrawlData.id,
+          sourceUrl: rawCrawlData.sourceUrl,
+          rawContent: rawCrawlData.rawContent,
+        })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.id, id))
+        .limit(1);
+
+      if (!raw) return res.status(404).json({ message: "Raw crawl not found" });
+      if (!raw.rawContent) {
+        return res.status(400).json({ message: "rawContent is empty; cannot generate template" });
+      }
+
+      const template = await aiGenerateExtractTemplateFromHtml({
+        pageUrl: raw.sourceUrl,
+        html: raw.rawContent,
+      });
+      const preview = previewExtractTemplate({
+        pageUrl: raw.sourceUrl,
+        html: raw.rawContent,
+        template,
+      });
+
+      res.json({
+        data: {
+          template,
+          preview,
+          model: process.env.AI_MODEL ?? null,
         },
       });
     } catch (error) {
