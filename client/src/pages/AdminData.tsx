@@ -45,6 +45,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { isChinaCountry } from "@shared/utils";
 
 function formatDateTime(value?: string | null) {
   if (!value) return "-";
@@ -94,31 +95,6 @@ function formatRawStatusLabel(status: string): string {
   }
 }
 
-const CHINA_COUNTRY_ALIASES = new Set([
-  "china",
-  "cn",
-  "chn",
-  "中国",
-  "中国大陆",
-  "中华人民共和国",
-  "mainland china",
-  "people's republic of china",
-  "prc",
-]);
-
-function normalizeCountryText(value?: string | null): string {
-  return (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s._-]+/g, " ")
-    .replace(/[’']/g, "'");
-}
-
-function isChinaCountry(value?: string | null): boolean {
-  const normalized = normalizeCountryText(value);
-  if (!normalized) return false;
-  return CHINA_COUNTRY_ALIASES.has(normalized);
-}
 
 const RAW_STATUS_FILTER_OPTIONS = [
   { value: "needs_review", label: "待审核" },

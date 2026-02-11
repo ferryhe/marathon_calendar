@@ -32,32 +32,6 @@ type MarathonTableView =
   | { mode: "grouped"; groups: Record<string, MarathonWithDate[]>; tbd: MarathonWithDate[] }
   | { mode: "flat"; events: MarathonWithDate[]; tbd: MarathonWithDate[] };
 
-const CHINA_COUNTRY_ALIASES = new Set([
-  "china",
-  "cn",
-  "chn",
-  "中国",
-  "中国大陆",
-  "中华人民共和国",
-  "mainland china",
-  "people's republic of china",
-  "prc",
-]);
-
-function normalizeCountryText(value?: string | null) {
-  return (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s._-]+/g, " ")
-    .replace(/[’']/g, "'");
-}
-
-function isChinaCountry(value?: string | null) {
-  const normalized = normalizeCountryText(value);
-  if (!normalized) return false;
-  return CHINA_COUNTRY_ALIASES.has(normalized);
-}
-
 function getStatusBadgeStyle(status: string) {
   if (status === "报名中") {
     return "bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-2 h-5";

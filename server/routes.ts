@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+﻿import type { Express, Request } from "express";
 import { type Server } from "http";
 import path from "path";
 import { promises as fs } from "fs";
@@ -22,6 +22,7 @@ import {
   marathons,
   marathonEditions,
 } from "@shared/schema";
+import { isChinaCountry, canonicalCountryValue } from "@shared/utils";
 import { db } from "./db";
 import { hashPassword, verifyPassword } from "./auth";
 import {
@@ -143,39 +144,6 @@ async function regenerateSession(req: Request) {
 
 function canonicalizeName(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, "-");
-}
-
-const CHINA_COUNTRY_ALIASES = [
-  "china",
-  "cn",
-  "chn",
-  "中国",
-  "中国大陆",
-  "中华人民共和国",
-  "mainland china",
-  "people's republic of china",
-  "prc",
-];
-
-function normalizeCountryText(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[\s._-]+/g, " ")
-    .replace(/[’']/g, "'");
-}
-
-function isChinaCountry(value?: string | null) {
-  if (!value) return false;
-  const normalized = normalizeCountryText(value);
-  return CHINA_COUNTRY_ALIASES.some((alias) => normalizeCountryText(alias) === normalized);
-}
-
-function canonicalCountryValue(value?: string | null) {
-  if (value == null) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return isChinaCountry(trimmed) ? "China" : trimmed;
 }
 
 function toAuthUser(user: {
@@ -891,19 +859,9 @@ export async function registerRoutes(
       }
       
       if (params.country) {
+        // All China aliases are normalized to "China" in the database
         if (isChinaCountry(params.country)) {
-          conditions.push(
-            or(
-              eq(marathons.country, "China"),
-              eq(marathons.country, "中国"),
-              eq(marathons.country, "CN"),
-              eq(marathons.country, "CHN"),
-              eq(marathons.country, "中国大陆"),
-              eq(marathons.country, "中华人民共和国"),
-              eq(marathons.country, "Mainland China"),
-              eq(marathons.country, "PRC"),
-            ),
-          );
+          conditions.push(eq(marathons.country, "China"));
         } else {
           conditions.push(eq(marathons.country, params.country));
         }
@@ -1298,7 +1256,7 @@ export async function registerRoutes(
         author?.username ??
         req.session.displayName ??
         req.session.username ??
-        "匿名用户";
+        "鍖垮悕鐢ㄦ埛";
       const [record] = await database
         .insert(marathonReviews)
         .values({
@@ -1595,7 +1553,14 @@ export async function registerRoutes(
       const database = ensureDatabase();
       requireAdmin(req);
       const sourceId = z.string().uuid().parse(req.params.id);
-      const force = z.coerce.boolean().default(false).parse(req.query.force);
+      const force = z
+        .preprocess((value) => {
+          if (value === undefined) return false;
+          if (value === "true" || value === "1") return true;
+          if (value === "false" || value === "0") return false;
+          return value;
+        }, z.boolean())
+        .parse(req.query.force);
 
       const [sourceRecord] = await database
         .select({ id: sources.id, name: sources.name })
