@@ -183,6 +183,30 @@ export async function runAdminSyncAll(token: string) {
   });
 }
 
+export async function runAdminSyncMarathonSource(token: string, marathonSourceId: string) {
+  return adminRequest<{ data: { runId: string; status: string } }>(
+    token,
+    "/admin/sync/run-marathon-source",
+    {
+      method: "POST",
+      body: JSON.stringify({ marathonSourceId }),
+    },
+  );
+}
+
+export async function lookupAdminMarathonSource(
+  token: string,
+  params: { marathonId: string; sourceId: string },
+) {
+  const query = new URLSearchParams({
+    marathonId: params.marathonId,
+    sourceId: params.sourceId,
+  });
+  return adminRequest<{
+    data: { id: string; marathonId: string; sourceId: string; sourceUrl: string; isPrimary: boolean };
+  }>(token, `/admin/marathon-sources/lookup?${query.toString()}`);
+}
+
 export async function listAdminSyncRuns(token: string, limit: number = 50) {
   return adminRequest<{ data: AdminSyncRun[] }>(token, `/admin/sync/runs?limit=${limit}`);
 }

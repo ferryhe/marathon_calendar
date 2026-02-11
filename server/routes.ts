@@ -1905,6 +1905,41 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/marathon-sources/lookup", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          marathonId: z.string().uuid(),
+          sourceId: z.string().uuid(),
+        })
+        .parse(req.query);
+
+      const [record] = await database
+        .select({
+          id: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+        })
+        .from(marathonSources)
+        .where(
+          and(
+            eq(marathonSources.marathonId, params.marathonId),
+            eq(marathonSources.sourceId, params.sourceId),
+          ),
+        )
+        .limit(1);
+
+      if (!record) return res.status(404).json({ message: "Marathon source not found" });
+      res.json({ data: record });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/admin/marathons", async (req, res, next) => {
     try {
       const database = ensureDatabase();

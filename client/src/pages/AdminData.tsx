@@ -13,9 +13,11 @@ import {
   listAdminMarathonSources,
   listAdminRawCrawlFiltered,
   listAdminSources,
+  lookupAdminMarathonSource,
   listAdminSyncRuns,
   resolveAdminRawCrawl,
   runAdminSyncAll,
+  runAdminSyncMarathonSource,
   setAdminToken,
   upsertAdminMarathonSource,
   updateAdminSource,
@@ -285,6 +287,80 @@ export default function AdminDataPage() {
     onError: (error) => {
       toast({
         title: "生成失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const applyAiTemplateMutation = useMutation({
+    mutationFn: async () => {
+      if (!rawDetailQuery.data?.data) throw new Error("Raw crawl detail is not loaded");
+      const sourceId = rawDetailQuery.data.data.sourceId;
+      const source = sources.find((s) => s.id === sourceId);
+      if (!source) throw new Error(`Source not found: ${sourceId}`);
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(aiTemplateDraft);
+      } catch {
+        throw new Error("Template JSON parse failed");
+      }
+
+      const extract = parsed?.extract;
+      if (!extract || typeof extract !== "object") {
+        throw new Error("Template JSON must contain { extract: ... }");
+      }
+
+      const nextConfig = {
+        ...(source.config ?? {}),
+        extract: {
+          ...(((source.config ?? {}) as any).extract ?? {}),
+          ...extract,
+        },
+      };
+
+      await updateAdminSource(token, sourceId, { config: nextConfig });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "sources"] });
+      return { sourceId };
+    },
+    onSuccess: () => {
+      toast({ title: "已写入 Source config.extract" });
+    },
+    onError: (error) => {
+      toast({
+        title: "写入失败",
+        description: getFriendlyErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const validateAiTemplateMutation = useMutation({
+    mutationFn: async () => {
+      if (!rawDetailQuery.data?.data) throw new Error("Raw crawl detail is not loaded");
+      const row = rawDetailQuery.data.data;
+      // 1) Apply template into source config
+      await applyAiTemplateMutation.mutateAsync();
+      // 2) Find the marathon_source and trigger a single run
+      const lookup = await lookupAdminMarathonSource(token, {
+        marathonId: row.marathonId,
+        sourceId: row.sourceId,
+      });
+      const msId = lookup.data.id;
+      const run = await runAdminSyncMarathonSource(token, msId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "sync-runs"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "raw-crawl"] }),
+      ]);
+      return run.data;
+    },
+    onSuccess: () => {
+      toast({ title: "已触发单条同步验证" });
+    },
+    onError: (error) => {
+      toast({
+        title: "验证失败",
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -1072,7 +1148,7 @@ export default function AdminDataPage() {
                     {aiTemplateDraft.trim() ? (
                       <div className="space-y-2">
                         <div className="text-xs text-muted-foreground">
-                          模板 JSON（可编辑；复制后可粘贴到 Source config 的 extract）
+                          模板 JSON（可编辑；会把 `extract` 合并写入 Source config.extract）
                         </div>
                         <Textarea
                           value={aiTemplateDraft}
@@ -1080,6 +1156,25 @@ export default function AdminDataPage() {
                           rows={10}
                           className="font-mono text-xs"
                         />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                            onClick={() => applyAiTemplateMutation.mutate()}
+                            disabled={!hasToken || applyAiTemplateMutation.isPending}
+                          >
+                            写入到 Source config
+                          </Button>
+                          <Button
+                            size="sm"
+                            type="button"
+                            onClick={() => validateAiTemplateMutation.mutate()}
+                            disabled={!hasToken || validateAiTemplateMutation.isPending}
+                          >
+                            保存并验证（单条同步）
+                          </Button>
+                        </div>
                       </div>
                     ) : null}
                   </div>
