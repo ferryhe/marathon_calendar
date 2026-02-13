@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { useMarathons } from "@/hooks/useMarathons";
 import { EventDetails } from "./EventDetails";
 import type { MarathonListItem } from "@/lib/apiClient";
+import { isChinaCountry } from "@shared/utils";
 
 interface MarathonTableProps {
   region: "China" | "Overseas";
