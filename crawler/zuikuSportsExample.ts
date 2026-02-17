@@ -351,7 +351,10 @@ export async function fetchWithRetry(
 
       // 如果还有重试机会
       if (attempt < config.maxRetries) {
-        // 计算退避时间（指数退避）
+        // 计算退避时间（线性退避）
+        // 注意：这里使用线性退避 (attempt * base) 而非指数退避 (2^attempt * base)
+        // 原因：与 syncScheduler.ts 实现保持一致，且对于网络暂时性问题，线性退避已足够
+        // 典型间隔：30s -> 60s -> 90s，既能快速恢复，又不会过度延迟
         const backoffMs = config.backoffSeconds * attempt * 1000;
         const nextRetryAt = new Date(Date.now() + backoffMs);
 
