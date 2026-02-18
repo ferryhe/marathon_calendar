@@ -4,7 +4,7 @@
  * 本文件展示了一个完整的爬虫实现示例，包括：
  * 1. 使用 Cheerio 解析 HTML
  * 2. 实现增量更新逻辑（基于 content hash）
- * 3. 添加错误重试机制（带指数退避）
+ * 3. 添加错误重试机制（带线性退避）
  * 
  * 注意：实际的爬虫逻辑已集成在 server/syncScheduler.ts 中，本文件作为：
  * - 技术参考文档
@@ -18,7 +18,7 @@
 
 import crypto from "crypto";
 import { load, type CheerioAPI } from "cheerio";
-import type { RawEvent, ParsedEvent, ChangeDetection } from "./types";
+import type { RawEvent, ChangeDetection } from "./types";
 
 // ============================================================================
 // 1. Cheerio HTML 解析示例
@@ -307,7 +307,7 @@ export interface RetryState {
 
 /**
  * 带重试的 HTTP 请求
- * 实现指数退避策略和超时控制
+ * 实现线性退避策略和超时控制
  */
 export async function fetchWithRetry(
   url: string,
@@ -547,9 +547,9 @@ export const ZUIKU_SPORTS_CONFIG = {
   minIntervalSeconds: 21600, // 6 hours
   selectors: {
     listItemLink: 'a.event-a[href*="/event/"]',
-    eventDate: ".event-date, .race-date, [class*='date']",
-    registrationStatus: ".registration-status, .event-status",
-    registrationUrl: "a[href*='register'], a[href*='signup']",
+    eventDate: ".event-date, .race-date, [class*='date'], meta[property='event:start_time']",
+    registrationStatus: ".registration-status, .event-status, [class*='status']",
+    registrationUrl: "a[href*='register'], a[href*='signup'], a[href*='baoming'], .register-btn",
   },
 } as const;
 
