@@ -151,13 +151,29 @@ sources:
     retryBackoffSeconds: 30
     requestTimeoutMs: 15000
     minIntervalSeconds: 21600
-    notes: "国内主流马拉松报名平台之一"
+    notes: "国内主流马拉松报名平台之一。完整爬虫实现包括：Cheerio HTML解析、增量更新逻辑、错误重试机制。参考测试文档：docs/审查报告/测试文档-最酷体育爬虫实现-2026-02-17.md"
     config:
       discovery:
         list:
           itemLink:
             selector: "a.event-a[href*='/event/']"
             attr: "href"
+      extract:
+        # 赛事日期提取规则
+        # 优先级：1) JSON-LD Event schema, 2) CSS selector, 3) regex fallback
+        raceDate:
+          selector: ".event-date, .race-date, [class*='date'], meta[property='event:start_time']"
+          attr: "text"
+          regex: "(20\\d{2})-(\\d{1,2})-(\\d{1,2})"
+          group: 0
+        # 报名状态提取
+        registrationStatus:
+          selector: ".registration-status, .event-status, [class*='status']"
+          attr: "text"
+        # 报名链接提取
+        registrationUrl:
+          selector: "a[href*='register'], a[href*='signup'], a[href*='baoming'], .register-btn"
+          attr: "href"
 
   - name: 芝华安方体育
     type: platform
