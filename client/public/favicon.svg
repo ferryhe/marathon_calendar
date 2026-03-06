@@ -1,13 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <defs>
-    <linearGradient id="bg" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1E3A8A"/>
-      <stop offset="1" stop-color="#0EA5E9"/>
-    </linearGradient>
-  </defs>
-  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#bg)"/>
-  <circle cx="32" cy="32" r="17" stroke="white" stroke-opacity=".9" stroke-width="3"/>
-  <path d="M22 32c3-3 7-3 10 0s7 3 10 0" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="34.5" cy="20.5" r="3.5" fill="white"/>
-  <path d="M29 27l5 3 5-1M31 30l-3 6m6-6l2 7m-8 2h10" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- 黑白大气马拉松图标 -->
+  <!-- 跑者剪影 -->
+  <circle cx="256" cy="256" r="240" fill="white" stroke="black" stroke-width="16"/>
+  
+  <!-- 跑者头部 -->
+  <circle cx="280" cy="140" r="40" fill="black"/>
+  
+  <!-- 身体 -->
+  <path d="M280 180 L320 280 L280 260 L240 280 L280 180" fill="black"/>
+  
+  <!-- 腿部 - 奔跑姿态 -->
+  <path d="M240 280 L200 380 L230 390 L260 300" fill="black"/>
+  <path d="M320 280 L360 340 L340 350 L300 290" fill="black"/>
+  
+  <!-- 手臂 -->
+  <path d="M260 200 L220 240 L230 250 L270 210" fill="black"/>
+  <path d="M300 200 L340 230 L330 240 L290 210" fill="black"/>
+  
+  <!-- 终点线 -->
+  <rect x="120" y="400" width="272" height="8" rx="4" fill="black"/>
+  
+  <!-- 数字 2026 -->
+  <text x="256" y="480" font-family="Arial Black, sans-serif" font-size="48" font-weight="bold" fill="black" text-anchor="middle">2026</text>
 </svg>
