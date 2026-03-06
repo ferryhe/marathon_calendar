@@ -43,6 +43,11 @@ export default function Home() {
     }
   }, [currentUser, viewMode]);
 
+  // 设置页面标题
+  useEffect(() => {
+    document.title = viewMode === "mine" ? "我的收藏 - 马拉松日历" : "马拉松日历";
+  }, [viewMode]);
+
   const handleUpdate = () => {
     setIsUpdating(true);
     setTimeout(() => {
