@@ -1,0 +1,2848 @@
+﻿import type { Express, Request } from "express";
+import { type Server } from "http";
+import path from "path";
+import { promises as fs } from "fs";
+import COS from "cos-nodejs-sdk-v5";
+import sharp from "sharp";
+import { eq, and, or, like, sql, desc, asc, inArray, ne } from "drizzle-orm";
+import { z } from "zod";
+import {
+  users,
+  insertUserSchema,
+  insertMarathonSchema,
+  insertReviewSchema,
+  userFavoriteMarathons,
+  marathonReviews,
+  reviewLikes,
+  reviewReports,
+  sources,
+  marathonSources,
+  marathonSyncRuns,
+  rawCrawlData,
+  marathons,
+  marathonEditions,
+} from "@shared/schema";
+import { isChinaCountry, canonicalCountryValue } from "@shared/utils";
+import { db } from "./db";
+import { hashPassword, verifyPassword } from "./auth";
+import {
+  AUTO_UPDATE_DISABLED_NEXT_CHECK_AT,
+  isAutoUpdateDisabled,
+  syncMarathonSourceOnce,
+  syncNowOnce,
+} from "./syncScheduler";
+import { braveWebSearch } from "./braveSearch";
+import { upsertEditionWithMerge } from "./editionMerge";
+import { aiGenerateExtractTemplateFromHtml, previewExtractTemplate } from "./aiRuleTemplate";
+
+const reviewPayloadSchema = insertReviewSchema.omit({
+  marathonId: true,
+  userId: true,
+  userDisplayName: true,
+});
+
+const marathonEditionIdSchema = z.union([
+  z.string().uuid(),
+  z.literal("").transform(() => undefined),
+  z.undefined(),
+]);
+
+const reviewPayloadWithEditionSchema = reviewPayloadSchema.extend({
+  marathonEditionId: marathonEditionIdSchema,
+});
+
+// Query parameter schemas
+const marathonQuerySchema = z.object({
+  page: z.coerce.number().min(1).default(1),
+  limit: z.coerce.number().min(1).max(100).default(20),
+  search: z.string().optional(),
+  city: z.string().optional(),
+  country: z.string().optional(),
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  status: z.string().optional(),
+  sortBy: z.enum(['name', 'createdAt', 'raceDate']).default('raceDate'),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
+});
+
+const searchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(200),
+});
+
+const registerPayloadSchema = insertUserSchema.extend({
+  username: z.string().trim().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/),
+  password: z.string().min(6).max(128),
+});
+
+const loginPayloadSchema = z.object({
+  username: z.string().trim().min(3).max(30),
+  password: z.string().min(6).max(128),
+});
+
+const updateReviewPayloadSchema = z.object({
+  rating: z.number().int().min(1).max(5).optional(),
+  comment: z.string().max(1000).nullable().optional(),
+});
+
+const updateProfilePayloadSchema = z.object({
+  displayName: z.string().trim().min(1).max(50),
+  avatarUrl: z.string().url().nullable().optional(),
+  avatarSource: z.enum(["manual", "upload", "wechat"]).optional(),
+});
+
+const avatarUploadPayloadSchema = z.object({
+  dataUrl: z.string().min(32).max(6 * 1024 * 1024),
+});
+
+const bindWechatPayloadSchema = z.object({
+  wechatOpenId: z.string().trim().min(6).max(128),
+  wechatUnionId: z.string().trim().min(6).max(128).optional(),
+  wechatNickname: z.string().trim().min(1).max(50),
+  wechatAvatarUrl: z.string().url().optional(),
+});
+
+function requireAuth(req: Request) {
+  if (!req.session?.userId) {
+    const error = new Error("Authentication required");
+    (error as Error & { status?: number }).status = 401;
+    throw error;
+  }
+}
+
+function ensureDatabase() {
+  if (!db) {
+    throw new Error("Database unavailable: DATABASE_URL is not configured");
+  }
+
+  return db;
+}
+
+function requireAdmin(req: Request) {
+  const expected = process.env.ADMIN_API_TOKEN;
+  if (!expected) {
+    const error = new Error("Admin API is not enabled");
+    (error as Error & { status?: number }).status = 404;
+    throw error;
+  }
+
+  const headerValue = req.header("x-admin-token") ?? "";
+  if (headerValue !== expected) {
+    const error = new Error("Admin authentication required");
+    (error as Error & { status?: number }).status = 401;
+    throw error;
+  }
+}
+
+async function regenerateSession(req: Request) {
+  await new Promise<void>((resolve, reject) => {
+    req.session.regenerate((err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
+
+function canonicalizeName(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function toAuthUser(user: {
+  id: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  avatarSource: string;
+  isWechatBound: boolean;
+  wechatNickname: string | null;
+  wechatAvatarUrl: string | null;
+}) {
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    avatarSource: user.avatarSource,
+    isWechatBound: user.isWechatBound,
+    wechatNickname: user.wechatNickname,
+    wechatAvatarUrl: user.wechatAvatarUrl,
+  };
+}
+
+const AVATAR_ALLOWED_INPUT_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/gif",
+]);
+const AVATAR_INPUT_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_OUTPUT_MAX_BYTES = 512 * 1024;
+const AVATAR_MAX_DIMENSION = 4096;
+const AVATAR_MIN_DIMENSION = 64;
+const AVATAR_TARGET_MAX_DIMENSION = 512;
+const AVATAR_SECURITY_TEXT_PATTERNS = [
+  "<script",
+  "<?php",
+  "<html",
+  "<svg",
+  "javascript:",
+  "onerror=",
+  "onload=",
+  "<!doctype",
+  "eval(",
+];
+
+function badRequest(message: string): never {
+  const error = new Error(message);
+  (error as Error & { status?: number }).status = 400;
+  throw error;
+}
+
+function scanForSuspiciousContent(buffer: Buffer) {
+  // Fast heuristic scan for common script/polyglot payload markers.
+  const lowerText = buffer.toString("latin1").toLowerCase();
+  if (AVATAR_SECURITY_TEXT_PATTERNS.some((pattern) => lowerText.includes(pattern))) {
+    badRequest("Avatar image failed security scan");
+  }
+
+  const header = buffer.subarray(0, 8);
+  const hasExecutableHeader =
+    header.length >= 2 && header[0] === 0x4d && header[1] === 0x5a; // MZ
+  const hasZipHeader =
+    header.length >= 4 &&
+    header[0] === 0x50 &&
+    header[1] === 0x4b &&
+    header[2] === 0x03 &&
+    header[3] === 0x04;
+  const hasPdfHeader =
+    header.length >= 5 &&
+    header[0] === 0x25 &&
+    header[1] === 0x50 &&
+    header[2] === 0x44 &&
+    header[3] === 0x46 &&
+    header[4] === 0x2d;
+  if (hasExecutableHeader || hasZipHeader || hasPdfHeader) {
+    badRequest("Avatar image failed security scan");
+  }
+}
+
+function normalizeDetectedMime(format: string | undefined) {
+  if (!format) return null;
+  if (format === "jpeg") return "image/jpeg";
+  return `image/${format}`;
+}
+
+async function compressAvatarToWebp(buffer: Buffer) {
+  for (const quality of [82, 72, 62, 52]) {
+    const output = await sharp(buffer, {
+      failOn: "error",
+      limitInputPixels: AVATAR_MAX_DIMENSION * AVATAR_MAX_DIMENSION,
+    })
+      .rotate()
+      .resize({
+        width: AVATAR_TARGET_MAX_DIMENSION,
+        height: AVATAR_TARGET_MAX_DIMENSION,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({
+        quality,
+        effort: 5,
+      })
+      .toBuffer();
+
+    if (output.length <= AVATAR_OUTPUT_MAX_BYTES) {
+      return output;
+    }
+  }
+
+  badRequest("Avatar image exceeds output size limit");
+}
+
+async function parseAvatarDataUrl(dataUrl: string) {
+  const match = dataUrl.match(
+    /^data:(image\/(png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)$/i,
+  );
+  if (!match) {
+    badRequest("Invalid image data");
+  }
+
+  const mime = match[1].toLowerCase();
+  const claimedMime = mime === "image/jpg" ? "image/jpeg" : mime;
+  if (!AVATAR_ALLOWED_INPUT_MIME.has(claimedMime)) {
+    badRequest("Avatar MIME type is not allowed");
+  }
+
+  const base64Body = match[3];
+  const buffer = Buffer.from(base64Body, "base64");
+  if (!buffer.length) {
+    badRequest("Invalid image data");
+  }
+
+  if (buffer.length > AVATAR_INPUT_MAX_BYTES) {
+    badRequest("Avatar image exceeds 2MB");
+  }
+
+  scanForSuspiciousContent(buffer);
+
+  let metadata: sharp.Metadata;
+  try {
+    metadata = await sharp(buffer, {
+      failOn: "error",
+      limitInputPixels: AVATAR_MAX_DIMENSION * AVATAR_MAX_DIMENSION,
+    })
+      .metadata();
+  } catch {
+    badRequest("Invalid image binary");
+  }
+
+  const detectedMime = normalizeDetectedMime(metadata.format);
+  if (!detectedMime || !AVATAR_ALLOWED_INPUT_MIME.has(detectedMime)) {
+    badRequest("Avatar MIME type is not allowed");
+  }
+  if (detectedMime !== claimedMime) {
+    badRequest("Avatar MIME does not match image content");
+  }
+
+  const width = metadata.width ?? 0;
+  const height = metadata.height ?? 0;
+  if (
+    width < AVATAR_MIN_DIMENSION ||
+    height < AVATAR_MIN_DIMENSION ||
+    width > AVATAR_MAX_DIMENSION ||
+    height > AVATAR_MAX_DIMENSION
+  ) {
+    badRequest("Avatar dimensions are out of allowed range");
+  }
+
+  const compressedBuffer = await compressAvatarToWebp(buffer);
+  return { buffer: compressedBuffer, ext: "webp" as const };
+}
+
+const COS_BUCKET = process.env.COS_BUCKET ?? "marathon-calendar-1256398230";
+const COS_REGION = process.env.COS_REGION;
+const COS_SECRET_ID = process.env.COS_SECRET_ID;
+const COS_SECRET_KEY = process.env.COS_SECRET_KEY;
+const COS_PUBLIC_BASE_URL = process.env.COS_PUBLIC_BASE_URL;
+
+const cosClient =
+  COS_REGION && COS_SECRET_ID && COS_SECRET_KEY
+    ? new COS({
+        SecretId: COS_SECRET_ID,
+        SecretKey: COS_SECRET_KEY,
+      })
+    : null;
+
+function getCosPublicUrl(key: string) {
+  const normalized = key.replace(/^\/+/, "");
+  if (COS_PUBLIC_BASE_URL) {
+    const base = COS_PUBLIC_BASE_URL.replace(/\/+$/, "");
+    return `${base}/${normalized}`;
+  }
+
+  if (!COS_REGION) {
+    throw new Error("COS_REGION is required for COS uploads");
+  }
+
+  return `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${normalized}`;
+}
+
+async function uploadAvatarObject(
+  userId: string,
+  ext: string,
+  buffer: Buffer,
+): Promise<{ avatarUrl: string; storage: "cos" | "local" }> {
+  const now = Date.now();
+  const objectKey = `avatars/${userId}/${now}.${ext}`;
+
+  if (cosClient && COS_REGION) {
+    await new Promise<void>((resolve, reject) => {
+      cosClient.putObject(
+        {
+          Bucket: COS_BUCKET,
+          Region: COS_REGION,
+          Key: objectKey,
+          Body: buffer,
+          ContentLength: buffer.length,
+          ContentType: `image/${ext === "jpg" ? "jpeg" : ext}`,
+          CacheControl: "public, max-age=31536000, immutable",
+        },
+        (err) => {
+          if (err) {
+            return reject(err);
+          }
+
+          return resolve();
+        },
+      );
+    });
+
+    return {
+      avatarUrl: getCosPublicUrl(objectKey),
+      storage: "cos",
+    };
+  }
+
+  const relativeDir = path.join("uploads", "avatars");
+  const absoluteDir = path.resolve(process.cwd(), relativeDir);
+  await fs.mkdir(absoluteDir, { recursive: true });
+
+  const fileName = `${userId}-${now}.${ext}`;
+  await fs.writeFile(path.join(absoluteDir, fileName), buffer);
+
+  return {
+    avatarUrl: `/uploads/avatars/${fileName}`,
+    storage: "local",
+  };
+}
+
+export async function registerRoutes(
+  httpServer: Server,
+  app: Express,
+): Promise<Server> {
+  app.post("/api/auth/register", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const payload = registerPayloadSchema.parse(req.body);
+
+      const [existingUser] = await database
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.username, payload.username));
+
+      if (existingUser) {
+        return res.status(409).json({ message: "Username already exists" });
+      }
+
+      const hashedPassword = await hashPassword(payload.password);
+      const [user] = await database
+        .insert(users)
+        .values({
+          username: payload.username,
+          password: hashedPassword,
+          displayName: payload.username,
+          avatarSource: "manual",
+        })
+        .returning();
+
+      // Mitigate session fixation: rotate session ID upon auth state change.
+      await regenerateSession(req);
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      req.session.displayName = user.displayName ?? user.username;
+
+      res.json({
+        user: toAuthUser(user),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const payload = loginPayloadSchema.parse(req.body);
+
+      const [user] = await database
+        .select({
+          id: users.id,
+          username: users.username,
+          password: users.password,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        })
+        .from(users)
+        .where(eq(users.username, payload.username));
+
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const isValidPassword = await verifyPassword(payload.password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      // Mitigate session fixation: rotate session ID upon auth state change.
+      await regenerateSession(req);
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      req.session.displayName = user.displayName ?? user.username;
+
+      res.json({
+        user: toAuthUser(user),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/auth/logout", async (req, res, next) => {
+    try {
+      if (!req.session) {
+        return res.json({ success: true });
+      }
+
+      req.session.destroy((err) => {
+        if (err) {
+          return next(err);
+        }
+
+        res.clearCookie("mc.sid");
+        return res.json({ success: true });
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/users/me", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      if (!req.session.userId) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const [user] = await database
+        .select({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        })
+        .from(users)
+        .where(eq(users.id, req.session.userId));
+
+      if (!user) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      res.json({ user: toAuthUser(user) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/users/me", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+      const payload = updateProfilePayloadSchema.parse(req.body);
+
+      const body = req.body as Record<string, unknown>;
+      const updateData: {
+        displayName: (typeof users.$inferInsert)["displayName"];
+        avatarUrl?: (typeof users.$inferInsert)["avatarUrl"];
+        avatarSource?: (typeof users.$inferInsert)["avatarSource"];
+        updatedAt: Date;
+      } = {
+        displayName: payload.displayName,
+        updatedAt: new Date(),
+      };
+
+      // Avoid unintentionally clearing avatar fields when the client only updates displayName.
+      if (Object.prototype.hasOwnProperty.call(body, "avatarUrl")) {
+        updateData.avatarUrl = payload.avatarUrl ?? null;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, "avatarSource")) {
+        updateData.avatarSource = payload.avatarSource ?? "manual";
+      }
+
+      const [updated] = await database
+        .update(users)
+        .set(updateData)
+        .where(eq(users.id, req.session.userId!))
+        .returning({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        });
+
+      if (!updated) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      req.session.displayName = updated.displayName ?? updated.username;
+      res.json({ user: toAuthUser(updated) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/users/me/avatar/upload", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+      const payload = avatarUploadPayloadSchema.parse(req.body);
+      const { buffer, ext } = await parseAvatarDataUrl(payload.dataUrl);
+      const { avatarUrl } = await uploadAvatarObject(req.session.userId!, ext, buffer);
+
+      const [updated] = await database
+        .update(users)
+        .set({
+          avatarUrl,
+          avatarSource: "upload",
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, req.session.userId!))
+        .returning({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        });
+
+      res.json({
+        avatarUrl,
+        user: updated ? toAuthUser(updated) : null,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Backend-oriented operation: in production this should be called after server-side
+  // verification with WeChat OAuth data, not directly by arbitrary clients.
+  app.post("/api/users/me/wechat/bind", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+      const payload = bindWechatPayloadSchema.parse(req.body);
+
+      const userId = req.session.userId!;
+      const [openIdConflict] = await database
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.wechatOpenId, payload.wechatOpenId), ne(users.id, userId)))
+        .limit(1);
+      if (openIdConflict) {
+        return res.status(409).json({ message: "WeChat openId already bound" });
+      }
+
+      if (payload.wechatUnionId) {
+        const [unionIdConflict] = await database
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.wechatUnionId, payload.wechatUnionId), ne(users.id, userId)))
+          .limit(1);
+        if (unionIdConflict) {
+          return res.status(409).json({ message: "WeChat unionId already bound" });
+        }
+      }
+
+      const [updated] = await database
+        .update(users)
+        .set({
+          wechatOpenId: payload.wechatOpenId,
+          wechatUnionId: payload.wechatUnionId ?? null,
+          wechatNickname: payload.wechatNickname,
+          wechatAvatarUrl: payload.wechatAvatarUrl ?? null,
+          isWechatBound: true,
+          wechatBoundAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId))
+        .returning({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        });
+
+      res.json({ user: updated ? toAuthUser(updated) : null });
+    } catch (error) {
+      // Map unique constraint violations to 409 so the client can react properly.
+      if ((error as any)?.code === "23505") {
+        return res.status(409).json({ message: "WeChat already bound" });
+      }
+      next(error);
+    }
+  });
+
+  app.post("/api/users/me/wechat/unbind", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const [updated] = await database
+        .update(users)
+        .set({
+          wechatOpenId: null,
+          wechatUnionId: null,
+          wechatNickname: null,
+          wechatAvatarUrl: null,
+          isWechatBound: false,
+          wechatBoundAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, req.session.userId!))
+        .returning({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          avatarSource: users.avatarSource,
+          isWechatBound: users.isWechatBound,
+          wechatNickname: users.wechatNickname,
+          wechatAvatarUrl: users.wechatAvatarUrl,
+        });
+
+      res.json({ user: updated ? toAuthUser(updated) : null });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/users/me/reviews", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const records = await database
+        .select({
+          id: marathonReviews.id,
+          marathonId: marathonReviews.marathonId,
+          userId: marathonReviews.userId,
+          marathonEditionId: marathonReviews.marathonEditionId,
+          userDisplayName: sql<string>`coalesce(${users.displayName}, ${marathonReviews.userDisplayName})`,
+          userAvatarUrl: users.avatarUrl,
+          rating: marathonReviews.rating,
+          comment: marathonReviews.comment,
+          likesCount: marathonReviews.likesCount,
+          reportCount: marathonReviews.reportCount,
+          createdAt: marathonReviews.createdAt,
+          marathon: {
+            id: marathons.id,
+            name: marathons.name,
+            city: marathons.city,
+            country: marathons.country,
+          },
+        })
+        .from(marathonReviews)
+        .leftJoin(users, eq(users.id, marathonReviews.userId))
+        .innerJoin(marathons, eq(marathons.id, marathonReviews.marathonId))
+        .where(eq(marathonReviews.userId, req.session.userId!))
+        .orderBy(desc(marathonReviews.createdAt));
+
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/users/me/favorites", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const records = await database
+        .select({
+          id: userFavoriteMarathons.id,
+          favoritedAt: userFavoriteMarathons.createdAt,
+          marathon: {
+            id: marathons.id,
+            name: marathons.name,
+            city: marathons.city,
+            country: marathons.country,
+            websiteUrl: marathons.websiteUrl,
+            description: marathons.description,
+          },
+        })
+        .from(userFavoriteMarathons)
+        .innerJoin(marathons, eq(marathons.id, userFavoriteMarathons.marathonId))
+        .where(eq(userFavoriteMarathons.userId, req.session.userId!))
+        .orderBy(desc(userFavoriteMarathons.createdAt));
+
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/users/me/favorites/:marathonId", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const [marathon] = await database
+        .select({ id: marathons.id })
+        .from(marathons)
+        .where(eq(marathons.id, req.params.marathonId));
+
+      if (!marathon) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      await database
+        .insert(userFavoriteMarathons)
+        .values({
+          userId: req.session.userId!,
+          marathonId: req.params.marathonId,
+        })
+        .onConflictDoNothing({
+          target: [
+            userFavoriteMarathons.userId,
+            userFavoriteMarathons.marathonId,
+          ],
+        });
+
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/users/me/favorites/:marathonId", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      await database
+        .delete(userFavoriteMarathons)
+        .where(
+          and(
+            eq(userFavoriteMarathons.userId, req.session.userId!),
+            eq(userFavoriteMarathons.marathonId, req.params.marathonId),
+          ),
+        );
+
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Get marathons list with filtering, pagination and search
+  app.get("/api/marathons", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const params = marathonQuerySchema.parse(req.query);
+
+      // Build where conditions
+      const conditions = [];
+
+      if (params.search) {
+        conditions.push(
+          or(
+            like(marathons.name, `%${params.search}%`),
+            like(marathons.city, `%${params.search}%`),
+            like(marathons.canonicalName, `%${params.search}%`),
+            like(marathons.description, `%${params.search}%`)
+          )
+        );
+      }
+      
+      if (params.city) {
+        conditions.push(eq(marathons.city, params.city));
+      }
+      
+      if (params.country) {
+        // All China aliases are normalized to "China" in the database
+        if (isChinaCountry(params.country)) {
+          conditions.push(eq(marathons.country, "China"));
+        } else {
+          conditions.push(eq(marathons.country, params.country));
+        }
+      }
+
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const baseMarathons = await database
+        .select()
+        .from(marathons)
+        .where(whereClause)
+        .orderBy(asc(marathons.name));
+
+      if (baseMarathons.length === 0) {
+        return res.json({
+          data: [],
+          pagination: {
+            page: params.page,
+            limit: params.limit,
+            total: 0,
+            totalPages: 0,
+          },
+        });
+      }
+
+      const marathonIds = baseMarathons.map((marathon) => marathon.id);
+      const editionConditions = [inArray(marathonEditions.marathonId, marathonIds)];
+      editionConditions.push(eq(marathonEditions.publishStatus, "published"));
+
+      if (params.year) {
+        editionConditions.push(eq(marathonEditions.year, params.year));
+      }
+
+      if (params.month) {
+        editionConditions.push(
+          sql`extract(month from ${marathonEditions.raceDate}) = ${params.month}`,
+        );
+      }
+
+      if (params.status) {
+        editionConditions.push(eq(marathonEditions.registrationStatus, params.status));
+      }
+
+      const editionWhereClause =
+        editionConditions.length > 1 ? and(...editionConditions) : editionConditions[0];
+
+      const editionRecords = await database
+        .select()
+        .from(marathonEditions)
+        .where(editionWhereClause)
+        // Null raceDate means "TBD": keep them at the end so upcoming lists remain useful.
+        .orderBy(
+          sql`case when ${marathonEditions.raceDate} is null then 1 else 0 end`,
+          asc(marathonEditions.raceDate),
+          desc(marathonEditions.year),
+        );
+
+      const editionsByMarathon = new Map<string, typeof editionRecords>();
+      for (const edition of editionRecords) {
+        const list = editionsByMarathon.get(edition.marathonId) ?? [];
+        list.push(edition);
+        editionsByMarathon.set(edition.marathonId, list);
+      }
+
+      const requiresEditionFilter =
+        params.year !== undefined ||
+        params.month !== undefined ||
+        params.status !== undefined;
+
+      const enrichedRecords = baseMarathons
+        .map((marathon) => {
+          const editions = editionsByMarathon.get(marathon.id) ?? [];
+          const nextEdition = editions[0];
+          return {
+            ...marathon,
+            nextEdition,
+          };
+        })
+        .filter((record) => (requiresEditionFilter ? !!record.nextEdition : true));
+
+      const sortedRecords = [...enrichedRecords].sort((a, b) => {
+        if (params.sortBy === "name") {
+          const compareValue = a.name.localeCompare(b.name, "zh-Hans-CN");
+          return params.sortOrder === "desc" ? -compareValue : compareValue;
+        }
+
+        if (params.sortBy === "createdAt") {
+          const timeA = new Date(a.createdAt).getTime();
+          const timeB = new Date(b.createdAt).getTime();
+          return params.sortOrder === "desc" ? timeB - timeA : timeA - timeB;
+        }
+
+        const raceA = a.nextEdition?.raceDate
+          ? new Date(a.nextEdition.raceDate).getTime()
+          : params.sortOrder === "desc"
+            ? Number.NEGATIVE_INFINITY
+            : Number.POSITIVE_INFINITY;
+        const raceB = b.nextEdition?.raceDate
+          ? new Date(b.nextEdition.raceDate).getTime()
+          : params.sortOrder === "desc"
+            ? Number.NEGATIVE_INFINITY
+            : Number.POSITIVE_INFINITY;
+
+        return params.sortOrder === "desc" ? raceB - raceA : raceA - raceB;
+      });
+
+      const total = sortedRecords.length;
+      const offset = (params.page - 1) * params.limit;
+      const paged = sortedRecords.slice(offset, offset + params.limit);
+
+      res.json({
+        data: paged,
+        pagination: {
+          page: params.page,
+          limit: params.limit,
+          total,
+          totalPages: Math.ceil(total / params.limit),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Search marathons (simplified search endpoint) - MUST come before /:id
+  app.get("/api/marathons/search", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const { q: searchQuery } = searchQuerySchema.parse(req.query);
+      
+      const records = await database
+        .select()
+        .from(marathons)
+        .where(
+          or(
+            like(marathons.name, `%${searchQuery}%`),
+            like(marathons.city, `%${searchQuery}%`),
+            like(marathons.description, `%${searchQuery}%`)
+          )
+        )
+        .limit(20);
+      
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Get upcoming marathons - MUST come before /:id
+  app.get("/api/marathons/upcoming", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const limit = z
+        .preprocess(
+          (value) => (Array.isArray(value) ? value[0] : value),
+          z.coerce.number().int().min(1).max(50).default(10),
+        )
+        .parse(req.query.limit);
+      
+      // Get marathons with editions that have future race dates
+      const records = await database
+        .select({
+          marathon: marathons,
+          edition: marathonEditions,
+        })
+        .from(marathons)
+        .innerJoin(marathonEditions, eq(marathons.id, marathonEditions.marathonId))
+        .where(
+          and(
+            eq(marathonEditions.publishStatus, "published"),
+            sql`${marathonEditions.raceDate} >= CURRENT_DATE`,
+          ),
+        )
+        .orderBy(asc(marathonEditions.raceDate))
+        .limit(limit);
+      
+      res.json({ 
+        data: records.map(r => ({
+          ...r.marathon,
+          nextEdition: r.edition,
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/marathons/hot", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const limit = z
+        .preprocess(
+          (value) => (Array.isArray(value) ? value[0] : value),
+          z.coerce.number().int().min(1).max(50).default(10),
+        )
+        .parse(req.query.limit);
+
+      const records = await database
+        .select({
+          marathon: marathons,
+          reviewCount: sql<number>`count(${marathonReviews.id})::int`,
+          averageRating: sql<number>`coalesce(avg(${marathonReviews.rating}), 0)::float`,
+        })
+        .from(marathons)
+        .leftJoin(marathonReviews, eq(marathonReviews.marathonId, marathons.id))
+        .groupBy(marathons.id)
+        .orderBy(
+          desc(sql`count(${marathonReviews.id})`),
+          desc(sql`coalesce(avg(${marathonReviews.rating}), 0)`),
+          asc(marathons.name),
+        )
+        .limit(limit);
+
+      res.json({
+        data: records.map((record) => ({
+          ...record.marathon,
+          stats: {
+            reviewCount: record.reviewCount,
+            averageRating: Number(record.averageRating ?? 0),
+          },
+        })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/marathons/:marathonId/favorite-status", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+
+      if (!req.session?.userId) {
+        return res.json({ isFavorited: false });
+      }
+
+      const [record] = await database
+        .select({ id: userFavoriteMarathons.id })
+        .from(userFavoriteMarathons)
+        .where(
+          and(
+            eq(userFavoriteMarathons.userId, req.session.userId),
+            eq(userFavoriteMarathons.marathonId, req.params.marathonId),
+          ),
+        )
+        .limit(1);
+
+      res.json({ isFavorited: !!record });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Get marathon details by ID - MUST come after /search and /upcoming
+  app.get("/api/marathons/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const [record] = await database
+        .select()
+        .from(marathons)
+        .where(eq(marathons.id, req.params.id));
+      
+      if (!record) {
+        return res.status(404).json({ error: "Marathon not found" });
+      }
+      
+      // Get associated editions
+      const editions = await database
+        .select()
+        .from(marathonEditions)
+        .where(
+          and(
+            eq(marathonEditions.marathonId, req.params.id),
+            eq(marathonEditions.publishStatus, "published"),
+          ),
+        )
+        .orderBy(desc(marathonEditions.year));
+      
+      // Get reviews with user profile data for avatar/display name rendering.
+      const reviews = await database
+        .select({
+          id: marathonReviews.id,
+          marathonId: marathonReviews.marathonId,
+          userId: marathonReviews.userId,
+          marathonEditionId: marathonReviews.marathonEditionId,
+          userDisplayName: sql<string>`coalesce(${users.displayName}, ${marathonReviews.userDisplayName})`,
+          userAvatarUrl: users.avatarUrl,
+          rating: marathonReviews.rating,
+          comment: marathonReviews.comment,
+          likesCount: marathonReviews.likesCount,
+          reportCount: marathonReviews.reportCount,
+          createdAt: marathonReviews.createdAt,
+        })
+        .from(marathonReviews)
+        .leftJoin(users, eq(users.id, marathonReviews.userId))
+        .where(eq(marathonReviews.marathonId, req.params.id))
+        .orderBy(desc(marathonReviews.createdAt));
+      
+      const avgRating = reviews.length > 0
+        ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+        : 0;
+      
+      res.json({
+        ...record,
+        editions,
+        reviews: {
+          items: reviews,
+          averageRating: avgRating,
+          count: reviews.length,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/marathons", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const parsed = insertMarathonSchema.parse({
+        ...req.body,
+        canonicalName:
+          req.body.canonicalName ?? canonicalizeName(req.body.name ?? ""),
+      });
+      const payload = {
+        ...parsed,
+        country: canonicalCountryValue(parsed.country),
+      };
+
+      const [record] = await database
+        .insert(marathons)
+        .values({
+          ...payload,
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: marathons.canonicalName,
+          set: {
+            ...payload,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+      res.json(record);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/marathons/:marathonId/reviews", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const records = await database
+        .select({
+          id: marathonReviews.id,
+          marathonId: marathonReviews.marathonId,
+          userId: marathonReviews.userId,
+          marathonEditionId: marathonReviews.marathonEditionId,
+          userDisplayName: sql<string>`coalesce(${users.displayName}, ${marathonReviews.userDisplayName})`,
+          userAvatarUrl: users.avatarUrl,
+          rating: marathonReviews.rating,
+          comment: marathonReviews.comment,
+          likesCount: marathonReviews.likesCount,
+          reportCount: marathonReviews.reportCount,
+          createdAt: marathonReviews.createdAt,
+        })
+        .from(marathonReviews)
+        .leftJoin(users, eq(users.id, marathonReviews.userId))
+        .where(eq(marathonReviews.marathonId, req.params.marathonId))
+        .orderBy(desc(marathonReviews.createdAt));
+      res.json(records);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/marathons/:marathonId/reviews", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+      const parsed = reviewPayloadWithEditionSchema.parse(req.body);
+      const [author] = await database
+        .select({
+          username: users.username,
+          displayName: users.displayName,
+        })
+        .from(users)
+        .where(eq(users.id, req.session.userId!));
+
+      const displayName =
+        author?.displayName ??
+        author?.username ??
+        req.session.displayName ??
+        req.session.username ??
+        "鍖垮悕鐢ㄦ埛";
+      const [record] = await database
+        .insert(marathonReviews)
+        .values({
+          ...parsed,
+          marathonId: req.params.marathonId,
+          userId: req.session.userId!,
+          userDisplayName: displayName,
+        })
+        .returning();
+
+      res.json(record);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/reviews/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+      const payload = updateReviewPayloadSchema.parse(req.body);
+
+      const [existing] = await database
+        .select()
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, req.params.id));
+
+      if (!existing) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      if (existing.userId !== req.session.userId) {
+        return res.status(403).json({ message: "Permission denied" });
+      }
+
+      const [updated] = await database
+        .update(marathonReviews)
+        .set({
+          ...(payload.rating !== undefined ? { rating: payload.rating } : {}),
+          ...(payload.comment !== undefined ? { comment: payload.comment } : {}),
+        })
+        .where(eq(marathonReviews.id, req.params.id))
+        .returning();
+
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/reviews/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const [existing] = await database
+        .select()
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, req.params.id));
+
+      if (!existing) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      if (existing.userId !== req.session.userId) {
+        return res.status(403).json({ message: "Permission denied" });
+      }
+
+      await database.delete(marathonReviews).where(eq(marathonReviews.id, req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/reviews/:id/like", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const reviewId = req.params.id;
+      const userId = req.session.userId!;
+
+      const [existing] = await database
+        .select({ id: marathonReviews.id })
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, reviewId));
+      if (!existing) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      const inserted = await database
+        .insert(reviewLikes)
+        .values({
+          reviewId,
+          userId,
+        })
+        .onConflictDoNothing({
+          target: [reviewLikes.reviewId, reviewLikes.userId],
+        })
+        .returning({ reviewId: reviewLikes.reviewId });
+
+      if (inserted.length === 0) {
+        return res.status(409).json({ message: "Already liked" });
+      }
+
+      const [updated] = await database
+        .update(marathonReviews)
+        .set({
+          likesCount: sql`${marathonReviews.likesCount} + 1`,
+        })
+        .where(eq(marathonReviews.id, reviewId))
+        .returning();
+
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/reviews/:id/report", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAuth(req);
+
+      const reviewId = req.params.id;
+      const userId = req.session.userId!;
+
+      const [existing] = await database
+        .select({ id: marathonReviews.id })
+        .from(marathonReviews)
+        .where(eq(marathonReviews.id, reviewId));
+      if (!existing) {
+        return res.status(404).json({ message: "Review not found" });
+      }
+
+      const inserted = await database
+        .insert(reviewReports)
+        .values({
+          reviewId,
+          userId,
+        })
+        .onConflictDoNothing({
+          target: [reviewReports.reviewId, reviewReports.userId],
+        })
+        .returning({ reviewId: reviewReports.reviewId });
+
+      if (inserted.length === 0) {
+        return res.status(409).json({ message: "Already reported" });
+      }
+
+      const [updated] = await database
+        .update(marathonReviews)
+        .set({
+          reportCount: sql`${marathonReviews.reportCount} + 1`,
+        })
+        .where(eq(marathonReviews.id, reviewId))
+        .returning();
+
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // --- Admin-only: data collection/sync management (Stage 1.3) ---
+  app.get("/api/admin/stats", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+
+      const now = new Date();
+      const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      const [sourceCounts] = await database
+        .select({
+          total: sql<number>`count(*)::int`,
+          active: sql<number>`sum(case when ${sources.isActive} then 1 else 0 end)::int`,
+        })
+        .from(sources);
+
+      const [marathonSourceCounts] = await database
+        .select({
+          total: sql<number>`count(*)::int`,
+        })
+        .from(marathonSources);
+
+      const rawByStatus = await database
+        .select({
+          status: rawCrawlData.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(rawCrawlData)
+        .groupBy(rawCrawlData.status);
+
+      const rawLast24hByStatus = await database
+        .select({
+          status: rawCrawlData.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(rawCrawlData)
+        .where(sql`${rawCrawlData.fetchedAt} >= ${since24h}`)
+        .groupBy(rawCrawlData.status);
+
+      const runsLast24hByStatus = await database
+        .select({
+          status: marathonSyncRuns.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(marathonSyncRuns)
+        .where(sql`${marathonSyncRuns.startedAt} >= ${since24h}`)
+        .groupBy(marathonSyncRuns.status);
+
+      res.json({
+        data: {
+          now: now.toISOString(),
+          since24h: since24h.toISOString(),
+          sources: {
+            total: sourceCounts?.total ?? 0,
+            active: sourceCounts?.active ?? 0,
+          },
+          marathonSources: {
+            total: marathonSourceCounts?.total ?? 0,
+          },
+          raw: {
+            byStatus: rawByStatus,
+            last24hByStatus: rawLast24hByStatus,
+          },
+          runs: {
+            last24hByStatus: runsLast24hByStatus,
+          },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/sources", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const records = await database
+        .select()
+        .from(sources)
+        .orderBy(desc(sources.priority), asc(sources.name));
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          name: z.string().trim().min(1).max(200).optional(),
+          type: z.string().trim().min(1).max(50).optional(),
+          strategy: z.string().trim().min(1).max(50).optional(),
+          baseUrl: z.string().url().nullable().optional(),
+          priority: z.number().int().min(0).max(1000).optional(),
+          isActive: z.boolean().optional(),
+          retryMax: z.number().int().min(1).max(10).optional(),
+          retryBackoffSeconds: z.number().int().min(1).max(3600).optional(),
+          requestTimeoutMs: z.number().int().min(1000).max(120000).optional(),
+          minIntervalSeconds: z.number().int().min(0).max(7 * 24 * 3600).optional(),
+          notes: z.string().max(2000).nullable().optional(),
+          config: z.record(z.string(), z.unknown()).nullable().optional(),
+        })
+        .parse(req.body);
+
+      const [updated] = await database
+        .update(sources)
+        .set({
+          ...payload,
+          updatedAt: new Date(),
+        })
+        .where(eq(sources.id, req.params.id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+      res.json({ data: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/admin/sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const sourceId = z.string().uuid().parse(req.params.id);
+      const force = z
+        .preprocess((value) => {
+          if (value === undefined) return false;
+          if (value === "true" || value === "1") return true;
+          if (value === "false" || value === "0") return false;
+          return value;
+        }, z.boolean())
+        .parse(req.query.force);
+
+      const [sourceRecord] = await database
+        .select({ id: sources.id, name: sources.name })
+        .from(sources)
+        .where(eq(sources.id, sourceId))
+        .limit(1);
+      if (!sourceRecord) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+
+      const [linkedMarathonSources] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(marathonSources)
+        .where(eq(marathonSources.sourceId, sourceId));
+      const [linkedSyncRuns] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(marathonSyncRuns)
+        .where(eq(marathonSyncRuns.sourceId, sourceId));
+      const [linkedRawCrawls] = await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.sourceId, sourceId));
+
+      const linkedCount =
+        (linkedMarathonSources?.count ?? 0) +
+        (linkedSyncRuns?.count ?? 0) +
+        (linkedRawCrawls?.count ?? 0);
+
+      if (linkedCount > 0) {
+        if (!force) {
+          return res.status(409).json({
+            message:
+              "Source is still referenced and cannot be deleted directly. Retry with force=true to remove related bindings and historical crawl/sync records.",
+            details: {
+              marathonSources: linkedMarathonSources?.count ?? 0,
+              syncRuns: linkedSyncRuns?.count ?? 0,
+              rawCrawl: linkedRawCrawls?.count ?? 0,
+            },
+          });
+        }
+
+        await database.transaction(async (tx) => {
+          await tx.delete(marathonSources).where(eq(marathonSources.sourceId, sourceId));
+          await tx.delete(marathonSyncRuns).where(eq(marathonSyncRuns.sourceId, sourceId));
+          await tx.delete(rawCrawlData).where(eq(rawCrawlData.sourceId, sourceId));
+          await tx.delete(sources).where(eq(sources.id, sourceId));
+        });
+        return res.json({
+          success: true,
+          deleted: {
+            sourceId,
+            marathonSources: linkedMarathonSources?.count ?? 0,
+            syncRuns: linkedSyncRuns?.count ?? 0,
+            rawCrawl: linkedRawCrawls?.count ?? 0,
+          },
+        });
+      }
+
+      await database.delete(sources).where(eq(sources.id, sourceId));
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/sync/run-all", async (req, res, next) => {
+    try {
+      requireAdmin(req);
+      await syncNowOnce();
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/sync/run-marathon-source", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          marathonSourceId: z.string().uuid(),
+        })
+        .parse(req.body);
+
+      const [record] = await database
+        .select({
+          msId: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          lastHash: marathonSources.lastHash,
+          nextCheckAt: marathonSources.nextCheckAt,
+          source: sources,
+        })
+        .from(marathonSources)
+        .innerJoin(sources, eq(sources.id, marathonSources.sourceId))
+        .where(eq(marathonSources.id, payload.marathonSourceId));
+
+      if (!record) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+
+      const result = await syncMarathonSourceOnce({
+        source: record.source,
+        marathonId: record.marathonId,
+        marathonSourceId: record.msId,
+        sourceUrl: record.sourceUrl,
+        lastHash: record.lastHash,
+        autoUpdateEnabled: !isAutoUpdateDisabled(record.nextCheckAt),
+      });
+
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/sync/runs", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const limit = z
+        .preprocess(
+          (value) => (Array.isArray(value) ? value[0] : value),
+          z.coerce.number().int().min(1).max(200).default(50),
+        )
+        .parse(req.query.limit);
+      const records = await database
+        .select()
+        .from(marathonSyncRuns)
+        .orderBy(desc(marathonSyncRuns.startedAt))
+        .limit(limit);
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/raw-crawl", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(200).default(50),
+          status: z.string().trim().min(1).max(50).optional(),
+          marathonId: z.string().uuid().optional(),
+          sourceId: z.string().uuid().optional(),
+        })
+        .parse(req.query);
+
+      const conditions = [];
+      if (params.status) conditions.push(eq(rawCrawlData.status, params.status));
+      if (params.marathonId) conditions.push(eq(rawCrawlData.marathonId, params.marathonId));
+      if (params.sourceId) conditions.push(eq(rawCrawlData.sourceId, params.sourceId));
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const records = await database
+        .select({
+          id: rawCrawlData.id,
+          marathonId: rawCrawlData.marathonId,
+          sourceId: rawCrawlData.sourceId,
+          sourceUrl: rawCrawlData.sourceUrl,
+          httpStatus: rawCrawlData.httpStatus,
+          contentType: rawCrawlData.contentType,
+          contentHash: rawCrawlData.contentHash,
+          status: rawCrawlData.status,
+          fetchedAt: rawCrawlData.fetchedAt,
+          processedAt: rawCrawlData.processedAt,
+          metadata: rawCrawlData.metadata,
+        })
+        .from(rawCrawlData)
+        .where(whereClause)
+        .orderBy(desc(rawCrawlData.fetchedAt))
+        .limit(params.limit);
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/raw-crawl/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const full = z
+        .preprocess((v) => (Array.isArray(v) ? v[0] : v), z.coerce.boolean().default(false))
+        .parse(req.query.full);
+
+      const [row] = await database
+        .select({
+          id: rawCrawlData.id,
+          marathonId: rawCrawlData.marathonId,
+          sourceId: rawCrawlData.sourceId,
+          sourceUrl: rawCrawlData.sourceUrl,
+          httpStatus: rawCrawlData.httpStatus,
+          contentType: rawCrawlData.contentType,
+          contentHash: rawCrawlData.contentHash,
+          status: rawCrawlData.status,
+          fetchedAt: rawCrawlData.fetchedAt,
+          processedAt: rawCrawlData.processedAt,
+          metadata: rawCrawlData.metadata,
+          rawContent: rawCrawlData.rawContent,
+        })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.id, id))
+        .limit(1);
+
+      if (!row) return res.status(404).json({ message: "Raw crawl not found" });
+
+      const [marathonInfo] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(eq(marathons.id, row.marathonId))
+        .limit(1);
+
+      const [latestEdition] = await database
+        .select({
+          id: marathonEditions.id,
+          year: marathonEditions.year,
+          raceDate: marathonEditions.raceDate,
+          registrationStatus: marathonEditions.registrationStatus,
+          registrationUrl: marathonEditions.registrationUrl,
+          publishStatus: marathonEditions.publishStatus,
+          updatedAt: marathonEditions.updatedAt,
+        })
+        .from(marathonEditions)
+        .where(eq(marathonEditions.marathonId, row.marathonId))
+        .orderBy(desc(marathonEditions.year))
+        .limit(1);
+
+      const rawContent = full ? row.rawContent : (row.rawContent ?? "").slice(0, 5000);
+      res.json({
+        data: {
+          ...row,
+          rawContent,
+          rawContentTruncated: !full && Boolean(row.rawContent && row.rawContent.length > 5000),
+          marathon: marathonInfo ?? null,
+          latestEdition: latestEdition ?? null,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/discovery/list", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+
+      const payload = z
+        .object({
+          sourceId: z.string().uuid(),
+          listUrl: z.string().url(),
+          maxResults: z.coerce.number().int().min(1).max(200).default(40),
+        })
+        .parse(req.body);
+
+      const [sourceRecord] = await database
+        .select({
+          id: sources.id,
+          name: sources.name,
+          requestTimeoutMs: sources.requestTimeoutMs,
+          config: sources.config,
+        })
+        .from(sources)
+        .where(eq(sources.id, payload.sourceId))
+        .limit(1);
+
+      if (!sourceRecord) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+
+      const cfg = (sourceRecord.config ?? {}) as any;
+      const listCfg = cfg?.discovery?.list ?? null;
+      const itemLink = listCfg?.itemLink ?? null;
+      if (!itemLink || typeof itemLink !== "object" || typeof itemLink.selector !== "string") {
+        return res.status(400).json({
+          message:
+            "Source config missing discovery.list.itemLink.selector (configure in sources.config)",
+        });
+      }
+
+      const selector = String(itemLink.selector);
+      const attr = typeof itemLink.attr === "string" ? itemLink.attr : "href";
+      const regex = typeof itemLink.regex === "string" ? itemLink.regex : null;
+      const group = typeof itemLink.group === "number" ? itemLink.group : 1;
+
+      const controller = new AbortController();
+      const timeoutMs =
+        Number.isFinite(sourceRecord.requestTimeoutMs) && sourceRecord.requestTimeoutMs
+          ? sourceRecord.requestTimeoutMs
+          : 15000;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      let html = "";
+      try {
+        const response = await fetch(payload.listUrl, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "marathon-calendar/1.0 (+https://github.com/ferryhe/marathon_calendar)",
+          },
+        });
+        html = await response.text();
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const { load } = await import("cheerio");
+      const $ = load(html);
+
+      const seen = new Set<string>();
+      const results: Array<{ url: string; title: string | null }> = [];
+
+      $(selector).each((_i, el) => {
+        if (results.length >= payload.maxResults) return;
+        const node = $(el);
+        const rawValue =
+          attr === "text" ? node.text() : attr === "html" ? node.html() ?? "" : node.attr(attr) ?? "";
+        let value = String(rawValue ?? "").trim();
+        if (!value) return;
+
+        if (regex) {
+          try {
+            const re = new RegExp(regex, "i");
+            const m = value.match(re);
+            if (!m) return;
+            value = String(m[group] ?? "").trim();
+            if (!value) return;
+          } catch {
+            return;
+          }
+        }
+
+        if (value.startsWith("javascript:") || value === "#" || value.startsWith("mailto:")) return;
+
+        let absolute: string;
+        try {
+          absolute = new URL(value, payload.listUrl).toString();
+        } catch {
+          return;
+        }
+        if (!absolute.startsWith("http://") && !absolute.startsWith("https://")) return;
+        if (seen.has(absolute)) return;
+        seen.add(absolute);
+
+        const titleText = node.text().trim();
+        results.push({ url: absolute, title: titleText || null });
+      });
+
+      res.json({
+        data: {
+          sourceId: sourceRecord.id,
+          sourceName: sourceRecord.name,
+          listUrl: payload.listUrl,
+          count: results.length,
+          results,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/raw-crawl/:id/ai-rule-template", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [raw] = await database
+        .select({
+          id: rawCrawlData.id,
+          sourceUrl: rawCrawlData.sourceUrl,
+          rawContent: rawCrawlData.rawContent,
+        })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.id, id))
+        .limit(1);
+
+      if (!raw) return res.status(404).json({ message: "Raw crawl not found" });
+      if (!raw.rawContent) {
+        return res.status(400).json({ message: "rawContent is empty; cannot generate template" });
+      }
+
+      const template = await aiGenerateExtractTemplateFromHtml({
+        pageUrl: raw.sourceUrl,
+        html: raw.rawContent,
+      });
+      const preview = previewExtractTemplate({
+        pageUrl: raw.sourceUrl,
+        html: raw.rawContent,
+        template,
+      });
+
+      res.json({
+        data: {
+          template,
+          preview,
+          model: process.env.AI_MODEL ?? null,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/raw-crawl/:id/ignore", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [updated] = await database
+        .update(rawCrawlData)
+        .set({
+          status: "ignored",
+          processedAt: new Date(),
+        })
+        .where(eq(rawCrawlData.id, id))
+        .returning({ id: rawCrawlData.id });
+
+      if (!updated) return res.status(404).json({ message: "Raw crawl not found" });
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/raw-crawl/:id/resolve", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const payload = z
+        .object({
+          year: z.coerce.number().int().min(2000).max(2100).optional(),
+          raceDate: z.string().trim().min(4).optional(),
+          registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
+          registrationUrl: z.string().trim().url().nullable().optional(),
+          note: z.string().trim().max(2000).optional(),
+          publish: z.coerce.boolean().optional(),
+          name: z.string().trim().min(1).max(200).optional(),
+          canonicalName: z.string().trim().min(1).max(200).optional(),
+          city: z.string().trim().min(1).max(100).nullable().optional(),
+          country: z.string().trim().min(1).max(100).nullable().optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          websiteUrl: z.string().trim().url().nullable().optional(),
+        })
+        .refine(
+          (p) =>
+            Boolean(p.raceDate) ||
+            p.registrationStatus !== undefined ||
+            p.registrationUrl !== undefined ||
+            p.name !== undefined ||
+            p.canonicalName !== undefined ||
+            p.city !== undefined ||
+            p.country !== undefined ||
+            p.description !== undefined ||
+            p.websiteUrl !== undefined,
+          { message: "At least one field is required" },
+        )
+        .parse(req.body);
+
+      const [raw] = await database
+        .select({
+          id: rawCrawlData.id,
+          marathonId: rawCrawlData.marathonId,
+          sourceId: rawCrawlData.sourceId,
+          sourceUrl: rawCrawlData.sourceUrl,
+          metadata: rawCrawlData.metadata,
+        })
+        .from(rawCrawlData)
+        .where(eq(rawCrawlData.id, id))
+        .limit(1);
+
+      if (!raw) return res.status(404).json({ message: "Raw crawl not found" });
+
+      const hasEditionInput =
+        Boolean(payload.raceDate) ||
+        payload.registrationStatus !== undefined ||
+        payload.registrationUrl !== undefined;
+
+      const year =
+        payload.raceDate && payload.raceDate.length >= 4
+          ? Number(payload.raceDate.slice(0, 4))
+          : payload.year;
+      if (hasEditionInput && (!year || !Number.isFinite(year))) {
+        return res.status(400).json({ message: "year is required when raceDate is not provided" });
+      }
+
+      let merge: Awaited<ReturnType<typeof upsertEditionWithMerge>> | null = null;
+      if (hasEditionInput) {
+        merge = await upsertEditionWithMerge({
+          database,
+          marathonId: raw.marathonId,
+          year: year!,
+          incoming: {
+            ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
+            ...(payload.registrationStatus !== undefined
+              ? { registrationStatus: payload.registrationStatus }
+              : {}),
+            ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
+          },
+          source: {
+            sourceId: raw.sourceId,
+            sourceType: "manual",
+            priority: 999,
+          },
+          publish: payload.publish !== undefined ? (payload.publish ? { status: "published" } : { status: "draft" }) : undefined,
+        });
+      }
+
+      const hasMarathonBaseInput =
+        payload.name !== undefined ||
+        payload.canonicalName !== undefined ||
+        payload.city !== undefined ||
+        payload.country !== undefined ||
+        payload.description !== undefined ||
+        payload.websiteUrl !== undefined;
+      let marathonUpdate: Record<string, unknown> | null = null;
+      if (hasMarathonBaseInput) {
+        const [marathonRecord] = await database
+          .select({
+            id: marathons.id,
+            name: marathons.name,
+            canonicalName: marathons.canonicalName,
+          })
+          .from(marathons)
+          .where(eq(marathons.id, raw.marathonId))
+          .limit(1);
+        if (!marathonRecord) {
+          return res.status(404).json({ message: "Marathon not found" });
+        }
+
+        if (payload.name && payload.name !== marathonRecord.name) {
+          const [nameConflict] = await database
+            .select({ id: marathons.id })
+            .from(marathons)
+            .where(and(eq(marathons.name, payload.name), ne(marathons.id, raw.marathonId)))
+            .limit(1);
+          if (nameConflict) {
+            return res.status(409).json({ message: "Marathon name already exists" });
+          }
+        }
+        if (payload.canonicalName && payload.canonicalName !== marathonRecord.canonicalName) {
+          const [canonicalConflict] = await database
+            .select({ id: marathons.id })
+            .from(marathons)
+            .where(
+              and(
+                eq(marathons.canonicalName, payload.canonicalName),
+                ne(marathons.id, raw.marathonId),
+              ),
+            )
+            .limit(1);
+          if (canonicalConflict) {
+            return res.status(409).json({ message: "Canonical name already exists" });
+          }
+        }
+
+        marathonUpdate = {
+          updatedAt: new Date(),
+          ...(payload.name !== undefined ? { name: payload.name } : {}),
+          ...(payload.canonicalName !== undefined ? { canonicalName: payload.canonicalName } : {}),
+          ...(payload.city !== undefined ? { city: payload.city ?? null } : {}),
+          ...(payload.country !== undefined ? { country: canonicalCountryValue(payload.country) } : {}),
+          ...(payload.description !== undefined ? { description: payload.description ?? null } : {}),
+          ...(payload.websiteUrl !== undefined ? { websiteUrl: payload.websiteUrl ?? null } : {}),
+        };
+
+        await database.update(marathons).set(marathonUpdate).where(eq(marathons.id, raw.marathonId));
+      }
+
+      await database
+        .update(rawCrawlData)
+        .set({
+          status: "processed",
+          processedAt: new Date(),
+          metadata: {
+            ...(typeof raw.metadata === "object" && raw.metadata ? raw.metadata : {}),
+            manualResolve: {
+              at: new Date().toISOString(),
+              note: payload.note ?? null,
+              incoming: {
+                year: year ?? null,
+                raceDate: payload.raceDate ?? null,
+                registrationStatus:
+                  payload.registrationStatus !== undefined ? payload.registrationStatus : null,
+                registrationUrl: payload.registrationUrl !== undefined ? payload.registrationUrl : null,
+                marathon: {
+                  name: payload.name ?? null,
+                  canonicalName: payload.canonicalName ?? null,
+                  city: payload.city ?? null,
+                  country: payload.country ?? null,
+                  description: payload.description ?? null,
+                  websiteUrl: payload.websiteUrl ?? null,
+                },
+              },
+              merge,
+            },
+          },
+        })
+        .where(eq(rawCrawlData.id, id));
+
+      res.json({ data: { merge, marathonUpdated: Boolean(hasMarathonBaseInput) } });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathon-sources", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(200).default(50),
+          marathonId: z.string().uuid().optional(),
+          sourceId: z.string().uuid().optional(),
+          search: z.string().trim().min(1).max(200).optional(),
+        })
+        .parse(req.query);
+
+      const conditions = [];
+      if (params.marathonId) {
+        conditions.push(eq(marathonSources.marathonId, params.marathonId));
+      }
+      if (params.sourceId) {
+        conditions.push(eq(marathonSources.sourceId, params.sourceId));
+      }
+      if (params.search) {
+        conditions.push(
+          or(
+            like(marathons.name, `%${params.search}%`),
+            like(marathons.canonicalName, `%${params.search}%`),
+            like(marathonSources.sourceUrl, `%${params.search}%`),
+          ),
+        );
+      }
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const records = await database
+        .select({
+          id: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+          sourceType: sources.type,
+          lastCheckedAt: marathonSources.lastCheckedAt,
+          nextCheckAt: marathonSources.nextCheckAt,
+          lastHttpStatus: marathonSources.lastHttpStatus,
+          lastError: marathonSources.lastError,
+          marathonName: marathons.name,
+          canonicalName: marathons.canonicalName,
+          sourceName: sources.name,
+        })
+        .from(marathonSources)
+        .innerJoin(marathons, eq(marathons.id, marathonSources.marathonId))
+        .innerJoin(sources, eq(sources.id, marathonSources.sourceId))
+        .where(whereClause)
+        .orderBy(desc(marathonSources.isPrimary), desc(marathonSources.lastCheckedAt))
+        .limit(params.limit);
+
+      res.json({
+        data: records.map((item) => ({
+          ...item,
+          autoUpdateEnabled: !isAutoUpdateDisabled(item.nextCheckAt),
+        })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathon-sources/lookup", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          marathonId: z.string().uuid(),
+          sourceId: z.string().uuid(),
+        })
+        .parse(req.query);
+
+      const [record] = await database
+        .select({
+          id: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+        })
+        .from(marathonSources)
+        .where(
+          and(
+            eq(marathonSources.marathonId, params.marathonId),
+            eq(marathonSources.sourceId, params.sourceId),
+          ),
+        )
+        .limit(1);
+
+      if (!record) return res.status(404).json({ message: "Marathon source not found" });
+      res.json({ data: record });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathons", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const params = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(50).default(20),
+          search: z.string().trim().min(1).max(200).optional(),
+        })
+        .parse(req.query);
+
+      const whereClause = params.search
+        ? or(
+            like(marathons.name, `%${params.search}%`),
+            like(marathons.canonicalName, `%${params.search}%`),
+          )
+        : undefined;
+
+      const records = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(whereClause)
+        .orderBy(asc(marathons.name))
+        .limit(params.limit);
+
+      res.json({ data: records });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/marathons", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          name: z.string().trim().min(1).max(200),
+          canonicalName: z.string().trim().min(1).max(200).optional(),
+          city: z.string().trim().min(1).max(100).nullable().optional(),
+          country: z.string().trim().min(1).max(100).nullable().optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          websiteUrl: z.string().url().nullable().optional(),
+        })
+        .parse(req.body);
+      const normalizedCountry = canonicalCountryValue(payload.country);
+
+      const [existingByName] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(eq(marathons.name, payload.name))
+        .limit(1);
+      if (existingByName) {
+        return res.json({ data: existingByName, created: false });
+      }
+
+      const canonicalSeed = payload.canonicalName ?? payload.name;
+      const canonicalBase = (canonicalizeName(canonicalSeed) || "marathon")
+        .replace(/[^a-z0-9\u4e00-\u9fff-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+      let canonicalCandidate = canonicalBase || `marathon-${Date.now().toString(36)}`;
+      let suffix = 2;
+      while (true) {
+        const [exists] = await database
+          .select({ id: marathons.id })
+          .from(marathons)
+          .where(eq(marathons.canonicalName, canonicalCandidate))
+          .limit(1);
+        if (!exists) break;
+        canonicalCandidate = `${canonicalBase || "marathon"}-${suffix}`;
+        suffix += 1;
+      }
+
+      const [created] = await database
+        .insert(marathons)
+        .values({
+          name: payload.name,
+          canonicalName: canonicalCandidate,
+          city: payload.city ?? null,
+          country: normalizedCountry,
+          description: payload.description ?? null,
+          websiteUrl: payload.websiteUrl ?? null,
+          updatedAt: new Date(),
+        })
+        .returning({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        });
+
+      res.status(201).json({ data: created, created: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathons/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          name: z.string().trim().min(1).max(200).optional(),
+          canonicalName: z.string().trim().min(1).max(200).optional(),
+          city: z.string().trim().min(1).max(100).nullable().optional(),
+          country: z.string().trim().min(1).max(100).nullable().optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          websiteUrl: z.string().url().nullable().optional(),
+        })
+        .parse(req.body);
+      const normalizedCountry =
+        payload.country !== undefined ? canonicalCountryValue(payload.country) : undefined;
+
+      const hasAnyField = Object.keys(payload).length > 0;
+      if (!hasAnyField) {
+        return res.status(400).json({ message: "At least one field is required" });
+      }
+
+      const [existing] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+        })
+        .from(marathons)
+        .where(eq(marathons.id, id))
+        .limit(1);
+
+      if (!existing) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      if (payload.name && payload.name !== existing.name) {
+        const [nameConflict] = await database
+          .select({ id: marathons.id })
+          .from(marathons)
+          .where(and(eq(marathons.name, payload.name), ne(marathons.id, id)))
+          .limit(1);
+        if (nameConflict) {
+          return res.status(409).json({ message: "Marathon name already exists" });
+        }
+      }
+
+      if (payload.canonicalName && payload.canonicalName !== existing.canonicalName) {
+        const [canonicalConflict] = await database
+          .select({ id: marathons.id })
+          .from(marathons)
+          .where(and(eq(marathons.canonicalName, payload.canonicalName), ne(marathons.id, id)))
+          .limit(1);
+        if (canonicalConflict) {
+          return res.status(409).json({ message: "Canonical name already exists" });
+        }
+      }
+
+      const updateData: Record<string, unknown> = {
+        updatedAt: new Date(),
+      };
+      if (payload.name !== undefined) updateData.name = payload.name;
+      if (payload.canonicalName !== undefined) updateData.canonicalName = payload.canonicalName;
+      if (payload.city !== undefined) updateData.city = payload.city ?? null;
+      if (payload.country !== undefined) updateData.country = normalizedCountry ?? null;
+      if (payload.description !== undefined) updateData.description = payload.description ?? null;
+      if (payload.websiteUrl !== undefined) updateData.websiteUrl = payload.websiteUrl ?? null;
+
+      const [updated] = await database
+        .update(marathons)
+        .set(updateData)
+        .where(eq(marathons.id, id))
+        .returning({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        });
+
+      if (!updated) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      res.json({ data: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathons/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [record] = await database
+        .select({
+          id: marathons.id,
+          name: marathons.name,
+          canonicalName: marathons.canonicalName,
+          city: marathons.city,
+          country: marathons.country,
+          description: marathons.description,
+          websiteUrl: marathons.websiteUrl,
+        })
+        .from(marathons)
+        .where(eq(marathons.id, id))
+        .limit(1);
+
+      if (!record) {
+        return res.status(404).json({ message: "Marathon not found" });
+      }
+
+      res.json({ data: record });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/admin/marathons/:id/edition", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const marathonId = z.string().uuid().parse(req.params.id);
+      const params = z
+        .object({
+          year: z.coerce.number().int().min(2000).max(2100).optional(),
+        })
+        .parse(req.query);
+
+      const [latest] = await database
+        .select({
+          year: marathonEditions.year,
+        })
+        .from(marathonEditions)
+        .where(eq(marathonEditions.marathonId, marathonId))
+        .orderBy(desc(marathonEditions.year))
+        .limit(1);
+
+      const fallbackYear = new Date().getFullYear();
+      const targetYear = params.year ?? latest?.year ?? fallbackYear;
+
+      const [edition] = await database
+        .select({
+          id: marathonEditions.id,
+          marathonId: marathonEditions.marathonId,
+          year: marathonEditions.year,
+          raceDate: marathonEditions.raceDate,
+          registrationStatus: marathonEditions.registrationStatus,
+          registrationUrl: marathonEditions.registrationUrl,
+          publishStatus: marathonEditions.publishStatus,
+          publishedAt: marathonEditions.publishedAt,
+          updatedAt: marathonEditions.updatedAt,
+        })
+        .from(marathonEditions)
+        .where(
+          and(
+            eq(marathonEditions.marathonId, marathonId),
+            eq(marathonEditions.year, targetYear),
+          ),
+        )
+        .limit(1);
+
+      res.json({
+        data: {
+          marathonId,
+          targetYear,
+          edition: edition ?? null,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathons/:id/edition", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const marathonId = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          year: z.coerce.number().int().min(2000).max(2100).optional(),
+          raceDate: z.string().trim().min(4).optional(),
+          registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
+          registrationUrl: z.string().trim().url().nullable().optional(),
+          publish: z.coerce.boolean().optional(),
+        })
+        .refine(
+          (p) =>
+            Boolean(p.raceDate) ||
+            p.registrationStatus !== undefined ||
+            p.registrationUrl !== undefined,
+          { message: "At least one field is required" },
+        )
+        .parse(req.body);
+
+      const year =
+        payload.raceDate && payload.raceDate.length >= 4
+          ? Number(payload.raceDate.slice(0, 4))
+          : payload.year;
+      if (!year || !Number.isFinite(year)) {
+        return res.status(400).json({ message: "year is required when raceDate is not provided" });
+      }
+
+      const [binding] = await database
+        .select({
+          sourceId: marathonSources.sourceId,
+        })
+        .from(marathonSources)
+        .where(eq(marathonSources.marathonId, marathonId))
+        .orderBy(desc(marathonSources.isPrimary), asc(marathonSources.createdAt))
+        .limit(1);
+
+      if (!binding) {
+        return res.status(400).json({ message: "Please bind at least one source before editing edition fields" });
+      }
+
+      const merge = await upsertEditionWithMerge({
+        database,
+        marathonId,
+        year,
+        incoming: {
+          ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
+          ...(payload.registrationStatus !== undefined
+            ? { registrationStatus: payload.registrationStatus }
+            : {}),
+          ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
+        },
+        source: {
+          sourceId: binding.sourceId,
+          sourceType: "manual",
+          priority: 999,
+        },
+        publish: payload.publish !== undefined ? (payload.publish ? { status: "published" } : { status: "draft" }) : undefined,
+      });
+
+      res.json({ data: merge });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/admin/marathon-sources", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const payload = z
+        .object({
+          marathonId: z.string().uuid(),
+          sourceId: z.string().uuid(),
+          sourceUrl: z.string().url(),
+          isPrimary: z.boolean().optional().default(false),
+        })
+        .parse(req.body);
+
+      const [sourceRecord] = await database
+        .select({ id: sources.id, type: sources.type })
+        .from(sources)
+        .where(eq(sources.id, payload.sourceId))
+        .limit(1);
+      if (!sourceRecord) {
+        return res.status(404).json({ message: "Source not found" });
+      }
+
+      const isThirdPartySource = sourceRecord.type !== "official";
+      const nextIsPrimary = isThirdPartySource ? false : Boolean(payload.isPrimary);
+
+      if (nextIsPrimary) {
+        await database
+          .update(marathonSources)
+          .set({ isPrimary: false })
+          .where(eq(marathonSources.marathonId, payload.marathonId));
+      }
+
+      const [row] = await database
+        .insert(marathonSources)
+        .values({
+          marathonId: payload.marathonId,
+          sourceId: payload.sourceId,
+          sourceUrl: payload.sourceUrl,
+          isPrimary: nextIsPrimary,
+          lastCheckedAt: null,
+        })
+        .onConflictDoUpdate({
+          target: [marathonSources.marathonId, marathonSources.sourceId],
+          set: {
+            sourceUrl: payload.sourceUrl,
+            isPrimary: nextIsPrimary,
+          },
+        })
+        .returning();
+
+      res.json({ data: row });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathon-sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          sourceUrl: z.string().url().optional(),
+          isPrimary: z.boolean().optional(),
+        })
+        .parse(req.body);
+
+      const [existing] = await database
+        .select({
+          id: marathonSources.id,
+          marathonId: marathonSources.marathonId,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+          sourceType: sources.type,
+        })
+        .from(marathonSources)
+        .innerJoin(sources, eq(sources.id, marathonSources.sourceId))
+        .where(eq(marathonSources.id, id))
+        .limit(1);
+      if (!existing) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+
+      const sourceIsThirdParty = existing.sourceType !== "official";
+      const nextIsPrimary = sourceIsThirdParty
+        ? false
+        : payload.isPrimary ?? existing.isPrimary;
+      const nextSourceUrl = payload.sourceUrl ?? existing.sourceUrl;
+
+      if (nextIsPrimary) {
+        await database
+          .update(marathonSources)
+          .set({ isPrimary: false })
+          .where(
+            and(
+              eq(marathonSources.marathonId, existing.marathonId),
+              ne(marathonSources.id, existing.id),
+            ),
+          );
+      }
+
+      const [updated] = await database
+        .update(marathonSources)
+        .set({
+          sourceUrl: nextSourceUrl,
+          isPrimary: Boolean(nextIsPrimary),
+        })
+        .where(eq(marathonSources.id, id))
+        .returning();
+
+      res.json({ data: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/admin/marathon-sources/:id/auto-update", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+      const payload = z
+        .object({
+          enabled: z.coerce.boolean(),
+        })
+        .parse(req.body);
+
+      const [updated] = await database
+        .update(marathonSources)
+        .set({
+          nextCheckAt: payload.enabled ? null : AUTO_UPDATE_DISABLED_NEXT_CHECK_AT,
+        })
+        .where(eq(marathonSources.id, id))
+        .returning({
+          id: marathonSources.id,
+          nextCheckAt: marathonSources.nextCheckAt,
+        });
+
+      if (!updated) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+
+      res.json({
+        data: {
+          ...updated,
+          autoUpdateEnabled: !isAutoUpdateDisabled(updated.nextCheckAt),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/admin/marathon-sources/:id", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      requireAdmin(req);
+      const id = z.string().uuid().parse(req.params.id);
+
+      const [deleted] = await database
+        .delete(marathonSources)
+        .where(eq(marathonSources.id, id))
+        .returning({ id: marathonSources.id });
+
+      if (!deleted) {
+        return res.status(404).json({ message: "Marathon source not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // --- Admin-only: discovery workflow (Stage 1.3) ---
+  app.get("/api/admin/discovery/web-search", async (req, res, next) => {
+    try {
+      requireAdmin(req);
+      const params = z
+        .object({
+          q: z.string().trim().min(1).max(200),
+          count: z.coerce.number().int().min(1).max(20).optional(),
+        })
+        .parse(req.query);
+
+      const results = await braveWebSearch({
+        query: params.q,
+        count: params.count ?? 10,
+      });
+
+      res.json({ data: results });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  return httpServer;
+}

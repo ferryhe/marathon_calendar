@@ -1,0 +1,5 @@
+# 马拉松日历 - 开发环境配置
+:80 {
+    reverse_proxy marathon:5000
+    encode gzip
+}
