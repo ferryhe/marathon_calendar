@@ -45,24 +45,24 @@
   }
 
   .dark {
-    --background: 0 0% 0%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
+    --background: 240 6% 6%;
+    --foreground: 0 0% 96%;
+    --card: 240 5% 10%;
+    --card-foreground: 0 0% 96%;
+    --popover: 240 5% 10%;
+    --popover-foreground: 0 0% 96%;
     --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 240 4% 16%;
     --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 240 4% 16%;
+    --accent-foreground: 0 0% 96%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
+    --border: 240 4% 18%;
+    --input: 240 4% 18%;
     --ring: 224.3 76.3% 48%;
   }
 }
@@ -75,10 +75,20 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    letter-spacing: -0.015em;
+    letter-spacing: -0.01em;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+}
+
+.glass-header {
+  background-color: hsla(var(--background), 0.72);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+.dark .glass-header {
+  background-color: hsla(240, 6%, 6%, 0.72);
 }
 
 .glass-effect {
@@ -88,15 +98,7 @@
 }
 
 .dark .glass-effect {
-  background-color: hsla(0, 0%, 0%, 0.7);
-}
-
-.card-shadow {
-  box-shadow: 0 2px 40px -12px rgba(0,0,0,0.08);
-}
-
-.dark .card-shadow {
-  box-shadow: 0 2px 40px -12px rgba(0,0,0,0.5);
+  background-color: hsla(240, 6%, 6%, 0.7);
 }
 
 ::-webkit-scrollbar {
@@ -106,6 +108,10 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsla(var(--muted-foreground), 0.2);
+  background: hsla(var(--muted-foreground), 0.15);
   border-radius: 10px;
+}
+
+::selection {
+  background-color: hsl(var(--primary) / 0.15);
 }

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
-import { RefreshCw, Search } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { RefreshCw, Search, User, Heart, MessageSquare } from "lucide-react";
 import { MarathonTable } from "@/components/MarathonTable";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser, useMyFavorites } from "@/hooks/useAuth";
 import {
@@ -67,50 +66,89 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 glass-effect border-b">
-        <div className="container mx-auto px-4 py-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold tracking-tight inline-flex items-center gap-2">
-              <span className="text-xl">🏃</span>
+      <header className="sticky top-0 z-50 glass-header border-b">
+        <div className="max-w-2xl mx-auto px-4">
+          <div className="flex items-center justify-between h-12">
+            <h1 className="text-base font-semibold inline-flex items-center gap-1.5" data-testid="text-app-title">
+              <span className="text-base">🏃</span>
               马拉松日历
             </h1>
 
-            <div className="flex items-center gap-2">
-              <Link href="/profile">
-                <Button variant="outline" size="sm" className="rounded-full" data-testid="link-profile">
-                  个人资料
-                </Button>
-              </Link>
+            <div className="flex items-center gap-1">
               <Link href="/my-favorites">
-                <Button variant="outline" size="sm" className="rounded-full" data-testid="link-favorites">
-                  我的收藏
-                </Button>
+                <button
+                  className="flex items-center justify-center w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  data-testid="link-favorites"
+                >
+                  <Heart className="w-4 h-4" />
+                </button>
               </Link>
               <Link href="/my-reviews">
-                <Button variant="outline" size="sm" className="rounded-full" data-testid="link-reviews">
-                  我的评论
-                </Button>
+                <button
+                  className="flex items-center justify-center w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  data-testid="link-reviews"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                </button>
               </Link>
-              <Button
-                variant="ghost"
-                size="icon"
+              <Link href="/profile">
+                <button
+                  className="flex items-center justify-center w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  data-testid="link-profile"
+                >
+                  <User className="w-4 h-4" />
+                </button>
+              </Link>
+              <button
                 onClick={handleUpdate}
                 disabled={isUpdating}
-                className="rounded-full"
+                className="flex items-center justify-center w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
                 data-testid="button-refresh"
               >
-                <RefreshCw className={`h-5 w-5 ${isUpdating ? "animate-spin" : ""}`} />
-              </Button>
+                <RefreshCw className={`w-4 h-4 ${isUpdating ? "animate-spin" : ""}`} />
+              </button>
             </div>
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="pb-3 space-y-3">
+            <div className="relative" data-testid="region-toggle">
+              <div className="flex bg-secondary/50 rounded-xl p-1 relative">
+                <motion.div
+                  className="absolute top-1 bottom-1 rounded-lg bg-background shadow-sm"
+                  layout
+                  transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                  style={{
+                    width: "calc(50% - 4px)",
+                    left: region === "China" ? 4 : "calc(50% + 0px)",
+                  }}
+                />
+                <button
+                  className={`relative z-10 flex-1 py-1.5 text-sm font-medium text-center rounded-lg transition-colors ${
+                    region === "China" ? "text-foreground" : "text-muted-foreground"
+                  }`}
+                  onClick={() => setRegion("China")}
+                  data-testid="tab-china"
+                >
+                  国内赛事
+                </button>
+                <button
+                  className={`relative z-10 flex-1 py-1.5 text-sm font-medium text-center rounded-lg transition-colors ${
+                    region === "Overseas" ? "text-foreground" : "text-muted-foreground"
+                  }`}
+                  onClick={() => setRegion("Overseas")}
+                  data-testid="tab-overseas"
+                >
+                  海外赛事
+                </button>
+              </div>
+            </div>
+
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 type="search"
                 placeholder="搜索赛事名称或城市..."
-                className="pl-9 bg-secondary/30 border-0 rounded-xl h-11 focus-visible:ring-1 focus-visible:ring-primary/20"
+                className="pl-9 bg-secondary/30 border-0 rounded-xl h-10 text-sm focus-visible:ring-1 focus-visible:ring-primary/20"
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 data-testid="input-search"
@@ -118,70 +156,51 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant={viewMode === "all" ? "default" : "outline"}
+              <button
                 onClick={() => setViewMode("all")}
-                className="rounded-full"
+                className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
+                  viewMode === "all"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-secondary/50 text-muted-foreground hover:text-foreground"
+                }`}
                 data-testid="button-all"
               >
-                全部比赛
-              </Button>
-              <Button
-                size="sm"
-                variant={viewMode === "mine" ? "default" : "outline"}
+                全部
+              </button>
+              <button
                 onClick={handleMineMode}
-                className="rounded-full"
+                className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
+                  viewMode === "mine"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-secondary/50 text-muted-foreground hover:text-foreground"
+                }`}
                 data-testid="button-mine"
               >
-                我的比赛{viewMode === "mine" ? ` (${favoriteMarathonIds.size})` : ""}
-              </Button>
+                我的{viewMode === "mine" ? ` (${favoriteMarathonIds.size})` : ""}
+              </button>
             </div>
 
-            <Tabs
-              value={region}
-              onValueChange={(value) => setRegion(value as "China" | "Overseas")}
-              className="w-full"
-            >
-              <TabsList className="grid w-full grid-cols-2 bg-secondary/50 rounded-xl p-1">
-                <TabsTrigger
-                  value="China"
-                  className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
-                  data-testid="tab-china"
-                >
-                  国内赛事
-                </TabsTrigger>
-                <TabsTrigger
-                  value="Overseas"
-                  className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
-                  data-testid="tab-overseas"
-                >
-                  海外赛事
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              <div className="bg-secondary/30 rounded-xl h-10 px-3 flex items-center text-sm text-muted-foreground">
-                {currentYear} 年
+            <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+              <div className="shrink-0 px-3 h-8 flex items-center rounded-full bg-secondary/30 text-sm text-muted-foreground">
+                {currentYear}年
               </div>
 
               <Select value={monthFilter} onValueChange={setMonthFilter}>
-                <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-10" data-testid="select-month">
+                <SelectTrigger className="shrink-0 w-auto min-w-[5rem] bg-secondary/30 border-0 rounded-full h-8 text-sm" data-testid="select-month">
                   <SelectValue placeholder="全部月份" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部月份</SelectItem>
                   {Array.from({ length: 12 }, (_, i) => (
                     <SelectItem key={i + 1} value={`${i + 1}`}>
-                      {i + 1} 月
+                      {i + 1}月
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-10" data-testid="select-status">
+                <SelectTrigger className="shrink-0 w-auto min-w-[5rem] bg-secondary/30 border-0 rounded-full h-8 text-sm" data-testid="select-status">
                   <SelectValue placeholder="报名状态" />
                 </SelectTrigger>
                 <SelectContent>
@@ -193,8 +212,8 @@ export default function Home() {
               </Select>
 
               <Select value={sortBy} onValueChange={(value) => setSortBy(value as "raceDate" | "name")}>
-                <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-10" data-testid="select-sort">
-                  <SelectValue placeholder="排序方式" />
+                <SelectTrigger className="shrink-0 w-auto min-w-[5rem] bg-secondary/30 border-0 rounded-full h-8 text-sm" data-testid="select-sort">
+                  <SelectValue placeholder="排序" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="raceDate">按时间</SelectItem>
@@ -206,20 +225,30 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-6">
-        <MarathonTable
-          region={region}
-          searchQuery={searchQuery}
-          filters={{
-            year: currentYear,
-            month: monthFilter === "all" ? undefined : Number(monthFilter),
-            status: statusFilter === "all" ? undefined : statusFilter,
-            sortBy,
-          }}
-          showMineOnly={viewMode === "mine"}
-          favoriteMarathonIds={favoriteMarathonIds}
-          favoritesLoading={isFavoritesLoading}
-        />
+      <main className="max-w-2xl mx-auto px-4 py-6">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={`${region}-${viewMode}`}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+          >
+            <MarathonTable
+              region={region}
+              searchQuery={searchQuery}
+              filters={{
+                year: currentYear,
+                month: monthFilter === "all" ? undefined : Number(monthFilter),
+                status: statusFilter === "all" ? undefined : statusFilter,
+                sortBy,
+              }}
+              showMineOnly={viewMode === "mine"}
+              favoriteMarathonIds={favoriteMarathonIds}
+              favoritesLoading={isFavoritesLoading}
+            />
+          </motion.div>
+        </AnimatePresence>
       </main>
     </div>
   );

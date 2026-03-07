@@ -3,20 +3,15 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 import { Link } from "wouter";
 import {
-  Award,
   Calendar,
   ExternalLink,
   Heart,
-  Info,
   MapPin,
-  MessageSquare,
   X,
 } from "lucide-react";
 import type { MarathonListItem } from "@/lib/apiClient";
@@ -31,6 +26,12 @@ interface EventDetailsProps {
   event: MarathonListItem | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+function getStatusStyle(status: string): { bg: string; text: string } {
+  if (status === "报名中") return { bg: "bg-blue-500/10", text: "text-blue-600 dark:text-blue-400" };
+  if (status === "即将开始") return { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400" };
+  return { bg: "bg-muted", text: "text-muted-foreground" };
 }
 
 export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
@@ -48,8 +49,12 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
   const year = displayDate.getFullYear();
   const month = displayDate.getMonth() + 1;
   const day = displayDate.getDate();
+  const weekDay = event.nextEdition?.raceDate
+    ? ["日", "一", "二", "三", "四", "五", "六"][displayDate.getDay()]
+    : null;
   const status = event.nextEdition?.registrationStatus ?? "待更新";
   const isFavorited = favoriteStatus?.isFavorited ?? false;
+  const statusStyle = getStatusStyle(status);
 
   const toggleFavorite = async () => {
     if (!currentUser) return;
@@ -71,143 +76,107 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] gap-0 p-0 overflow-hidden rounded-[2rem] border-0 sm:rounded-[2rem] max-h-[90vh] overflow-y-auto [&>button:last-child]:hidden">
-        <button
-          onClick={() => onOpenChange(false)}
-          className="absolute right-6 top-6 z-20 rounded-full bg-background/50 p-2 text-muted-foreground hover:text-foreground backdrop-blur-sm transition-colors active:scale-95"
-        >
-          <X className="h-5 w-5" />
-          <span className="sr-only">Close</span>
-        </button>
-
-        <div className="bg-secondary/30 p-8 pb-6 sticky top-0 z-10 backdrop-blur-md">
-          <div className="flex justify-between items-start mb-4">
-            <Badge variant="secondary" className="rounded-full px-3">
-              {status}
-            </Badge>
-          </div>
-          <DialogTitle className="text-2xl font-bold tracking-tight leading-tight">
+      <DialogContent className="sm:max-w-[440px] gap-0 p-0 overflow-hidden rounded-2xl sm:rounded-2xl border max-h-[85vh] overflow-y-auto [&>button:last-child]:hidden">
+        <div className="flex items-center justify-between px-4 h-12 border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+          <DialogTitle className="text-base font-semibold truncate pr-4" data-testid="text-event-dialog-title">
             {event.name}
           </DialogTitle>
-          <div className="flex items-center text-muted-foreground mt-3 space-x-3 text-sm font-medium">
-            <div className="flex items-center gap-1">
-              <Calendar className="w-4 h-4" />
-              <span>
-                {year}-{month}-{day}
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              <MapPin className="w-4 h-4" />
-              <span>{event.city || event.country || "待更新"}</span>
-            </div>
-          </div>
+          <button
+            onClick={() => onOpenChange(false)}
+            className="flex items-center justify-center w-7 h-7 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+            data-testid="button-dialog-close"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </button>
         </div>
 
-        <div className="p-8 pt-6 space-y-8">
-          <div className="grid grid-cols-2 gap-6">
-            <div className="flex items-start gap-3">
-              <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-500">
-                <MapPin className="w-5 h-5" />
+        <div className="p-4 space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/60 shrink-0">
+              <span className="text-lg font-bold leading-none">{event.nextEdition?.raceDate ? day : "--"}</span>
+              <span className="text-[10px] text-muted-foreground mt-0.5">
+                {weekDay ? `周${weekDay}` : "待定"}
+              </span>
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Calendar className="w-3.5 h-3.5 shrink-0" />
+                <span>{year}年{month}月{day}日</span>
               </div>
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                  地点
-                </p>
-                <p className="text-sm font-semibold">{event.city || "未指定"}</p>
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground mt-0.5">
+                <MapPin className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{event.city || event.country || "待更新"}</span>
               </div>
             </div>
-
-            <div className="flex items-start gap-3">
-              <div className="p-2 rounded-xl bg-orange-50 dark:bg-orange-500/10 text-orange-500">
-                <Award className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                  国家/地区
-                </p>
-                <p className="text-sm font-semibold">{event.country || "未指定"}</p>
-              </div>
-            </div>
+            <span className={`ml-auto px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 ${statusStyle.bg} ${statusStyle.text}`} data-testid="badge-dialog-status">
+              {status}
+            </span>
           </div>
 
-          <Separator className="opacity-50" />
-
-          <div className="space-y-6">
-            <div className="flex items-start gap-3">
-              <div className="mt-1">
-                <Info className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-muted-foreground uppercase mb-1">赛事简介</p>
-                <p className="text-sm text-foreground/80 leading-relaxed">
-                  {event.description || "暂无赛事简介信息"}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4 pt-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-blue-500" />
-                <h4 className="text-sm font-bold uppercase tracking-wider">网友点评</h4>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs h-7 rounded-full font-bold text-blue-500 hover:text-blue-600 hover:bg-blue-500/5"
-              >
-                我要评价
-              </Button>
-            </div>
-
-            <div className="py-8 text-center bg-secondary/10 rounded-2xl border border-dashed border-border/50">
-              <p className="text-xs text-muted-foreground italic">查看详情页可浏览完整评论</p>
-            </div>
-          </div>
-
-          <div className="pt-4 pb-8">
-            <Button
-              variant={isFavorited ? "default" : "outline"}
-              className="w-full h-11 rounded-xl mb-3"
-              onClick={toggleFavorite}
-              disabled={
-                !currentUser ||
-                addFavoriteMutation.isPending ||
-                removeFavoriteMutation.isPending
-              }
-            >
-              <Heart className={`w-4 h-4 mr-2 ${isFavorited ? "fill-current" : ""}`} />
-              {currentUser
-                ? isFavorited
-                  ? "已收藏，点击取消"
-                  : "收藏赛事"
-                : "登录后可收藏"}
-            </Button>
-
-            <Link href={`/marathons/${event.id}`}>
-              <Button variant="outline" className="w-full h-11 rounded-xl mb-3">
-                查看完整详情页
-              </Button>
-            </Link>
-
-            <Button
-              asChild
-              className="w-full h-14 rounded-2xl text-base font-semibold shadow-xl shadow-primary/10 transition-transform active:scale-[0.97]"
-            >
-              <a
-                href={event.websiteUrl || "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2"
-              >
-                前往官网查看 <ExternalLink className="w-4 h-4" />
-              </a>
-            </Button>
-            <p className="text-center text-[10px] text-muted-foreground mt-4">
-              数据来源于公开搜索，请以官方发布为准
+          <div className="rounded-2xl bg-secondary/30 p-4">
+            <p className="text-xs font-semibold text-muted-foreground mb-1.5">赛事简介</p>
+            <p className="text-sm leading-relaxed text-foreground/80" data-testid="text-event-description">
+              {event.description || "暂无赛事简介信息"}
             </p>
           </div>
+
+          {event.country && (
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-sm text-muted-foreground">国家/地区</span>
+              <span className="text-sm font-medium" data-testid="text-event-country">{event.country}</span>
+            </div>
+          )}
+
+          <div className="space-y-2 pt-2">
+            <div className="flex gap-2">
+              <Button
+                variant={isFavorited ? "default" : "outline"}
+                className="flex-1 h-10 rounded-xl text-sm"
+                onClick={toggleFavorite}
+                disabled={
+                  !currentUser ||
+                  addFavoriteMutation.isPending ||
+                  removeFavoriteMutation.isPending
+                }
+                data-testid="button-toggle-favorite"
+              >
+                <Heart className={`w-4 h-4 mr-1.5 ${isFavorited ? "fill-current" : ""}`} />
+                {currentUser
+                  ? isFavorited
+                    ? "已收藏"
+                    : "收藏"
+                  : "登录后收藏"}
+              </Button>
+
+              <Link href={`/marathons/${event.id}`}>
+                <Button variant="outline" className="h-10 rounded-xl text-sm" data-testid="link-detail-page">
+                  详情
+                </Button>
+              </Link>
+            </div>
+
+            {event.websiteUrl && (
+              <Button
+                asChild
+                className="w-full h-11 rounded-xl text-sm font-semibold"
+              >
+                <a
+                  href={event.websiteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5"
+                  data-testid="link-official-website"
+                >
+                  前往官网 <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </Button>
+            )}
+          </div>
+
+          <p className="text-center text-[10px] text-muted-foreground pt-1 pb-2">
+            数据来源于公开搜索，请以官方发布为准
+          </p>
         </div>
       </DialogContent>
     </Dialog>
