@@ -1,171 +1,277 @@
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Calendar, ChevronRight, ExternalLink, Loader2, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { ChevronRight, MapPin, Calendar, Loader2 } from "lucide-react";
-import { EventDetails } from "./EventDetails";
-import { motion, AnimatePresence } from "framer-motion";
 import { useMarathons } from "@/hooks/useMarathons";
-import type { MarathonListItem, MarathonQueryParams } from "@/lib/apiClient";
-import { isChinaCountry } from "@shared/utils";
+import { EventDetails } from "./EventDetails";
+import type { MarathonListItem } from "@/lib/apiClient";
 
 interface MarathonTableProps {
   region: "China" | "Overseas";
   searchQuery: string;
-  filters?: {
-    year?: number;
+  filters: {
+    year: number;
     month?: number;
     status?: string;
-    sortBy?: "raceDate" | "name" | "createdAt";
-    sortOrder?: "asc" | "desc";
+    sortBy: "raceDate" | "name";
   };
+  showMineOnly?: boolean;
   favoriteMarathonIds?: Set<string>;
+  favoritesLoading?: boolean;
 }
 
-export function MarathonTable({ region, searchQuery, filters, favoriteMarathonIds }: MarathonTableProps) {
+interface MarathonWithDate extends MarathonListItem {
+  displayDate: Date;
+  year: number;
+  month: number;
+  day: number;
+  registrationStatus: string;
+}
+
+type MarathonTableView =
+  | { mode: "grouped"; groups: Record<string, MarathonWithDate[]>; tbd: MarathonWithDate[] }
+  | { mode: "flat"; events: MarathonWithDate[]; tbd: MarathonWithDate[] };
+
+const CHINA_COUNTRY_ALIASES = new Set([
+  "china", "cn", "chn", "中国", "中国大陆", "中华人民共和国",
+  "mainland china", "people's republic of china", "prc",
+]);
+
+function normalizeCountryText(value?: string | null) {
+  return (value ?? "").trim().toLowerCase().replace(/[\s._-]+/g, " ").replace(/['']/g, "'");
+}
+
+function isChinaCountry(value?: string | null) {
+  const normalized = normalizeCountryText(value);
+  if (!normalized) return false;
+  return CHINA_COUNTRY_ALIASES.has(normalized);
+}
+
+function getStatusBadgeStyle(status: string) {
+  if (status === "报名中") return "bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-2 h-5";
+  if (status === "即将开始") return "bg-amber-500 hover:bg-amber-600 border-0 text-[10px] px-2 h-5";
+  return "bg-muted text-muted-foreground border-0 text-[10px] px-2 h-5";
+}
+
+function EventCard({ event, index, onSelect }: { event: MarathonWithDate; index: number; onSelect: (e: MarathonListItem) => void }) {
+  const weekDay = event.day > 0
+    ? ["日", "一", "二", "三", "四", "五", "六"][event.displayDate.getDay()]
+    : null;
+
+  return (
+    <motion.div
+      key={event.id}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.03 }}
+      className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
+      onClick={() => onSelect(event)}
+      data-testid={`row-event-${event.id}`}
+    >
+      <div className="flex items-center gap-5">
+        <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
+          <span className="text-lg leading-none">{event.day > 0 ? event.day : "--"}</span>
+          <span className="text-[10px] text-muted-foreground uppercase mt-1">
+            {weekDay ? `周${weekDay}` : "待定"}
+          </span>
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
+            {event.name}
+          </h3>
+          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
+            <MapPin className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate">{event.city || event.country || "待更新"}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        {event.websiteUrl ? (
+          <a
+            href={event.websiteUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
+            onClick={(e) => e.stopPropagation()}
+            title="打开官网"
+          >
+            <ExternalLink className="w-4 h-4 text-muted-foreground" />
+          </a>
+        ) : null}
+        <Badge variant="default" className={getStatusBadgeStyle(event.registrationStatus)}>
+          {event.registrationStatus}
+        </Badge>
+        <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+      </div>
+    </motion.div>
+  );
+}
+
+export function MarathonTable({
+  region,
+  searchQuery,
+  filters,
+  showMineOnly = false,
+  favoriteMarathonIds = new Set<string>(),
+  favoritesLoading = false,
+}: MarathonTableProps) {
   const [selectedEvent, setSelectedEvent] = useState<MarathonListItem | null>(null);
+  const country = region === "China" ? "China" : undefined;
 
-  const queryParams: MarathonQueryParams = {
-    limit: 100,
+  const { data, isLoading, error } = useMarathons({
+    country,
     search: searchQuery || undefined,
-    country: region === "China" ? "China" : undefined,
-    year: filters?.year,
-    month: filters?.month,
-    status: filters?.status,
-    sortBy: filters?.sortBy ?? "raceDate",
-    sortOrder: filters?.sortOrder ?? "asc",
-  };
+    limit: 100,
+    year: filters.year,
+    month: filters.month,
+    status: filters.status,
+    sortBy: filters.sortBy,
+    sortOrder: "asc",
+  });
 
-  const { data, isLoading, error } = useMarathons(queryParams);
+  const view = useMemo<MarathonTableView>(() => {
+    if (!data?.data) return { mode: "grouped", groups: {}, tbd: [] };
 
-  const filteredData = useMemo(() => {
-    if (!data?.data) return [];
-    return data.data.filter((m) => {
-      const isChina = isChinaCountry(m.country);
-      return region === "China" ? isChina : !isChina;
-    });
-  }, [data, region]);
+    const { dated, tbd } = data.data
+      .filter((marathon) => {
+        if (region === "China" && !isChinaCountry(marathon.country)) return false;
+        if (region === "Overseas" && isChinaCountry(marathon.country)) return false;
+        if (showMineOnly && !favoriteMarathonIds.has(marathon.id)) return false;
+        return true;
+      })
+      .reduce(
+        (acc, marathon) => {
+          const editionDate = marathon.nextEdition?.raceDate;
+          if (!editionDate) {
+            acc.tbd.push({
+              ...marathon,
+              displayDate: new Date(marathon.createdAt),
+              year: filters.year,
+              month: 0,
+              day: 0,
+              registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
+            } as MarathonWithDate);
+            return acc;
+          }
 
-  const groupedEvents = useMemo(() => {
-    const groups: { [key: string]: MarathonListItem[] } = {};
-    filteredData.forEach((event) => {
-      const raceDate = event.nextEdition?.raceDate;
-      let monthKey: string;
-      if (raceDate) {
-        const d = new Date(raceDate);
-        monthKey = `${d.getFullYear()}-${d.getMonth() + 1}`;
-      } else {
-        monthKey = "未定";
-      }
-      if (!groups[monthKey]) groups[monthKey] = [];
-      groups[monthKey].push(event);
-    });
-    return groups;
-  }, [filteredData]);
+          const displayDate = new Date(editionDate);
+          acc.dated.push({
+            ...marathon,
+            displayDate,
+            year: displayDate.getFullYear(),
+            month: displayDate.getMonth() + 1,
+            day: displayDate.getDate(),
+            registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
+          } as MarathonWithDate);
+          return acc;
+        },
+        { dated: [] as MarathonWithDate[], tbd: [] as MarathonWithDate[] },
+      );
 
-  if (isLoading) {
+    if (filters.sortBy !== "raceDate") {
+      return { mode: "flat", events: dated, tbd };
+    }
+
+    const sortedByDate = [...dated].sort(
+      (a, b) => a.displayDate.getTime() - b.displayDate.getTime(),
+    );
+
+    const groups: Record<string, MarathonWithDate[]> = {};
+    for (const event of sortedByDate) {
+      const key = `${event.year}年${event.month}月`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(event);
+    }
+
+    return { mode: "grouped", groups, tbd };
+  }, [data, region, showMineOnly, favoriteMarathonIds, filters.sortBy, filters.year]);
+
+  if (isLoading || (showMineOnly && favoritesLoading)) {
     return (
-      <div className="py-20 text-center">
-        <Loader2 className="w-6 h-6 animate-spin text-blue-500 mx-auto mb-3" />
-        <p className="text-sm text-muted-foreground">加载中...</p>
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="py-20 text-center">
-        <p className="text-sm text-destructive">加载失败，请刷新重试</p>
+      <div className="py-24 text-center">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-destructive/10 mb-4">
+          <Calendar className="w-8 h-8 text-destructive" />
+        </div>
+        <p className="text-destructive font-medium">加载赛事数据失败</p>
+        <p className="text-sm text-muted-foreground mt-2">{(error as Error).message}</p>
       </div>
     );
   }
 
+  const hasData =
+    view.mode === "grouped"
+      ? Object.keys(view.groups).length > 0 || view.tbd.length > 0
+      : view.events.length > 0 || view.tbd.length > 0;
+  const emptyTitle = showMineOnly ? "你还没有收藏赛事" : "未找到相关马拉松赛事";
+  const emptyHint = showMineOnly
+    ? '可在赛事详情或弹窗中点击"收藏赛事"后再查看'
+    : searchQuery
+      ? "尝试使用不同的搜索关键词"
+      : "";
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-12">
       <AnimatePresence mode="popLayout">
-        {Object.keys(groupedEvents).length > 0 ? (
-          Object.entries(groupedEvents).map(([monthKey, events]) => {
-            let monthLabel = "待定";
-            if (monthKey !== "未定") {
-              const [y, m] = monthKey.split("-");
-              monthLabel = `${y}年${m}月`;
-            }
+        {hasData ? (
+          <div className="space-y-12">
+            {view.mode === "grouped" ? (
+              Object.entries(view.groups).map(([month, events]) => (
+                <div key={month} className="relative grid grid-cols-1 md:grid-cols-[100px_1fr] gap-6">
+                  <div className="md:sticky md:top-44 h-fit">
+                    <div className="flex items-baseline gap-2 md:flex-col md:items-start md:gap-0">
+                      <span className="text-3xl font-black tracking-tighter text-foreground/20 md:text-4xl">
+                        {month.split("年")[1].replace("月", "")}
+                      </span>
+                      <span className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/50 md:mt-1">
+                        {month.split("年")[0]}
+                      </span>
+                    </div>
+                  </div>
 
-            return (
-              <div key={monthKey}>
-                <div className="flex items-center gap-3 mb-3 px-1">
-                  <h3 className="text-sm font-bold text-muted-foreground/50">{monthLabel}</h3>
-                  <div className="flex-1 h-px bg-border/50" />
-                  <span className="text-xs text-muted-foreground/30">{events.length} 场</span>
+                  <div className="space-y-3">
+                    {events.map((event, index) => (
+                      <EventCard key={event.id} event={event} index={index} onSelect={setSelectedEvent} />
+                    ))}
+                  </div>
                 </div>
-
-                <div className="space-y-2.5">
-                  {events.map((event, index) => {
-                    const raceDate = event.nextEdition?.raceDate
-                      ? new Date(event.nextEdition.raceDate)
-                      : null;
-                    const day = raceDate ? raceDate.getDate() : "?";
-                    const weekDay = raceDate
-                      ? ["日", "一", "二", "三", "四", "五", "六"][raceDate.getDay()]
-                      : "";
-                    const status = event.nextEdition?.registrationStatus;
-
-                    return (
-                      <motion.div
-                        key={event.id}
-                        initial={{ opacity: 0, y: 8 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true }}
-                        transition={{ duration: 0.35, delay: index * 0.03 }}
-                        className="group flex items-center gap-4 p-3.5 bg-card hover:bg-accent/50 active:scale-[0.99] transition-all duration-300 rounded-2xl border cursor-pointer"
-                        onClick={() => setSelectedEvent(event)}
-                        data-testid={`row-event-${event.id}`}
-                      >
-                        <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-secondary/60 shrink-0">
-                          <span className="text-lg font-bold leading-none">{day}</span>
-                          {weekDay && <span className="text-[10px] text-muted-foreground/50 mt-0.5">周{weekDay}</span>}
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-sm font-semibold truncate group-hover:text-blue-500 transition-colors">{event.name}</h4>
-                          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground/50">
-                            <MapPin className="w-3 h-3" />
-                            <span>{event.city || "待更新"}</span>
-                            {event.country && region === "Overseas" && (
-                              <>
-                                <span className="opacity-30">·</span>
-                                <span>{event.country}</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          {status === "报名中" && (
-                            <Badge className="bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-2 h-5 flex items-center gap-1.5 rounded-full">
-                              <span className="relative flex h-1.5 w-1.5">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
-                              </span>
-                              报名中
-                            </Badge>
-                          )}
-                          {status && status !== "报名中" && (
-                            <Badge variant="secondary" className="text-[10px] px-2 h-5 rounded-full">
-                              {status}
-                            </Badge>
-                          )}
-                          <ChevronRight className="w-4 h-4 text-muted-foreground/20 group-hover:text-muted-foreground/50 transition-colors" />
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
+              ))
+            ) : (
+              <div className="space-y-3">
+                {view.events.map((event, index) => (
+                  <EventCard key={event.id} event={event} index={index} onSelect={setSelectedEvent} />
+                ))}
               </div>
-            );
-          })
+            )}
+
+            {view.tbd.length > 0 ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold">待确认日期</div>
+                  <div className="text-xs text-muted-foreground">已收录官网，但具体比赛日期尚未确认</div>
+                </div>
+                {view.tbd.map((event, index) => (
+                  <EventCard key={event.id} event={event} index={index} onSelect={setSelectedEvent} />
+                ))}
+              </div>
+            ) : null}
+          </div>
         ) : (
-          <div className="py-20 text-center">
-            <Calendar className="w-8 h-8 text-muted-foreground/15 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">没有找到符合条件的赛事</p>
+          <div className="py-24 text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-secondary mb-4">
+              <Calendar className="w-8 h-8 text-muted-foreground/40" />
+            </div>
+            <p className="text-muted-foreground font-medium">{emptyTitle}</p>
+            {emptyHint ? <p className="text-sm text-muted-foreground/60 mt-2">{emptyHint}</p> : null}
           </div>
         )}
       </AnimatePresence>
