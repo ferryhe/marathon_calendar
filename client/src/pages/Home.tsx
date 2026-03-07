@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
-import { motion, AnimatePresence } from "framer-motion";
-import { RefreshCw, Search, User, Heart, MessageSquare } from "lucide-react";
+import { Heart, MessageSquare, RefreshCw, Search, SlidersHorizontal, User, X } from "lucide-react";
 import { MarathonTable } from "@/components/MarathonTable";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser, useMyFavorites } from "@/hooks/useAuth";
 import {
@@ -13,15 +14,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function Home() {
   const [region, setRegion] = useState<"China" | "Overseas">("China");
   const [searchQuery, setSearchQuery] = useState("");
+  const [cityFilter, setCityFilter] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [monthFilter, setMonthFilter] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<"raceDate" | "name">("raceDate");
+  const [sortBy, setSortBy] = useState<"raceDate" | "name" | "createdAt">("raceDate");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [viewMode, setViewMode] = useState<"all" | "mine">("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const { toast } = useToast();
 
   const { data: currentUser } = useCurrentUser();
@@ -34,11 +39,21 @@ export default function Home() {
 
   const currentYear = new Date().getFullYear();
 
+  const hasActiveFilters =
+    monthFilter !== "all" ||
+    statusFilter !== "all" ||
+    sortBy !== "raceDate" ||
+    cityFilter !== "";
+
   useEffect(() => {
     if (!currentUser && viewMode === "mine") {
       setViewMode("all");
     }
   }, [currentUser, viewMode]);
+
+  useEffect(() => {
+    document.title = viewMode === "mine" ? "我的收藏 - 马拉松日历" : "马拉松日历";
+  }, [viewMode]);
 
   const handleUpdate = () => {
     setIsUpdating(true);
@@ -56,7 +71,7 @@ export default function Home() {
     if (!currentUser) {
       toast({
         title: "请先登录",
-        description: '登录后可查看"我的比赛"（收藏赛事）。',
+        description: "登录后可查看收藏赛事。",
         duration: 2500,
       });
       return;
@@ -64,191 +79,271 @@ export default function Home() {
     setViewMode("mine");
   };
 
+  const clearFilters = () => {
+    setMonthFilter("all");
+    setStatusFilter("all");
+    setSortBy("raceDate");
+    setSortOrder("asc");
+    setCityFilter("");
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 glass-header border-b">
         <div className="max-w-2xl mx-auto px-4">
-          <div className="flex items-center justify-between h-12">
-            <h1 className="text-base font-semibold inline-flex items-center gap-1.5" data-testid="text-app-title">
-              <span className="text-base">🏃</span>
-              马拉松日历
-            </h1>
+          <div className="h-12 flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <img
+                src="/favicon.svg"
+                alt=""
+                className="w-6 h-6 rounded-md shrink-0"
+              />
+              <h1 className="text-base font-semibold truncate" data-testid="text-app-title">
+                马拉松日历
+              </h1>
+            </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 shrink-0">
               <Link href="/my-favorites">
                 <button
-                  className="flex items-center justify-center w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                  data-testid="link-favorites"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+                  data-testid="link-my-favorites"
+                  title="我的收藏"
                 >
-                  <Heart className="w-4 h-4" />
+                  <Heart className="w-[18px] h-[18px]" />
                 </button>
               </Link>
               <Link href="/my-reviews">
                 <button
-                  className="flex items-center justify-center w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                  data-testid="link-reviews"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+                  data-testid="link-my-reviews"
+                  title="我的评论"
                 >
-                  <MessageSquare className="w-4 h-4" />
+                  <MessageSquare className="w-[18px] h-[18px]" />
                 </button>
               </Link>
               <Link href="/profile">
                 <button
-                  className="flex items-center justify-center w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
                   data-testid="link-profile"
+                  title="个人资料"
                 >
-                  <User className="w-4 h-4" />
+                  <User className="w-[18px] h-[18px]" />
                 </button>
               </Link>
               <button
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
                 onClick={handleUpdate}
                 disabled={isUpdating}
-                className="flex items-center justify-center w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
                 data-testid="button-refresh"
+                title="刷新数据"
               >
-                <RefreshCw className={`w-4 h-4 ${isUpdating ? "animate-spin" : ""}`} />
+                <RefreshCw className={`w-[18px] h-[18px] ${isUpdating ? "animate-spin" : ""}`} />
               </button>
-            </div>
-          </div>
-
-          <div className="pb-3 space-y-3">
-            <div className="relative" data-testid="region-toggle">
-              <div className="flex bg-secondary/50 rounded-xl p-1 relative">
-                <motion.div
-                  className="absolute top-1 bottom-1 rounded-lg bg-background shadow-sm"
-                  layout
-                  transition={{ type: "spring", stiffness: 500, damping: 35 }}
-                  style={{
-                    width: "calc(50% - 4px)",
-                    left: region === "China" ? 4 : "calc(50% + 0px)",
-                  }}
-                />
-                <button
-                  className={`relative z-10 flex-1 py-1.5 text-sm font-medium text-center rounded-lg transition-colors ${
-                    region === "China" ? "text-foreground" : "text-muted-foreground"
-                  }`}
-                  onClick={() => setRegion("China")}
-                  data-testid="tab-china"
-                >
-                  国内赛事
-                </button>
-                <button
-                  className={`relative z-10 flex-1 py-1.5 text-sm font-medium text-center rounded-lg transition-colors ${
-                    region === "Overseas" ? "text-foreground" : "text-muted-foreground"
-                  }`}
-                  onClick={() => setRegion("Overseas")}
-                  data-testid="tab-overseas"
-                >
-                  海外赛事
-                </button>
-              </div>
-            </div>
-
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="搜索赛事名称或城市..."
-                className="pl-9 bg-secondary/30 border-0 rounded-xl h-10 text-sm focus-visible:ring-1 focus-visible:ring-primary/20"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                data-testid="input-search"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setViewMode("all")}
-                className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
-                  viewMode === "all"
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "bg-secondary/50 text-muted-foreground hover:text-foreground"
-                }`}
-                data-testid="button-all"
-              >
-                全部
-              </button>
-              <button
-                onClick={handleMineMode}
-                className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
-                  viewMode === "mine"
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "bg-secondary/50 text-muted-foreground hover:text-foreground"
-                }`}
-                data-testid="button-mine"
-              >
-                我的{viewMode === "mine" ? ` (${favoriteMarathonIds.size})` : ""}
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-              <div className="shrink-0 px-3 h-8 flex items-center rounded-full bg-secondary/30 text-sm text-muted-foreground">
-                {currentYear}年
-              </div>
-
-              <Select value={monthFilter} onValueChange={setMonthFilter}>
-                <SelectTrigger className="shrink-0 w-auto min-w-[5rem] bg-secondary/30 border-0 rounded-full h-8 text-sm" data-testid="select-month">
-                  <SelectValue placeholder="全部月份" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部月份</SelectItem>
-                  {Array.from({ length: 12 }, (_, i) => (
-                    <SelectItem key={i + 1} value={`${i + 1}`}>
-                      {i + 1}月
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="shrink-0 w-auto min-w-[5rem] bg-secondary/30 border-0 rounded-full h-8 text-sm" data-testid="select-status">
-                  <SelectValue placeholder="报名状态" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部状态</SelectItem>
-                  <SelectItem value="报名中">报名中</SelectItem>
-                  <SelectItem value="即将开始">即将开始</SelectItem>
-                  <SelectItem value="已截止">已截止</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select value={sortBy} onValueChange={(value) => setSortBy(value as "raceDate" | "name")}>
-                <SelectTrigger className="shrink-0 w-auto min-w-[5rem] bg-secondary/30 border-0 rounded-full h-8 text-sm" data-testid="select-sort">
-                  <SelectValue placeholder="排序" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="raceDate">按时间</SelectItem>
-                  <SelectItem value="name">按名称</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-6">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={`${region}-${viewMode}`}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-          >
-            <MarathonTable
-              region={region}
-              searchQuery={searchQuery}
-              filters={{
-                year: currentYear,
-                month: monthFilter === "all" ? undefined : Number(monthFilter),
-                status: statusFilter === "all" ? undefined : statusFilter,
-                sortBy,
-              }}
-              showMineOnly={viewMode === "mine"}
-              favoriteMarathonIds={favoriteMarathonIds}
-              favoritesLoading={isFavoritesLoading}
+      <div className="max-w-2xl mx-auto px-4 pt-3 space-y-2.5">
+        <Tabs
+          value={region}
+          onValueChange={(value) => setRegion(value as "China" | "Overseas")}
+          className="w-full"
+        >
+          <TabsList className="grid w-full grid-cols-2 bg-secondary/50 rounded-xl p-1 h-9">
+            <TabsTrigger
+              value="China"
+              className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              data-testid="tab-china"
+            >
+              国内赛事
+            </TabsTrigger>
+            <TabsTrigger
+              value="Overseas"
+              className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              data-testid="tab-overseas"
+            >
+              海外赛事
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="搜索赛事名称..."
+              className="pl-9 bg-secondary/30 border-0 rounded-xl h-9 text-sm focus-visible:ring-1 focus-visible:ring-primary/20"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              data-testid="input-search"
             />
-          </motion.div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              className={`h-9 px-3 rounded-xl text-sm font-medium transition-colors ${
+                viewMode === "all"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary/40 text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => setViewMode("all")}
+              data-testid="button-view-all"
+            >
+              全部
+            </button>
+            <button
+              className={`h-9 px-3 rounded-xl text-sm font-medium transition-colors ${
+                viewMode === "mine"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary/40 text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={handleMineMode}
+              data-testid="button-view-mine"
+            >
+              收藏{viewMode === "mine" && favoriteMarathonIds.size > 0 ? ` ${favoriteMarathonIds.size}` : ""}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            className={`h-8 px-3 rounded-full text-xs font-medium inline-flex items-center gap-1.5 transition-colors ${
+              filtersOpen || hasActiveFilters
+                ? "bg-primary/10 text-primary"
+                : "bg-secondary/40 text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setFiltersOpen(!filtersOpen)}
+            data-testid="button-toggle-filters"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            筛选
+            {hasActiveFilters && (
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+            )}
+          </button>
+          {hasActiveFilters && (
+            <button
+              className="h-8 px-2.5 rounded-full text-xs text-muted-foreground hover:text-foreground bg-secondary/40 inline-flex items-center gap-1 transition-colors"
+              onClick={clearFilters}
+              data-testid="button-clear-filters"
+            >
+              <X className="w-3 h-3" />
+              清除
+            </button>
+          )}
+          {hasActiveFilters && !filtersOpen && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground overflow-x-auto">
+              {monthFilter !== "all" && (
+                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{monthFilter}月</span>
+              )}
+              {statusFilter !== "all" && (
+                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{statusFilter}</span>
+              )}
+              {cityFilter && (
+                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{cityFilter}</span>
+              )}
+              {sortBy !== "raceDate" && (
+                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">
+                  {sortBy === "name" ? "按名称" : "按最新"}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <AnimatePresence>
+          {filtersOpen && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeInOut" }}
+              className="overflow-hidden"
+            >
+              <div className="rounded-2xl border bg-card p-3 space-y-2.5">
+                <Input
+                  type="search"
+                  placeholder="筛选城市..."
+                  className="bg-secondary/30 border-0 rounded-xl h-9 text-sm focus-visible:ring-1 focus-visible:ring-primary/20"
+                  value={cityFilter}
+                  onChange={(event) => setCityFilter(event.target.value)}
+                  data-testid="input-city-filter"
+                />
+
+                <div className="grid grid-cols-3 gap-2">
+                  <Select value={monthFilter} onValueChange={setMonthFilter}>
+                    <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-9 text-sm" data-testid="select-month">
+                      <SelectValue placeholder="月份" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部月份</SelectItem>
+                      {Array.from({ length: 12 }, (_, i) => (
+                        <SelectItem key={i + 1} value={`${i + 1}`}>
+                          {i + 1} 月
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-9 text-sm" data-testid="select-status">
+                      <SelectValue placeholder="状态" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部状态</SelectItem>
+                      <SelectItem value="报名中">报名中</SelectItem>
+                      <SelectItem value="即将开始">即将开始</SelectItem>
+                      <SelectItem value="已截止">已截止</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <div className="flex gap-1.5">
+                    <Select value={sortBy} onValueChange={(value) => setSortBy(value as "raceDate" | "name" | "createdAt")}>
+                      <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-9 text-sm flex-1" data-testid="select-sort">
+                        <SelectValue placeholder="排序" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="raceDate">按时间</SelectItem>
+                        <SelectItem value="name">按名称</SelectItem>
+                        <SelectItem value="createdAt">按最新</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <button
+                      className="w-9 h-9 shrink-0 rounded-xl bg-secondary/30 flex items-center justify-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+                      data-testid="button-sort-order"
+                      title={sortOrder === "asc" ? "升序" : "降序"}
+                    >
+                      {sortOrder === "asc" ? "↑" : "↓"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
+      </div>
+
+      <main className="max-w-2xl mx-auto px-4 py-4">
+        <MarathonTable
+          region={region}
+          searchQuery={searchQuery}
+          cityFilter={cityFilter}
+          filters={{
+            year: currentYear,
+            month: monthFilter === "all" ? undefined : Number(monthFilter),
+            status: statusFilter === "all" ? undefined : statusFilter,
+            sortBy,
+            sortOrder,
+          }}
+          showMineOnly={viewMode === "mine"}
+          favoriteMarathonIds={favoriteMarathonIds}
+          favoritesLoading={isFavoritesLoading}
+        />
       </main>
     </div>
   );

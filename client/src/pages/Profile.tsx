@@ -1,19 +1,20 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { Loader2, Upload, UserCircle2, LogOut, MessageCircle, Unlink, ChevronDown, ChevronUp } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Link } from "wouter";
+import { ArrowLeft, Loader2, Upload, UserCircle2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 import {
   useBindWechat,
   useCurrentUser,
   useLogin,
-  useLogout,
   useRegister,
   useUnbindWechat,
   useUpdateMyProfile,
   useUploadAvatar,
 } from "@/hooks/useAuth";
-import { PageShell, AuthCard } from "@/components/PageShell";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -29,7 +30,6 @@ export default function ProfilePage() {
   const { data: currentUser, isLoading: isUserLoading } = useCurrentUser();
   const loginMutation = useLogin();
   const registerMutation = useRegister();
-  const logoutMutation = useLogout();
   const updateProfileMutation = useUpdateMyProfile();
   const uploadAvatarMutation = useUploadAvatar();
   const bindWechatMutation = useBindWechat();
@@ -55,14 +55,23 @@ export default function ProfilePage() {
     setWechatAvatarUrl(currentUser.wechatAvatarUrl || "");
   }, [currentUser]);
 
+
   const submitAuth = async () => {
     if (!authUsername || !authPassword) return;
+
     try {
       if (isRegisterMode) {
-        await registerMutation.mutateAsync({ username: authUsername, password: authPassword });
+        await registerMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
       } else {
-        await loginMutation.mutateAsync({ username: authUsername, password: authPassword });
+        await loginMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
       }
+
       setAuthPassword("");
     } catch (error) {
       toast({
@@ -73,18 +82,24 @@ export default function ProfilePage() {
     }
   };
 
+
   const saveProfile = async () => {
     if (!displayName.trim()) {
       toast({ title: "姓名不能为空", variant: "destructive" });
       return;
     }
+
     try {
       const payload: {
         displayName: string;
         avatarUrl?: string | null;
         avatarSource?: "manual" | "upload" | "wechat";
-      } = { displayName: displayName.trim() };
+      } = {
+        displayName: displayName.trim(),
+      };
 
+      // Only update avatar fields when the user actually changes the avatar URL input.
+      // This avoids overwriting sources set by upload/WeChat flows.
       const desiredAvatarUrl = avatarUrl.trim() ? avatarUrl.trim() : null;
       const currentAvatarUrl = currentUser?.avatarUrl ?? null;
       if (desiredAvatarUrl !== currentAvatarUrl) {
@@ -103,14 +118,17 @@ export default function ProfilePage() {
     }
   };
 
+
   const onUploadAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+
     if (!file.type.startsWith("image/")) {
       toast({ title: "请选择图片文件", variant: "destructive" });
       return;
     }
+
     try {
       const dataUrl = await fileToDataUrl(file);
       const result = await uploadAvatarMutation.mutateAsync(dataUrl);
@@ -125,8 +143,10 @@ export default function ProfilePage() {
     }
   };
 
+
   const useWechatAvatar = async () => {
     if (!currentUser?.wechatAvatarUrl) return;
+
     try {
       await updateProfileMutation.mutateAsync({
         displayName: displayName.trim(),
@@ -144,11 +164,13 @@ export default function ProfilePage() {
     }
   };
 
+
   const bindWechat = async () => {
     if (!wechatOpenId || !wechatNickname) {
       toast({ title: "请填写 openId 和微信昵称", variant: "destructive" });
       return;
     }
+
     try {
       await bindWechatMutation.mutateAsync({
         wechatOpenId: wechatOpenId.trim(),
@@ -167,6 +189,7 @@ export default function ProfilePage() {
     }
   };
 
+
   const unbindWechat = async () => {
     try {
       await unbindWechatMutation.mutateAsync();
@@ -180,260 +203,196 @@ export default function ProfilePage() {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await logoutMutation.mutateAsync();
-      toast({ title: "已退出登录" });
-    } catch (error) {
-      toast({
-        title: "退出失败",
-        description: getFriendlyErrorMessage(error),
-        variant: "destructive",
-      });
-    }
-  };
-
   const avatarPreview = useMemo(() => {
     if (avatarUrl.trim()) return avatarUrl.trim();
     if (currentUser?.avatarUrl) return currentUser.avatarUrl;
     return "";
   }, [avatarUrl, currentUser?.avatarUrl]);
 
-  const logoutAction = currentUser ? (
-    <button
-      className="flex items-center gap-1 text-sm text-destructive hover:text-destructive/80 transition-colors"
-      onClick={handleLogout}
-      disabled={logoutMutation.isPending}
-      data-testid="button-logout"
-    >
-      <LogOut className="w-4 h-4" />
-      <span>退出</span>
-    </button>
-  ) : undefined;
-
   return (
-    <PageShell title="个人资料" actions={logoutAction}>
-      <div className="space-y-5">
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto max-w-4xl px-4 py-6 space-y-6">
+        <div className="flex items-center gap-3">
+          <Link href="/">
+            <Button variant="outline" size="sm" className="rounded-full">
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              返回首页
+            </Button>
+          </Link>
+          <h1 className="text-xl font-bold tracking-tight">个人资料</h1>
+        </div>
+
         {isUserLoading && (
-          <div className="rounded-2xl border bg-card p-16 flex items-center justify-center">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          </div>
+          <Card>
+            <CardContent className="py-16 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </CardContent>
+          </Card>
         )}
 
         {!isUserLoading && !currentUser && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <AuthCard
-              isRegisterMode={isRegisterMode}
-              setIsRegisterMode={setIsRegisterMode}
-              authUsername={authUsername}
-              setAuthUsername={setAuthUsername}
-              authPassword={authPassword}
-              setAuthPassword={setAuthPassword}
-              onSubmit={submitAuth}
-              isPending={loginMutation.isPending || registerMutation.isPending}
-              prompt="登录后可修改个人资料"
-            />
-          </motion.div>
+          <Card>
+            <CardHeader>
+              <CardTitle>登录后可修改个人资料</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Input
+                placeholder="用户名"
+                value={authUsername}
+                onChange={(event) => setAuthUsername(event.target.value)}
+              />
+              <Input
+                type="password"
+                placeholder="密码"
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+              />
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={submitAuth}
+                  disabled={loginMutation.isPending || registerMutation.isPending}
+                >
+                  {isRegisterMode ? "注册并登录" : "登录"}
+                </Button>
+                <Button variant="outline" onClick={() => setIsRegisterMode((value) => !value)}>
+                  {isRegisterMode ? "切换登录" : "切换注册"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {currentUser && (
           <>
-            <motion.div
-              className="rounded-2xl border bg-card p-6 space-y-5"
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
-              data-testid="card-profile"
-            >
-              <div className="flex items-center gap-4">
-                <div className="relative group">
+            <Card>
+              <CardHeader>
+                <CardTitle>基础信息</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-4">
                   {avatarPreview ? (
                     <img
                       src={avatarPreview}
                       alt="avatar"
-                      className="w-20 h-20 rounded-full object-cover border-2 border-border"
-                      data-testid="img-avatar"
+                      className="w-16 h-16 rounded-full object-cover border"
                     />
                   ) : (
-                    <div className="w-20 h-20 rounded-full border-2 border-border bg-secondary/50 flex items-center justify-center">
-                      <UserCircle2 className="w-10 h-10 text-muted-foreground" data-testid="img-avatar-placeholder" />
+                    <div className="w-16 h-16 rounded-full border bg-secondary/50 flex items-center justify-center">
+                      <UserCircle2 className="w-8 h-8 text-muted-foreground" />
                     </div>
                   )}
-                  <label className="absolute inset-0 rounded-full bg-black/0 group-hover:bg-black/30 flex items-center justify-center cursor-pointer transition-colors">
-                    <Upload className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={onUploadAvatar}
-                      data-testid="input-avatar-upload"
-                    />
-                  </label>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-base font-semibold truncate" data-testid="text-display-name">
-                    {currentUser.displayName || currentUser.username}
-                  </p>
-                  <p className="text-sm text-muted-foreground" data-testid="text-username">
-                    @{currentUser.username}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-muted-foreground">显示名称</label>
-                  <input
-                    className="w-full h-10 px-3 rounded-xl bg-secondary border-0 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    data-testid="input-display-name"
-                  />
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">上传头像</label>
+                    <div>
+                      <label className="inline-flex">
+                        <input type="file" accept="image/*" className="hidden" onChange={onUploadAvatar} />
+                        <Button type="button" variant="outline" size="sm" asChild>
+                          <span>
+                            <Upload className="w-4 h-4 mr-1" />
+                            选择图片
+                          </span>
+                        </Button>
+                      </label>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-muted-foreground">头像 URL（可选）</label>
-                  <input
-                    className="w-full h-10 px-3 rounded-xl bg-secondary border-0 text-sm placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">姓名（默认账户名称）</label>
+                  <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">头像 URL（可选）</label>
+                  <Input
                     placeholder="https://..."
                     value={avatarUrl}
-                    onChange={(e) => setAvatarUrl(e.target.value)}
-                    data-testid="input-avatar-url"
+                    onChange={(event) => setAvatarUrl(event.target.value)}
                   />
                 </div>
-              </div>
 
-              <button
-                className="w-full h-10 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
-                onClick={saveProfile}
-                disabled={updateProfileMutation.isPending}
-                data-testid="button-save-profile"
-              >
-                {updateProfileMutation.isPending ? "保存中…" : "保存资料"}
-              </button>
-            </motion.div>
+                <Button onClick={saveProfile} disabled={updateProfileMutation.isPending}>
+                  保存资料
+                </Button>
+              </CardContent>
+            </Card>
 
-            <motion.div
-              className="rounded-2xl border bg-card p-6 space-y-4"
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-              data-testid="card-wechat"
-            >
-              <div className="flex items-center gap-2">
-                <MessageCircle className="w-5 h-5 text-green-500" />
-                <h2 className="text-base font-semibold">微信绑定</h2>
-              </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>微信绑定（后端操作为主）</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <p className="text-muted-foreground">
+                  设计上微信绑定应由后端通过 OAuth 获取 openid/unionid 后写入数据库，前端只触发授权。
+                  当前页面提供开发态模拟绑定，方便联调未来小程序/公众号体系。
+                </p>
 
-              <p className="text-sm text-muted-foreground">
-                微信绑定由后端通过 OAuth 完成，当前为开发模拟模式。
-              </p>
-
-              <div className="rounded-xl bg-secondary/50 p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium" data-testid="text-wechat-status">
-                    {currentUser.isWechatBound ? "已绑定" : "未绑定"}
-                  </p>
-                  {currentUser.isWechatBound && currentUser.wechatNickname && (
-                    <p className="text-sm text-muted-foreground" data-testid="text-wechat-nickname">
-                      {currentUser.wechatNickname}
-                    </p>
-                  )}
+                <div className="rounded-xl border p-3 bg-secondary/20">
+                  <div>绑定状态：{currentUser.isWechatBound ? "已绑定" : "未绑定"}</div>
+                  {currentUser.isWechatBound ? (
+                    <div className="mt-1 text-muted-foreground">
+                      微信昵称：{currentUser.wechatNickname || "未同步"}
+                    </div>
+                  ) : null}
                 </div>
-                <div
-                  className={`w-2.5 h-2.5 rounded-full ${currentUser.isWechatBound ? "bg-green-500" : "bg-muted-foreground/30"}`}
-                />
-              </div>
 
-              {currentUser.isWechatBound && currentUser.wechatAvatarUrl && (
-                <button
-                  className="w-full h-10 rounded-xl border text-sm font-medium hover:bg-accent transition-colors"
-                  onClick={useWechatAvatar}
-                  data-testid="button-use-wechat-avatar"
-                >
-                  使用微信头像
-                </button>
-              )}
+                {currentUser.isWechatBound && currentUser.wechatAvatarUrl ? (
+                  <Button variant="outline" onClick={useWechatAvatar}>
+                    使用微信头像
+                  </Button>
+                ) : null}
 
-              {currentUser.isWechatBound ? (
-                <button
-                  className="w-full h-10 rounded-xl border border-destructive/30 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
-                  onClick={unbindWechat}
-                  disabled={unbindWechatMutation.isPending}
-                  data-testid="button-unbind-wechat"
-                >
-                  <Unlink className="w-4 h-4" />
-                  解除微信绑定
-                </button>
-              ) : (
-                <>
-                  <button
-                    className="w-full h-10 rounded-xl border text-sm font-medium hover:bg-accent transition-colors flex items-center justify-center gap-1.5"
-                    onClick={() => setShowBindForm((v) => !v)}
-                    data-testid="button-toggle-bind-form"
+                {currentUser.isWechatBound ? (
+                  <Button
+                    variant="destructive"
+                    onClick={unbindWechat}
+                    disabled={unbindWechatMutation.isPending}
                   >
-                    {showBindForm ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    {showBindForm ? "收起模拟绑定" : "开发模拟绑定"}
-                  </button>
-
-                  <AnimatePresence>
-                    {showBindForm && (
-                      <motion.div
-                        className="space-y-2 rounded-xl border p-4"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <input
-                          className="w-full h-10 px-3 rounded-xl bg-secondary border-0 text-sm placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    解除微信绑定
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowBindForm((value) => !value)}
+                    >
+                      {showBindForm ? "收起开发模拟绑定" : "开发模拟绑定"}
+                    </Button>
+                    {showBindForm ? (
+                      <div className="space-y-2 rounded-xl border p-3">
+                        <Input
                           placeholder="wechat openid"
                           value={wechatOpenId}
-                          onChange={(e) => setWechatOpenId(e.target.value)}
-                          data-testid="input-wechat-openid"
+                          onChange={(event) => setWechatOpenId(event.target.value)}
                         />
-                        <input
-                          className="w-full h-10 px-3 rounded-xl bg-secondary border-0 text-sm placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        <Input
                           placeholder="wechat unionid（可选）"
                           value={wechatUnionId}
-                          onChange={(e) => setWechatUnionId(e.target.value)}
-                          data-testid="input-wechat-unionid"
+                          onChange={(event) => setWechatUnionId(event.target.value)}
                         />
-                        <input
-                          className="w-full h-10 px-3 rounded-xl bg-secondary border-0 text-sm placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        <Input
                           placeholder="wechat nickname"
                           value={wechatNickname}
-                          onChange={(e) => setWechatNickname(e.target.value)}
-                          data-testid="input-wechat-nickname"
+                          onChange={(event) => setWechatNickname(event.target.value)}
                         />
-                        <input
-                          className="w-full h-10 px-3 rounded-xl bg-secondary border-0 text-sm placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        <Input
                           placeholder="wechat avatar url（可选）"
                           value={wechatAvatarUrl}
-                          onChange={(e) => setWechatAvatarUrl(e.target.value)}
-                          data-testid="input-wechat-avatar-url"
+                          onChange={(event) => setWechatAvatarUrl(event.target.value)}
                         />
-                        <button
-                          className="w-full h-10 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-600/90 transition-colors disabled:opacity-50"
-                          onClick={bindWechat}
-                          disabled={bindWechatMutation.isPending}
-                          data-testid="button-submit-bind"
-                        >
+                        <Button onClick={bindWechat} disabled={bindWechatMutation.isPending}>
                           提交模拟绑定
-                        </button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </>
-              )}
-            </motion.div>
+                        </Button>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </CardContent>
+            </Card>
           </>
         )}
       </div>
-    </PageShell>
+    </div>
   );
 }

@@ -1,32 +1,24 @@
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
-import { Calendar, ChevronRight, Loader2, MapPin, MessageSquare, Star } from "lucide-react";
-import { motion } from "framer-motion";
+import { ArrowLeft, Calendar, Loader2, MapPin, MessageSquare, Star } from "lucide-react";
 import { useCurrentUser, useLogin, useMyReviews, useRegister } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
-import { PageShell, AuthCard } from "@/components/PageShell";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 function formatDate(dateValue?: string | null) {
-  if (!dateValue) return "";
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("zh-CN");
-}
+  if (!dateValue) {
+    return "Unknown";
+  }
 
-function StarRating({ rating }: { rating: number }) {
-  return (
-    <div className="inline-flex items-center gap-0.5">
-      {[1, 2, 3, 4, 5].map((star) => (
-        <Star
-          key={star}
-          className={`w-3.5 h-3.5 ${
-            star <= rating ? "text-amber-500 fill-amber-500" : "text-muted-foreground/20"
-          }`}
-        />
-      ))}
-    </div>
-  );
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+
+  return date.toLocaleDateString("zh-CN");
 }
 
 export default function MyReviewsPage() {
@@ -41,19 +33,35 @@ export default function MyReviewsPage() {
   const [authPassword, setAuthPassword] = useState("");
 
   const stats = useMemo(() => {
-    if (myReviews.length === 0) return { total: 0, averageRating: 0 };
+    if (myReviews.length === 0) {
+      return { total: 0, averageRating: 0 };
+    }
+
     const totalRating = myReviews.reduce((sum, review) => sum + review.rating, 0);
-    return { total: myReviews.length, averageRating: totalRating / myReviews.length };
+    return {
+      total: myReviews.length,
+      averageRating: totalRating / myReviews.length,
+    };
   }, [myReviews]);
 
   const submitAuth = async () => {
-    if (!authUsername || !authPassword) return;
+    if (!authUsername || !authPassword) {
+      return;
+    }
+
     try {
       if (isRegisterMode) {
-        await registerMutation.mutateAsync({ username: authUsername, password: authPassword });
+        await registerMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
       } else {
-        await loginMutation.mutateAsync({ username: authUsername, password: authPassword });
+        await loginMutation.mutateAsync({
+          username: authUsername,
+          password: authPassword,
+        });
       }
+
       setAuthPassword("");
     } catch (error) {
       toast({
@@ -65,122 +73,128 @@ export default function MyReviewsPage() {
   };
 
   return (
-    <PageShell title="我的评论">
-      <div className="space-y-4">
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto max-w-4xl px-4 py-6 space-y-6">
+        <div className="flex items-center gap-3">
+          <Link href="/">
+            <Button variant="outline" size="sm" className="rounded-full">
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              返回首页
+            </Button>
+          </Link>
+          <h1 className="text-xl font-bold tracking-tight">我的评论</h1>
+        </div>
+
         {(isUserLoading || (currentUser && isReviewsLoading)) && (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          </div>
+          <Card>
+            <CardContent className="py-16 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </CardContent>
+          </Card>
         )}
 
         {!isUserLoading && !currentUser && (
-          <AuthCard
-            isRegisterMode={isRegisterMode}
-            setIsRegisterMode={setIsRegisterMode}
-            authUsername={authUsername}
-            setAuthUsername={setAuthUsername}
-            authPassword={authPassword}
-            setAuthPassword={setAuthPassword}
-            onSubmit={submitAuth}
-            isPending={loginMutation.isPending || registerMutation.isPending}
-            prompt="登录后查看你的评论历史"
-          />
+          <Card>
+            <CardHeader>
+              <CardTitle>登录后查看你的评论历史</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Input
+                placeholder="用户名"
+                value={authUsername}
+                onChange={(event) => setAuthUsername(event.target.value)}
+              />
+              <Input
+                type="password"
+                placeholder="密码"
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+              />
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={submitAuth}
+                  disabled={loginMutation.isPending || registerMutation.isPending}
+                >
+                  {isRegisterMode ? "注册并登录" : "登录"}
+                </Button>
+                <Button variant="outline" onClick={() => setIsRegisterMode((value) => !value)}>
+                  {isRegisterMode ? "切换登录" : "切换注册"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
-        {currentUser && !isReviewsLoading && (
+        {currentUser && (
           <>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-2xl border bg-card p-4 text-center">
-                <div className="text-2xl font-semibold" data-testid="text-reviews-count">
-                  {stats.total}
+            <Card>
+              <CardHeader>
+                <CardTitle>{currentUser.username}</CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div className="rounded-xl border p-4">
+                  <div className="text-muted-foreground">评论总数</div>
+                  <div className="text-2xl font-semibold mt-1">{stats.total}</div>
                 </div>
-                <div className="text-sm text-muted-foreground mt-1">评论总数</div>
-              </div>
-              <div className="rounded-2xl border bg-card p-4 text-center">
-                <div className="text-2xl font-semibold" data-testid="text-reviews-avg-rating">
-                  {stats.averageRating.toFixed(1)}
+                <div className="rounded-xl border p-4">
+                  <div className="text-muted-foreground">平均评分</div>
+                  <div className="text-2xl font-semibold mt-1">{stats.averageRating.toFixed(1)}</div>
                 </div>
-                <div className="text-sm text-muted-foreground mt-1">平均评分</div>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
-            {myReviews.length === 0 && (
-              <div className="rounded-2xl border bg-card p-8 text-center space-y-3">
-                <MessageSquare className="w-10 h-10 mx-auto text-muted-foreground/30" />
-                <p className="text-sm text-muted-foreground" data-testid="text-empty-reviews">
-                  你还没有发布过评论
-                </p>
-                <Link href="/">
-                  <button
-                    className="text-sm text-primary hover:text-primary/80 transition-colors"
-                    data-testid="link-browse-events"
-                  >
-                    去发现赛事 →
-                  </button>
-                </Link>
-              </div>
-            )}
+            <Card>
+              <CardHeader>
+                <CardTitle>评论列表</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {myReviews.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">你还没有发布过评论。</p>
+                ) : (
+                  myReviews.map((review) => (
+                    <div key={review.id} className="rounded-xl border p-4 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-medium">{review.marathon.name}</div>
+                        <div className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {formatDate(review.createdAt)}
+                        </div>
+                      </div>
 
-            {myReviews.map((review, index) => (
-              <motion.div
-                key={review.id}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.04, type: "spring", stiffness: 300, damping: 30 }}
-                className="rounded-2xl border bg-card p-4 space-y-3 hover:shadow-md transition-shadow"
-                data-testid={`card-review-${review.id}`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <Link href={`/marathons/${review.marathon.id}`} data-testid={`link-review-${review.id}`}>
-                    <div className="flex items-center gap-2 group cursor-pointer min-w-0">
-                      <span
-                        className="text-base font-semibold truncate group-hover:text-primary transition-colors"
-                        data-testid={`text-review-marathon-${review.id}`}
-                      >
-                        {review.marathon.name}
-                      </span>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground/40 shrink-0 group-hover:text-primary transition-colors" />
+                      <div className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                        {review.marathon.city || review.marathon.country || "Unknown"}
+                      </div>
+
+                      <div className="text-sm inline-flex items-center gap-1">
+                        <Star className="w-4 h-4 text-amber-500" />
+                        {review.rating} / 5
+                      </div>
+
+                      <p className="text-sm text-foreground/90">
+                        {review.comment || "No text comment."}
+                      </p>
+
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <MessageSquare className="w-3 h-3" />
+                          Likes {review.likesCount} · Reports {review.reportCount}
+                        </span>
+                        <Link href={`/marathons/${review.marathon.id}`}>
+                          <Button variant="outline" size="sm">
+                            查看赛事详情
+                          </Button>
+                        </Link>
+                      </div>
                     </div>
-                  </Link>
-                  <StarRating rating={review.rating} />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                  {(review.marathon.city || review.marathon.country) && (
-                    <span className="inline-flex items-center gap-1">
-                      <MapPin className="w-3.5 h-3.5" />
-                      {review.marathon.city || review.marathon.country}
-                    </span>
-                  )}
-                  {review.createdAt && (
-                    <span className="inline-flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5" />
-                      {formatDate(review.createdAt)}
-                    </span>
-                  )}
-                </div>
-
-                {review.comment && (
-                  <p className="text-sm text-foreground/80 leading-relaxed">
-                    {review.comment}
-                  </p>
+                  ))
                 )}
-
-                <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <span className="inline-flex items-center gap-1" data-testid={`text-review-likes-${review.id}`}>
-                    ♥ {review.likesCount}
-                  </span>
-                  {review.reportCount > 0 && (
-                    <span className="inline-flex items-center gap-1 text-amber-500" data-testid={`text-review-reports-${review.id}`}>
-                      ⚠ {review.reportCount}
-                    </span>
-                  )}
-                </div>
-              </motion.div>
-            ))}
+              </CardContent>
+            </Card>
           </>
         )}
       </div>
-    </PageShell>
+    </div>
   );
 }
