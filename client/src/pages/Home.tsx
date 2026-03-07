@@ -4,7 +4,6 @@ import { Heart, MessageSquare, RefreshCw, Search, SlidersHorizontal, User, X } f
 import { MarathonTable } from "@/components/MarathonTable";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser, useMyFavorites } from "@/hooks/useAuth";
 import {
@@ -19,7 +18,6 @@ import { motion, AnimatePresence } from "framer-motion";
 export default function Home() {
   const [region, setRegion] = useState<"China" | "Overseas">("China");
   const [searchQuery, setSearchQuery] = useState("");
-  const [cityFilter, setCityFilter] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [monthFilter, setMonthFilter] = useState<string>("all");
@@ -43,7 +41,7 @@ export default function Home() {
     monthFilter !== "all" ||
     statusFilter !== "all" ||
     sortBy !== "raceDate" ||
-    cityFilter !== "";
+    searchQuery !== "";
 
   useEffect(() => {
     if (!currentUser && viewMode === "mine") {
@@ -60,19 +58,22 @@ export default function Home() {
     setTimeout(() => {
       setIsUpdating(false);
       toast({
-        title: "日历已更新",
-        description: "已从网络获取最新马拉松赛事信息。",
-        duration: 3000,
+        title: "已更新",
+        duration: 1000,
       });
-    }, 1500);
+    }, 800);
   };
 
-  const handleMineMode = () => {
+  const handleToggleMine = () => {
+    if (viewMode === "mine") {
+      setViewMode("all");
+      return;
+    }
     if (!currentUser) {
       toast({
         title: "请先登录",
-        description: "登录后可查看收藏赛事。",
-        duration: 2500,
+        description: "登录后可查看收藏赛事",
+        duration: 1000,
       });
       return;
     }
@@ -84,7 +85,7 @@ export default function Home() {
     setStatusFilter("all");
     setSortBy("raceDate");
     setSortOrder("asc");
-    setCityFilter("");
+    setSearchQuery("");
   };
 
   return (
@@ -146,66 +147,42 @@ export default function Home() {
       </header>
 
       <div className="max-w-2xl mx-auto px-4 pt-3 space-y-2.5">
-        <Tabs
-          value={region}
-          onValueChange={(value) => setRegion(value as "China" | "Overseas")}
-          className="w-full"
-        >
-          <TabsList className="grid w-full grid-cols-2 bg-secondary/50 rounded-xl p-1 h-9">
-            <TabsTrigger
-              value="China"
-              className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
-              data-testid="tab-china"
-            >
-              国内赛事
-            </TabsTrigger>
-            <TabsTrigger
-              value="Overseas"
-              className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
-              data-testid="tab-overseas"
-            >
-              海外赛事
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-2">
+          <Tabs
+            value={region}
+            onValueChange={(value) => setRegion(value as "China" | "Overseas")}
+            className="flex-1"
+          >
+            <TabsList className="grid w-full grid-cols-2 bg-secondary/50 rounded-xl p-1 h-9">
+              <TabsTrigger
+                value="China"
+                className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                data-testid="tab-china"
+              >
+                国内赛事
+              </TabsTrigger>
+              <TabsTrigger
+                value="Overseas"
+                className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                data-testid="tab-overseas"
+              >
+                海外赛事
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
 
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="搜索赛事名称..."
-              className="pl-9 bg-secondary/30 border-0 rounded-xl h-9 text-sm focus-visible:ring-1 focus-visible:ring-primary/20"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              data-testid="input-search"
-            />
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              className={`h-9 px-3 rounded-xl text-sm font-medium transition-colors ${
-                viewMode === "all"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary/40 text-muted-foreground hover:text-foreground"
-              }`}
-              onClick={() => setViewMode("all")}
-              data-testid="button-view-all"
-            >
-              全部
-            </button>
-            <button
-              className={`h-9 px-3 rounded-xl text-sm font-medium transition-colors ${
-                viewMode === "mine"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary/40 text-muted-foreground hover:text-foreground"
-              }`}
-              onClick={handleMineMode}
-              data-testid="button-view-mine"
-            >
-              收藏{viewMode === "mine" && favoriteMarathonIds.size > 0 ? ` ${favoriteMarathonIds.size}` : ""}
-            </button>
-          </div>
+          <button
+            className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center transition-colors ${
+              viewMode === "mine"
+                ? "bg-red-500/10 text-red-500"
+                : "bg-secondary/40 text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={handleToggleMine}
+            data-testid="button-toggle-mine"
+            title={viewMode === "mine" ? "显示全部赛事" : "只看收藏"}
+          >
+            <Heart className={`w-[18px] h-[18px] ${viewMode === "mine" ? "fill-current" : ""}`} />
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -236,14 +213,14 @@ export default function Home() {
           )}
           {hasActiveFilters && !filtersOpen && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground overflow-x-auto">
+              {searchQuery && (
+                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{searchQuery}</span>
+              )}
               {monthFilter !== "all" && (
                 <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{monthFilter}月</span>
               )}
               {statusFilter !== "all" && (
                 <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{statusFilter}</span>
-              )}
-              {cityFilter && (
-                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{cityFilter}</span>
               )}
               {sortBy !== "raceDate" && (
                 <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">
@@ -264,14 +241,17 @@ export default function Home() {
               className="overflow-hidden"
             >
               <div className="rounded-2xl border bg-card p-3 space-y-2.5">
-                <Input
-                  type="search"
-                  placeholder="筛选城市..."
-                  className="bg-secondary/30 border-0 rounded-xl h-9 text-sm focus-visible:ring-1 focus-visible:ring-primary/20"
-                  value={cityFilter}
-                  onChange={(event) => setCityFilter(event.target.value)}
-                  data-testid="input-city-filter"
-                />
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    placeholder="搜索赛事名称或城市..."
+                    className="pl-9 bg-secondary/30 border-0 rounded-xl h-9 text-sm focus-visible:ring-1 focus-visible:ring-primary/20"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    data-testid="input-search"
+                  />
+                </div>
 
                 <div className="grid grid-cols-3 gap-2">
                   <Select value={monthFilter} onValueChange={setMonthFilter}>
@@ -332,7 +312,6 @@ export default function Home() {
         <MarathonTable
           region={region}
           searchQuery={searchQuery}
-          cityFilter={cityFilter}
           filters={{
             year: currentYear,
             month: monthFilter === "all" ? undefined : Number(monthFilter),

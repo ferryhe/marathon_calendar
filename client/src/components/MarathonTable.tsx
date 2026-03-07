@@ -41,7 +41,6 @@ function HighlightText({ text, highlight }: { text: string; highlight: string })
 interface MarathonTableProps {
   region: "China" | "Overseas";
   searchQuery: string;
-  cityFilter?: string;
   filters: {
     year: number;
     month?: number;
@@ -84,7 +83,6 @@ function getStatusBadgeStyle(status: string) {
 export function MarathonTable({
   region,
   searchQuery,
-  cityFilter,
   filters,
   showMineOnly = false,
   favoriteMarathonIds = new Set<string>(),
@@ -100,7 +98,6 @@ export function MarathonTable({
   const { data, isLoading, error } = useMarathons({
     country,
     search: searchQuery || undefined,
-    city: cityFilter || undefined,
     limit: 20,
     page: currentPage,
     year: filters.year,
@@ -122,12 +119,10 @@ export function MarathonTable({
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Reset to page 1 when filters change
-  const prevFiltersRef = useRef({ searchQuery, cityFilter, region, filters });
+  const prevFiltersRef = useRef({ searchQuery, region, filters });
   useEffect(() => {
     const prev = prevFiltersRef.current;
     if (prev.searchQuery !== searchQuery || 
-        prev.cityFilter !== cityFilter ||
         prev.region !== region ||
         prev.filters.month !== filters.month ||
         prev.filters.status !== filters.status ||
@@ -135,11 +130,14 @@ export function MarathonTable({
         prev.filters.sortOrder !== filters.sortOrder) {
       handlePageChange(1);
     }
-    prevFiltersRef.current = { searchQuery, cityFilter, region, filters };
-  }, [searchQuery, cityFilter, region, filters]);
+    prevFiltersRef.current = { searchQuery, region, filters };
+  }, [searchQuery, region, filters]);
 
   const view = useMemo<MarathonTableView>(() => {
     if (!data?.data) return { mode: "grouped", groups: {}, tbd: [] };
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
     const { dated, tbd } = data.data
       .filter((marathon) => {
@@ -151,6 +149,11 @@ export function MarathonTable({
         }
         if (showMineOnly && !favoriteMarathonIds.has(marathon.id)) {
           return false;
+        }
+        const raceDate = marathon.nextEdition?.raceDate;
+        if (raceDate) {
+          const d = new Date(raceDate);
+          if (d < today) return false;
         }
         return true;
       })
