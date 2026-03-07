@@ -1,522 +1,129 @@
-import { useMemo, useState, useEffect, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { Calendar, ChevronRight, ExternalLink, Loader2, MapPin } from "lucide-react";
+import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
-import { useMarathons } from "@/hooks/useMarathons";
+import { ChevronRight, MapPin, Calendar } from "lucide-react";
+import { MarathonEvent, MOCK_MARATHONS } from "@/lib/mockData";
 import { EventDetails } from "./EventDetails";
-import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination";
-import type { MarathonListItem } from "@/lib/apiClient";
-import { isChinaCountry } from "@shared/utils";
-
-// Highlight helper component for search terms
-function HighlightText({ text, highlight }: { text: string; highlight: string }) {
-  if (!highlight.trim()) {
-    return <>{text}</>;
-  }
-  
-  const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
-  return (
-    <>
-      {parts.map((part, i) => 
-        part.toLowerCase() === highlight.toLowerCase() ? (
-          <mark key={i} className="bg-yellow-200 dark:bg-yellow-500/30 text-foreground rounded px-0.5">
-            {part}
-          </mark>
-        ) : (
-          <span key={i}>{part}</span>
-        )
-      )}
-    </>
-  );
-}
+import { motion, AnimatePresence } from "framer-motion";
 
 interface MarathonTableProps {
   region: "China" | "Overseas";
   searchQuery: string;
-  cityFilter?: string;
-  filters: {
-    year: number;
-    month?: number;
-    status?: string;
-    sortBy: "raceDate" | "name" | "createdAt";
-    sortOrder?: "asc" | "desc";
-  };
-  showMineOnly?: boolean;
-  favoriteMarathonIds?: Set<string>;
-  favoritesLoading?: boolean;
-  externalPage?: number;
-  onPageChange?: (page: number) => void;
 }
 
-interface MarathonWithDate extends MarathonListItem {
-  displayDate: Date;
-  year: number;
-  month: number;
-  day: number;
-  registrationStatus: string;
-}
+export function MarathonTable({ region, searchQuery }: MarathonTableProps) {
+  const [selectedEvent, setSelectedEvent] = useState<MarathonEvent | null>(null);
 
-type MarathonTableView =
-  | { mode: "grouped"; groups: Record<string, MarathonWithDate[]>; tbd: MarathonWithDate[] }
-  | { mode: "flat"; events: MarathonWithDate[]; tbd: MarathonWithDate[] };
+  const groupedEvents = useMemo(() => {
+    const filtered = MOCK_MARATHONS.filter((event) => {
+      const matchesRegion = event.location.country === (region === "China" ? "China" : "Overseas");
+      const matchesSearch = event.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                            event.location.city.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesRegion && matchesSearch;
+    }).sort((a, b) => {
+      return new Date(a.year, a.month - 1, a.day).getTime() - new Date(b.year, b.month - 1, b.day).getTime();
+    });
 
-function getStatusBadgeStyle(status: string) {
-  if (status === "报名中") {
-    return "bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-2 h-5";
-  }
-  if (status === "即将开始") {
-    return "bg-amber-500 hover:bg-amber-600 border-0 text-[10px] px-2 h-5";
-  }
-  if (status === "已截止") {
-    return "bg-muted text-muted-foreground border-0 text-[10px] px-2 h-5";
-  }
-  return "bg-muted text-muted-foreground border-0 text-[10px] px-2 h-5";
-}
-
-export function MarathonTable({
-  region,
-  searchQuery,
-  cityFilter,
-  filters,
-  showMineOnly = false,
-  favoriteMarathonIds = new Set<string>(),
-  favoritesLoading = false,
-  externalPage,
-  onPageChange,
-}: MarathonTableProps) {
-  const [selectedEvent, setSelectedEvent] = useState<MarathonListItem | null>(null);
-  const [page, setPage] = useState(1);
-  const currentPage = externalPage ?? page;
-  const country = region === "China" ? "China" : undefined;
-
-  const { data, isLoading, error } = useMarathons({
-    country,
-    search: searchQuery || undefined,
-    city: cityFilter || undefined,
-    limit: 20,
-    page: currentPage,
-    year: filters.year,
-    month: filters.month,
-    status: filters.status,
-    sortBy: filters.sortBy,
-    sortOrder: filters.sortOrder || "asc",
-  });
-
-  const paginationInfo = data?.pagination;
-  const totalPages = paginationInfo?.totalPages ?? 1;
-
-  const handlePageChange = (newPage: number) => {
-    if (onPageChange) {
-      onPageChange(newPage);
-    } else {
-      setPage(newPage);
-    }
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  // Reset to page 1 when filters change
-  const prevFiltersRef = useRef({ searchQuery, cityFilter, region, filters });
-  useEffect(() => {
-    const prev = prevFiltersRef.current;
-    if (prev.searchQuery !== searchQuery || 
-        prev.cityFilter !== cityFilter ||
-        prev.region !== region ||
-        prev.filters.month !== filters.month ||
-        prev.filters.status !== filters.status ||
-        prev.filters.sortBy !== filters.sortBy ||
-        prev.filters.sortOrder !== filters.sortOrder) {
-      handlePageChange(1);
-    }
-    prevFiltersRef.current = { searchQuery, cityFilter, region, filters };
-  }, [searchQuery, cityFilter, region, filters]);
-
-  const view = useMemo<MarathonTableView>(() => {
-    if (!data?.data) return { mode: "grouped", groups: {}, tbd: [] };
-
-    const { dated, tbd } = data.data
-      .filter((marathon) => {
-        if (region === "China" && !isChinaCountry(marathon.country)) {
-          return false;
-        }
-        if (region === "Overseas" && isChinaCountry(marathon.country)) {
-          return false;
-        }
-        if (showMineOnly && !favoriteMarathonIds.has(marathon.id)) {
-          return false;
-        }
-        return true;
-      })
-      .reduce(
-        (acc, marathon) => {
-          const editionDate = marathon.nextEdition?.raceDate;
-          if (!editionDate) {
-            acc.tbd.push({
-              ...marathon,
-              // Keep a stable date to avoid crashing UI; we render it as TBD.
-              displayDate: new Date(marathon.createdAt),
-              year: filters.year,
-              month: 0,
-              day: 0,
-              registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
-            } as MarathonWithDate);
-            return acc;
-          }
-
-          const displayDate = new Date(editionDate);
-          acc.dated.push({
-            ...marathon,
-            displayDate,
-            year: displayDate.getFullYear(),
-            month: displayDate.getMonth() + 1,
-            day: displayDate.getDate(),
-            registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
-          } as MarathonWithDate);
-          return acc;
-        },
-        { dated: [] as MarathonWithDate[], tbd: [] as MarathonWithDate[] },
-      );
-
-    // When the API is sorting by name, preserve the server ordering (avoid reordering paginated results).
-    if (filters.sortBy !== "raceDate") {
-      return { mode: "flat", events: dated, tbd };
-    }
-
-    const sortedByDate = [...dated].sort(
-      (a, b) => a.displayDate.getTime() - b.displayDate.getTime(),
-    );
-
-    const groups: Record<string, MarathonWithDate[]> = {};
-    for (const event of sortedByDate) {
+    const groups: { [key: string]: MarathonEvent[] } = {};
+    filtered.forEach(event => {
       const key = `${event.year}年${event.month}月`;
       if (!groups[key]) groups[key] = [];
       groups[key].push(event);
-    }
-
-    return { mode: "grouped", groups, tbd };
-  }, [data, region, showMineOnly, favoriteMarathonIds, filters.sortBy]);
-
-  if (isLoading || (showMineOnly && favoritesLoading)) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="py-24 text-center">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-destructive/10 mb-4">
-          <Calendar className="w-8 h-8 text-destructive" />
-        </div>
-        <p className="text-destructive font-medium">加载赛事数据失败</p>
-        <p className="text-sm text-muted-foreground mt-2">{(error as Error).message}</p>
-      </div>
-    );
-  }
-
-  const hasData =
-    view.mode === "grouped"
-      ? Object.keys(view.groups).length > 0 || view.tbd.length > 0
-      : view.events.length > 0 || view.tbd.length > 0;
-  const emptyTitle = showMineOnly ? "你还没有收藏赛事" : "未找到相关马拉松赛事";
-  const emptyHint = showMineOnly
-    ? "可在赛事详情或弹窗中点击“收藏赛事”后再查看"
-    : searchQuery
-      ? "尝试使用不同的搜索关键词"
-      : "";
+    });
+    return groups;
+  }, [region, searchQuery]);
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-16">
       <AnimatePresence mode="popLayout">
-        {hasData ? (
-          <div className="space-y-12">
-            {view.mode === "grouped" ? (
-              Object.entries(view.groups).map(([month, events]) => (
-                <div
-                  key={month}
-                  className="relative grid grid-cols-1 md:grid-cols-[100px_1fr] gap-6"
-                >
-                  <div className="md:sticky md:top-44 h-fit">
-                    <div className="flex items-baseline gap-2 md:flex-col md:items-start md:gap-0">
-                      <span className="text-3xl font-black tracking-tighter text-foreground/20 md:text-4xl">
-                        {month.split("年")[1].replace("月", "")}
-                      </span>
-                      <span className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/50 md:mt-1">
-                        {month.split("年")[0]}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {events.map((event, index) => {
-                      const weekDay = ["日", "一", "二", "三", "四", "五", "六"][
-                        event.displayDate.getDay()
-                      ];
-                      return (
-                        <motion.div
-                          key={event.id}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.03 }}
-                          className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
-                          onClick={() => setSelectedEvent(event)}
-                          data-testid={`row-event-${event.id}`}
-                        >
-                          <div className="flex items-center gap-5">
-                            <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
-                              <span className="text-lg leading-none">{event.day}</span>
-                              <span className="text-[10px] text-muted-foreground uppercase mt-1">
-                                周{weekDay}
-                              </span>
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
-                                <HighlightText text={event.name} highlight={searchQuery} />
-                              </h3>
-                              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
-                                <MapPin className="w-3 h-3 flex-shrink-0" />
-                                <span className="truncate"><HighlightText text={event.city || event.country || "待更新"} highlight={searchQuery} /></span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-3">
-                            {event.websiteUrl ? (
-                              <a
-                                href={event.websiteUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
-                                onClick={(e) => e.stopPropagation()}
-                                title="打开官网"
-                              >
-                                <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                              </a>
-                            ) : null}
-                            <Badge
-                              variant="default"
-                              className={getStatusBadgeStyle(event.registrationStatus)}
-                            >
-                              {event.registrationStatus}
-                            </Badge>
-                            <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
+        {Object.keys(groupedEvents).length > 0 ? (
+          Object.entries(groupedEvents).map(([month, events], groupIdx) => (
+            <div key={month} className="relative grid grid-cols-1 md:grid-cols-[120px_1fr] gap-8">
+              {/* Sticky Month Label */}
+              <div className="md:sticky md:top-48 h-fit pt-2">
+                <div className="flex items-baseline gap-2 md:flex-col md:items-start md:gap-0">
+                  <span className="text-4xl font-black tracking-tighter text-foreground/10 md:text-6xl select-none">
+                    {month.split('年')[1].replace('月', '').padStart(2, '0')}
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted-foreground/40 md:mt-2 px-1">
+                    {month.split('年')[0]}
+                  </span>
                 </div>
-              ))
-            ) : (
-              <div className="space-y-3">
-                {view.events.map((event, index) => {
-                  const weekDay = ["日", "一", "二", "三", "四", "五", "六"][
-                    event.displayDate.getDay()
-                  ];
+              </div>
+
+              {/* Events List for this month */}
+              <div className="space-y-4">
+                {events.map((event, index) => {
+                  const date = new Date(event.year, event.month - 1, event.day);
+                  const weekDay = ['日', '一', '二', '三', '四', '五', '六'][date.getDay()];
+                  
                   return (
                     <motion.div
                       key={event.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.03 }}
-                      className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
+                      initial={{ opacity: 0, x: -10 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: index * 0.05 }}
+                      className="group relative flex items-center justify-between p-5 bg-card/50 dark:bg-zinc-900/50 hover:bg-white dark:hover:bg-zinc-800 active:scale-[0.99] transition-all duration-500 rounded-[2rem] border border-black/[0.03] dark:border-white/[0.03] hover:border-black/[0.08] dark:hover:border-white/[0.08] hover:shadow-2xl hover:shadow-black/[0.02] cursor-pointer overflow-hidden"
                       onClick={() => setSelectedEvent(event)}
                       data-testid={`row-event-${event.id}`}
                     >
-                      <div className="flex items-center gap-5">
-                        <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
-                          <span className="text-lg leading-none">{event.day}</span>
-                          <span className="text-[10px] text-muted-foreground uppercase mt-1">
-                            周{weekDay}
-                          </span>
-                        </div>
+                      {/* Hover subtle gradient */}
+                      <div className="absolute inset-0 bg-gradient-to-r from-blue-500/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
 
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
-                            <HighlightText text={event.name} highlight={searchQuery} />
-                          </h3>
-                          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
-                            <MapPin className="w-3 h-3 flex-shrink-0" />
-                            <span className="truncate"><HighlightText text={event.city || event.country || "待更新"} highlight={searchQuery} /></span>
+                      <div className="flex items-center gap-6 relative z-10">
+                        {/* Time Module (Date + Weekday) */}
+                        <div className="flex flex-col items-center justify-center w-16 h-16 rounded-2xl bg-secondary/80 dark:bg-zinc-800/80 font-bold border border-black/[0.03] dark:border-white/[0.03] group-hover:bg-white dark:group-hover:bg-zinc-700 transition-colors shadow-sm">
+                          <span className="text-2xl tracking-tighter leading-none">{event.day}</span>
+                          <span className="text-[10px] text-muted-foreground/60 uppercase mt-1.5 font-medium">周{weekDay}</span>
+                        </div>
+                        
+                        <div>
+                          <h3 className="font-bold text-lg tracking-tight group-hover:text-blue-500 transition-colors duration-300">{event.name}</h3>
+                          <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground/70 font-medium">
+                            <div className="flex items-center gap-1">
+                              <MapPin className="w-3.5 h-3.5 opacity-50" />
+                              <span>{event.location.city}</span>
+                            </div>
+                            <span className="w-1 h-1 rounded-full bg-muted-foreground/20" />
+                            <span className="tracking-wide">{event.type}</span>
                           </div>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-3">
-                        {event.websiteUrl ? (
-                          <a
-                            href={event.websiteUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
-                            onClick={(e) => e.stopPropagation()}
-                            title="打开官网"
-                          >
-                            <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                          </a>
-                        ) : null}
-                        <Badge
-                          variant="default"
-                          className={getStatusBadgeStyle(event.registrationStatus)}
-                        >
-                          {event.registrationStatus}
-                        </Badge>
-                        <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+                      
+                      <div className="flex items-center gap-4 relative z-10">
+                        {event.registrationStatus === 'Open' && (
+                          <Badge variant="default" className="bg-blue-500 hover:bg-blue-600 border-0 text-[10px] font-bold tracking-wider px-3 h-6 flex items-center gap-2 rounded-full shadow-lg shadow-blue-500/20">
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
+                            </span>
+                            报名中
+                          </Badge>
+                        )}
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center bg-secondary/50 group-hover:bg-blue-500 group-hover:text-white transition-all duration-300">
+                          <ChevronRight className="w-4 h-4 opacity-50 group-hover:opacity-100" />
+                        </div>
                       </div>
                     </motion.div>
                   );
                 })}
               </div>
-            )}
-
-            {view.tbd.length > 0 ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">待确认日期</div>
-                  <div className="text-xs text-muted-foreground">
-                    已收录官网，但具体比赛日期尚未确认
-                  </div>
-                </div>
-                {view.tbd.map((event, index) => (
-                  <motion.div
-                    key={event.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.02 }}
-                    className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
-                    onClick={() => setSelectedEvent(event)}
-                    data-testid={`row-event-tbd-${event.id}`}
-                  >
-                    <div className="flex items-center gap-5">
-                      <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/30 font-bold border border-border/50">
-                        <span className="text-lg leading-none">--</span>
-                        <span className="text-[10px] text-muted-foreground uppercase mt-1">待定</span>
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
-                          <HighlightText text={event.name} highlight={searchQuery} />
-                        </h3>
-                        <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
-                          <MapPin className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate"><HighlightText text={event.city || event.country || "待更新"} highlight={searchQuery} /></span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {event.websiteUrl ? (
-                        <a
-                          href={event.websiteUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
-                          onClick={(e) => e.stopPropagation()}
-                          title="打开官网"
-                        >
-                          <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                        </a>
-                      ) : null}
-                      <Badge variant="secondary" className="text-[10px] px-2 h-5">
-                        {event.registrationStatus}
-                      </Badge>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="py-24 text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-secondary mb-4">
-              <Calendar className="w-8 h-8 text-muted-foreground/40" />
             </div>
-            <p className="text-muted-foreground font-medium">{emptyTitle}</p>
-            {emptyHint ? <p className="text-sm text-muted-foreground/60 mt-2">{emptyHint}</p> : null}
+          ))
+        ) : (
+          <div className="py-32 text-center">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-secondary/50 mb-6">
+              <Calendar className="w-10 h-10 text-muted-foreground/20" />
+            </div>
+            <p className="text-muted-foreground text-lg font-medium tracking-tight">没有找到符合条件的赛事</p>
           </div>
         )}
       </AnimatePresence>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="mt-8 flex justify-center">
-          <Pagination>
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious 
-                  href="#" 
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (currentPage > 1) handlePageChange(currentPage - 1);
-                  }}
-                  className={currentPage <= 1 ? "pointer-events-none opacity-50" : ""}
-                />
-              </PaginationItem>
-              
-              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                let pageNum: number;
-                if (totalPages <= 5) {
-                  pageNum = i + 1;
-                } else if (currentPage <= 3) {
-                  pageNum = i + 1;
-                } else if (currentPage >= totalPages - 2) {
-                  pageNum = totalPages - 4 + i;
-                } else {
-                  pageNum = currentPage - 2 + i;
-                }
-                
-                return (
-                  <PaginationItem key={pageNum}>
-                    <PaginationLink
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        handlePageChange(pageNum);
-                      }}
-                      isActive={currentPage === pageNum}
-                    >
-                      {pageNum}
-                    </PaginationLink>
-                  </PaginationItem>
-                );
-              })}
-              
-              {totalPages > 5 && currentPage < totalPages - 2 && (
-                <PaginationItem>
-                  <PaginationEllipsis />
-                </PaginationItem>
-              )}
-              
-              <PaginationItem>
-                <PaginationNext 
-                  href="#" 
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (currentPage < totalPages) handlePageChange(currentPage + 1);
-                  }}
-                  className={currentPage >= totalPages ? "pointer-events-none opacity-50" : ""}
-                />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
-        </div>
-      )}
-
-      <EventDetails
-        event={selectedEvent}
-        open={!!selectedEvent}
-        onOpenChange={(open) => !open && setSelectedEvent(null)}
+      <EventDetails 
+        event={selectedEvent} 
+        open={!!selectedEvent} 
+        onOpenChange={(open) => !open && setSelectedEvent(null)} 
       />
     </div>
   );
