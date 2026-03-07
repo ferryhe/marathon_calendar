@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { Search, RefreshCw, Map } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -6,17 +6,16 @@ import { Button } from "@/components/ui/button";
 import { MarathonTable } from "@/components/MarathonTable";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser, useMyFavorites } from "@/hooks/useAuth";
-import { motion, useScroll, useTransform } from "framer-motion";
+import { motion } from "framer-motion";
 
 export default function Home() {
   const [region, setRegion] = useState<"China" | "Overseas">("China");
   const [searchQuery, setSearchQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { toast } = useToast();
-  const { scrollY } = useScroll();
 
   const { data: currentUser } = useCurrentUser();
-  const { data: favorites = [], isLoading: isFavoritesLoading } = useMyFavorites(!!currentUser);
+  const { data: favorites = [] } = useMyFavorites(!!currentUser);
 
   const favoriteMarathonIds = useMemo(
     () => new Set(favorites.map((item) => item.marathon.id)),
@@ -25,101 +24,77 @@ export default function Home() {
 
   const currentYear = new Date().getFullYear();
 
-  const headerBlur = useTransform(scrollY, [0, 100], [0, 20]);
-  const headerBorder = useTransform(scrollY, [0, 100], ["rgba(0,0,0,0)", "rgba(0,0,0,0.05)"]);
-
   const handleRefresh = () => {
     setIsRefreshing(true);
     setTimeout(() => {
       setIsRefreshing(false);
-      toast({
-        title: "数据已同步",
-        description: "已获取最新赛事状态",
-      });
+      toast({ title: "数据已同步", description: "已获取最新赛事状态" });
     }, 1200);
   };
 
   return (
-    <div className="min-h-screen selection:bg-blue-500/20">
-      <motion.header
-        style={{ backdropFilter: `blur(${headerBlur}px)`, borderBottomColor: headerBorder }}
-        className="sticky top-0 z-50 w-full glass-effect border-b transition-colors duration-500"
-      >
-        <div className="container max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Map className="w-5 h-5 text-white" />
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-50 w-full glass-effect border-b">
+        <div className="max-w-3xl mx-auto px-5 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
+              <Map className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight leading-none">马拉松日历</h1>
-              <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-blue-500/80">Global Calendar</span>
-            </div>
+            <h1 className="text-base font-bold tracking-tight">马拉松日历</h1>
           </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Link href="/profile">
-              <Button variant="ghost" size="sm" className="rounded-full text-xs font-medium h-8">
-                个人
-              </Button>
+              <Button variant="ghost" size="sm" className="rounded-full text-xs h-8 px-3">个人</Button>
             </Link>
             <Link href="/my-favorites">
-              <Button variant="ghost" size="sm" className="rounded-full text-xs font-medium h-8">
-                收藏
-              </Button>
+              <Button variant="ghost" size="sm" className="rounded-full text-xs h-8 px-3">收藏</Button>
             </Link>
             <Link href="/my-reviews">
-              <Button variant="ghost" size="sm" className="rounded-full text-xs font-medium h-8">
-                评论
-              </Button>
+              <Button variant="ghost" size="sm" className="rounded-full text-xs h-8 px-3">评论</Button>
             </Link>
             <Button
               variant="ghost"
               size="icon"
               onClick={handleRefresh}
-              className="rounded-full hover:bg-secondary transition-all active:scale-90 h-8 w-8"
+              className="rounded-full h-8 w-8 active:scale-90"
               disabled={isRefreshing}
             >
-              <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin text-blue-500" : "text-muted-foreground/60"}`} />
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin text-blue-500" : "text-muted-foreground/50"}`} />
             </Button>
           </div>
         </div>
-      </motion.header>
+      </header>
 
-      <main className="container max-w-6xl mx-auto px-6 pt-12 pb-24">
-        <section className="mb-16">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <h2 className="text-5xl md:text-7xl font-black tracking-tighter mb-4 leading-[0.9]">
-              下一个征程，<br />
-              <span className="text-muted-foreground/30">从这里开始。</span>
-            </h2>
-          </motion.div>
-        </section>
+      <main className="max-w-3xl mx-auto px-5 pt-8 pb-20">
+        <motion.p
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-xl font-bold tracking-tight mb-8"
+        >
+          发现你的下一场比赛
+        </motion.p>
 
-        <div className="sticky top-[72px] z-40 mb-12">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="p-1.5 bg-secondary/80 backdrop-blur-2xl rounded-2xl border flex shadow-2xl shadow-black/[0.02]">
+        <div className="sticky top-[60px] z-40 pb-5 -mx-5 px-5 glass-effect">
+          <div className="flex gap-3 items-center">
+            <div className="p-1 bg-secondary/60 rounded-xl flex shrink-0">
               {[
-                { id: "China", label: "中国境内" },
-                { id: "Overseas", label: "全球海外" }
+                { id: "China", label: "国内" },
+                { id: "Overseas", label: "海外" }
               ].map((opt) => (
                 <button
                   key={opt.id}
                   onClick={() => setRegion(opt.id as any)}
-                  className={`relative px-8 py-2.5 rounded-[14px] text-sm font-bold transition-all duration-500 ${
+                  className={`relative px-5 py-2 rounded-lg text-[13px] font-semibold transition-all ${
                     region === opt.id
-                    ? "text-blue-500"
+                    ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {region === opt.id && (
                     <motion.div
                       layoutId="active-tab"
-                      className="absolute inset-0 bg-white dark:bg-zinc-800 rounded-[14px] shadow-sm"
-                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                      className="absolute inset-0 bg-white dark:bg-zinc-800 rounded-lg shadow-sm"
+                      transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
                     />
                   )}
                   <span className="relative z-10">{opt.label}</span>
@@ -127,13 +102,13 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="relative flex-1 group">
-              <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40 group-focus-within:text-blue-500 transition-colors duration-500" />
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40" />
               <Input
-                placeholder="搜索赛事名称或城市..."
+                placeholder="搜索赛事或城市..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-12 h-12 bg-secondary/80 border-transparent focus:bg-white dark:focus:bg-zinc-900 focus:ring-[6px] focus:ring-blue-500/5 rounded-2xl transition-all duration-500 placeholder:text-muted-foreground/30 shadow-2xl shadow-black/[0.02]"
+                className="pl-9 h-10 bg-secondary/60 border-0 rounded-xl text-sm placeholder:text-muted-foreground/30 focus-visible:ring-1 focus-visible:ring-blue-500/30"
               />
             </div>
           </div>
@@ -142,11 +117,7 @@ export default function Home() {
         <MarathonTable
           region={region}
           searchQuery={searchQuery}
-          filters={{
-            year: currentYear,
-            sortBy: "raceDate",
-            sortOrder: "asc",
-          }}
+          filters={{ year: currentYear, sortBy: "raceDate", sortOrder: "asc" }}
           favoriteMarathonIds={favoriteMarathonIds}
         />
       </main>
