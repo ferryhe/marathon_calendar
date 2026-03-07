@@ -72,19 +72,21 @@
     border-color: hsl(var(--border));
   }
   body {
-    @apply bg-background text-foreground antialiased selection:bg-blue-500/30;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     letter-spacing: -0.015em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
 /* Glassmorphism utilities */
 .glass-effect {
-  @apply bg-background/70 backdrop-blur-xl border-white/10;
-}
-
-.dark .glass-effect {
-  @apply bg-black/40 backdrop-blur-xl border-white/5;
+  background-color: hsla(var(--background), 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid hsla(var(--foreground), 0.05);
 }
 
 /* Custom Scrollbar */
@@ -92,8 +94,12 @@
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  @apply bg-transparent;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/40 transition-colors;
+  background: hsla(var(--muted-foreground), 0.2);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsla(var(--muted-foreground), 0.4);
 }
