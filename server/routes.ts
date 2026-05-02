@@ -28,6 +28,7 @@ import { log } from "./logger";
 import { hashPassword, verifyPassword } from "./auth";
 import {
   AUTO_UPDATE_DISABLED_NEXT_CHECK_AT,
+  archivePastEditions,
   isAutoUpdateDisabled,
   syncMarathonSourceOnce,
   syncNowOnce,
@@ -1152,6 +1153,24 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/marathons/archive-past", async (_req, res, next) => {
+    try {
+      ensureDatabase();
+      const archivedCount = await archivePastEditions();
+      res.json({
+        data: {
+          archivedCount,
+          message:
+            archivedCount > 0
+              ? `已将 ${archivedCount} 条已过赛日的届次归档为「已完赛」`
+              : "无需归档：所有届次状态已是最新",
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/marathons/refresh", async (_req, res, next) => {
     try {
       ensureDatabase();
@@ -1574,6 +1593,37 @@ export async function registerRoutes(
         .where(sql`${marathonSyncRuns.startedAt} >= ${since24h}`)
         .groupBy(marathonSyncRuns.status);
 
+      // 数据健康度指标 (P4)
+      // 注意：marathons 表没有 publishStatus（在 editions 上）；marathon_sources
+      // 没有 autoUpdateEnabled / lastSyncedAt——autoUpdate 由 nextCheckAt 是否
+      // 等于哨兵值 AUTO_UPDATE_DISABLED_NEXT_CHECK_AT 派生；新鲜度看 lastCheckedAt。
+      const stale30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const disabledSentinel = AUTO_UPDATE_DISABLED_NEXT_CHECK_AT;
+
+      const [marathonHealth] = await database
+        .select({
+          total: sql<number>`count(*)::int`,
+          published: sql<number>`(select count(distinct ${marathonEditions.marathonId})::int from ${marathonEditions} where ${marathonEditions.publishStatus} = 'published')`,
+        })
+        .from(marathons);
+
+      const [editionHealth] = await database
+        .select({
+          total: sql<number>`count(*)::int`,
+          pendingDate: sql<number>`sum(case when ${marathonEditions.raceDate} is null then 1 else 0 end)::int`,
+          openWithoutUrl: sql<number>`sum(case when ${marathonEditions.registrationStatus} = '报名中' and (${marathonEditions.registrationUrl} is null or ${marathonEditions.registrationUrl} = '') then 1 else 0 end)::int`,
+          finished: sql<number>`sum(case when ${marathonEditions.registrationStatus} = '已完赛' then 1 else 0 end)::int`,
+        })
+        .from(marathonEditions);
+
+      const [bindingHealth] = await database
+        .select({
+          total: sql<number>`count(*)::int`,
+          autoUpdate: sql<number>`sum(case when ${marathonSources.nextCheckAt} is null or ${marathonSources.nextCheckAt} <> ${disabledSentinel} then 1 else 0 end)::int`,
+          stale30d: sql<number>`sum(case when (${marathonSources.nextCheckAt} is null or ${marathonSources.nextCheckAt} <> ${disabledSentinel}) and (${marathonSources.lastCheckedAt} is null or ${marathonSources.lastCheckedAt} < ${stale30d}) then 1 else 0 end)::int`,
+        })
+        .from(marathonSources);
+
       res.json({
         data: {
           now: now.toISOString(),
@@ -1591,6 +1641,23 @@ export async function registerRoutes(
           },
           runs: {
             last24hByStatus: runsLast24hByStatus,
+          },
+          health: {
+            marathons: {
+              total: marathonHealth?.total ?? 0,
+              published: marathonHealth?.published ?? 0,
+            },
+            editions: {
+              total: editionHealth?.total ?? 0,
+              pendingDate: editionHealth?.pendingDate ?? 0,
+              openWithoutUrl: editionHealth?.openWithoutUrl ?? 0,
+              finished: editionHealth?.finished ?? 0,
+            },
+            bindings: {
+              total: bindingHealth?.total ?? 0,
+              autoUpdate: bindingHealth?.autoUpdate ?? 0,
+              stale30d: bindingHealth?.stale30d ?? 0,
+            },
           },
         },
       });

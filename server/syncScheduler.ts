@@ -743,6 +743,30 @@ async function syncSources() {
   }
 }
 
+export async function archivePastEditions(): Promise<number> {
+  ensureDatabase();
+  const result = await pool!.query(`
+    UPDATE marathon_editions e
+    SET registration_status = '已完赛',
+        field_sources = COALESCE(e.field_sources, '{}'::jsonb) || jsonb_build_object(
+          'registrationStatus', jsonb_build_object(
+            'source','auto_archive',
+            'rule','race_date < CURRENT_DATE',
+            'at', NOW()::text
+          )
+        ),
+        updated_at = NOW()
+    WHERE e.race_date < CURRENT_DATE - INTERVAL '1 day'
+      AND e.registration_status NOT IN ('已完赛','已结束','已取消')
+    RETURNING e.id
+  `);
+  const count = result.rowCount ?? 0;
+  if (count > 0) {
+    log(`Auto-archived ${count} past edition(s) to 已完赛.`, "sync");
+  }
+  return count;
+}
+
 export async function syncNowOnce() {
   const release = await tryAcquireSchedulerLock();
   if (!release) {
@@ -750,6 +774,12 @@ export async function syncNowOnce() {
     return;
   }
   try {
+    try {
+      await archivePastEditions();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      log(`archivePastEditions failed: ${message}`, "sync");
+    }
     await syncSources();
   } finally {
     await release();

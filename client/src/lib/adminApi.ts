@@ -152,6 +152,20 @@ export type AdminStats = {
   runs: {
     last24hByStatus: Array<{ status: string; count: number }>;
   };
+  health: {
+    marathons: { total: number; published: number };
+    editions: {
+      total: number;
+      pendingDate: number;
+      openWithoutUrl: number;
+      finished: number;
+    };
+    bindings: {
+      total: number;
+      autoUpdate: number;
+      stale30d: number;
+    };
+  };
 };
 
 export async function listAdminSources(token: string) {

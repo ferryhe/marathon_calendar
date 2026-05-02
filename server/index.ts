@@ -129,8 +129,10 @@ app.use((req, res, next) => {
 (async () => {
   await registerRoutes(httpServer, app);
   const schedulerEnabled =
-    process.env.SYNC_SCHEDULER_ENABLED === "true" ||
-    process.env.NODE_ENV === "production";
+    process.env.SYNC_SCHEDULER_ENABLED !== "false" &&
+    (process.env.SYNC_SCHEDULER_ENABLED === "true" ||
+      process.env.NODE_ENV === "production" ||
+      process.env.NODE_ENV === "development");
   const intervalMsEnv = process.env.SYNC_SCHEDULER_INTERVAL_MS;
   const intervalMs = intervalMsEnv ? Number(intervalMsEnv) : undefined;
   const stopScheduler = schedulerEnabled

@@ -1133,6 +1133,106 @@ export default function AdminDataPage() {
                         ))}
                       </div>
                     </div>
+
+                    <div
+                      className="rounded-xl border p-3 space-y-3"
+                      data-testid="card-data-health"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-medium">数据健康度</div>
+                        <span className="text-xs text-muted-foreground">
+                          公开数据完整性指标
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        <div className="rounded-lg border p-2">
+                          <div className="text-xs text-muted-foreground">赛事总数</div>
+                          <div
+                            className="text-base font-semibold mt-1"
+                            data-testid="text-health-marathons-total"
+                          >
+                            {stats?.health?.marathons.total ?? "-"}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-1">
+                            含已发布届次 {stats?.health?.marathons.published ?? "-"}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border p-2">
+                          <div className="text-xs text-muted-foreground">届次总数</div>
+                          <div
+                            className="text-base font-semibold mt-1"
+                            data-testid="text-health-editions-total"
+                          >
+                            {stats?.health?.editions.total ?? "-"}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-1">
+                            已完赛 {stats?.health?.editions.finished ?? "-"}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border p-2">
+                          <div className="text-xs text-muted-foreground">待公布日期</div>
+                          <div
+                            className="text-base font-semibold mt-1"
+                            data-testid="text-health-pending-date"
+                          >
+                            {stats?.health?.editions.pendingDate ?? "-"}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-1">
+                            届次中 raceDate 为空
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border p-2">
+                          <div className="text-xs text-muted-foreground">报名中无 URL</div>
+                          <div
+                            className={`text-base font-semibold mt-1 ${
+                              (stats?.health?.editions.openWithoutUrl ?? 0) > 0
+                                ? "text-destructive"
+                                : ""
+                            }`}
+                            data-testid="text-health-open-without-url"
+                          >
+                            {stats?.health?.editions.openWithoutUrl ?? "-"}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-1">
+                            状态=报名中 但缺报名链接
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border p-2">
+                          <div className="text-xs text-muted-foreground">第三方绑定</div>
+                          <div
+                            className="text-base font-semibold mt-1"
+                            data-testid="text-health-bindings-total"
+                          >
+                            {stats?.health?.bindings.total ?? "-"}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-1">
+                            自动更新 {stats?.health?.bindings.autoUpdate ?? "-"}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border p-2">
+                          <div className="text-xs text-muted-foreground">陈旧绑定</div>
+                          <div
+                            className={`text-base font-semibold mt-1 ${
+                              (stats?.health?.bindings.stale30d ?? 0) > 0
+                                ? "text-destructive"
+                                : ""
+                            }`}
+                            data-testid="text-health-stale-bindings"
+                          >
+                            {stats?.health?.bindings.stale30d ?? "-"}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-1">
+                            自动更新但 30 天未抓取
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </>
                 )}
               </CardContent>
