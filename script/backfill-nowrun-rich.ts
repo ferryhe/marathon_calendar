@@ -24,6 +24,7 @@ const OFFSET = (() => {
   const m = process.argv.find((a) => a.startsWith("--offset="));
   return m ? parseInt(m.split("=")[1], 10) : 0;
 })();
+const ONLY_NEW = process.argv.includes("--only-new");
 
 const DB_URL = process.env.TARGET_DB_URL || process.env.DATABASE_URL;
 if (!DB_URL) {
@@ -374,6 +375,13 @@ interface RowToBackfill {
 
 async function loadTargets(): Promise<RowToBackfill[]> {
   const where = ONLY_URL ? `AND ms.source_url = $1` : ``;
+  // --only-new: skip editions that already have rich data (certification_grade
+  // is the most reliable "was this run before?" sentinel since every parse
+  // populates it for any A/B/C race; unmatched races stay null but we'd
+  // re-process them which is fine — they're rare).
+  const onlyNewClause = ONLY_NEW
+    ? `AND m.certification_grade IS NULL AND e.distance_options IS NULL`
+    : ``;
   const params = ONLY_URL ? [ONLY_URL] : [];
   const r = await pool.query(
     `SELECT m.id AS marathon_id, e.id AS edition_id, e.year, ms.source_url, m.name
@@ -383,6 +391,7 @@ async function loadTargets(): Promise<RowToBackfill[]> {
      WHERE ms.source_url LIKE 'https://www.nowrun.cn/race/%'
        AND e.year = 2026
        ${where}
+       ${onlyNewClause}
      ORDER BY ms.source_url`,
     params,
   );

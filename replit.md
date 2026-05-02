@@ -155,6 +155,22 @@ Used `webSearch` to find authoritative race dates / registration windows / offic
 
 PR-1 已完成。Tier B/C 字段（city_guide / weather / lottery_history / race_start_time）留待后续 PR。
 
+### 2026-05-02 NowRun 缺源回填（PR-1.5）
+
+针对原本没有 NowRun 源的 69 个赛事（44 国内 + 25 海外），补绑+回填。
+
+**绑定脚本**：`script/bind-nowrun-extra.ts`
+- 抓 NowRun 主页 492 个赛事链接（仅国内），写入 `/tmp/nowrun-races-unique.tsv`。
+- `score(candidate, entry)` 多因子打分：距离类型必须一致 / 年份一致 / 城市命中 OR 名称词干命中（`nameStem` 去掉年份/届次/标点/距离后缀），加上长度相似性微调。阈值 80。
+- `classify()` 拒绝非马拉松（如 10公里精英赛、嘉年华、越野）。
+- CLI: `--apply` 实际写入；默认 dry-run。
+- 44 国内候选中匹配 31 个，剩 13 个跳过原因：1 个 10K 赛、1 个嘉年华、2 个 NowRun 没收录（秦皇岛/长白山）、9 个 2027 届（NowRun 主页只有 2026）。
+- 25 海外候选全跳过（NowRun 主页是国内列表，柏林/东京/纽约都没有）。
+
+**增量回填**：`backfill-nowrun-rich.ts` 加 `--only-new` 标志（过滤 `certification_grade IS NULL AND distance_options IS NULL`），dev/prod 各跑 31 条全成功。
+
+**最终库存**：365/378 国内赛事有 NowRun 源（96.6%），365 条 2026 届次 distance_options 全覆盖。
+
 ## Known Limitations / Future Work
 
 - `MarathonTable.tsx` line 153-157 无条件过滤 race_date<today 的赛事，导致批次 h 的 57 个春季历史赛事在前端不可见。如需让用户能搜索到 "石家庄马拉松" 等历史赛事，应在 Home.tsx 加 `showPast` 状态 + 状态筛选器加上 `已完赛` 选项 + 把 prop 传给 MarathonTable 让 line 156 条件化。
