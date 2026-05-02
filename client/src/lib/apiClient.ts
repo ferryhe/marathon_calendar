@@ -86,7 +86,11 @@ export interface MyReviewDTO extends ReviewDTO {
   marathon: {
     id: string;
     name: string;
+    nameZh: string | null;
+    nameEn: string | null;
     city: string | null;
+    cityZh: string | null;
+    cityEn: string | null;
     country: string | null;
   };
 }
@@ -97,7 +101,11 @@ export interface FavoriteMarathonDTO {
   marathon: {
     id: string;
     name: string;
+    nameZh: string | null;
+    nameEn: string | null;
     city: string | null;
+    cityZh: string | null;
+    cityEn: string | null;
     country: string | null;
     websiteUrl: string | null;
     description: string | null;

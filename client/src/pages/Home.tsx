@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
-import { Heart, MessageSquare, RefreshCw, Search, SlidersHorizontal, User, X } from "lucide-react";
+import { Heart, Languages, MessageSquare, RefreshCw, Search, SlidersHorizontal, User, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { MarathonTable } from "@/components/MarathonTable";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -25,22 +26,30 @@ type SyncStatus = {
   last24h: Array<{ status: string; count: number }>;
 };
 
-function formatRelativeTime(iso: string | null): string | null {
+function useRelativeTime(iso: string | null): string | null {
+  const { t } = useTranslation();
   if (!iso) return null;
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return null;
   const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (diffSec < 60) return "刚刚更新";
+  if (diffSec < 60) return t("header.lastUpdated.justNow");
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} 分钟前更新`;
+  if (diffMin < 60) return t("header.lastUpdated.minutesAgo", { count: diffMin });
   const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `${diffHour} 小时前更新`;
+  if (diffHour < 24) return t("header.lastUpdated.hoursAgo", { count: diffHour });
   const diffDay = Math.floor(diffHour / 24);
-  if (diffDay < 30) return `${diffDay} 天前更新`;
+  if (diffDay < 30) return t("header.lastUpdated.daysAgo", { count: diffDay });
   return null;
 }
 
+const STATUS_KEY: Record<string, string> = {
+  报名中: "status.registering",
+  即将开始: "status.openingSoon",
+  已截止: "status.closed",
+};
+
 export default function Home() {
+  const { t, i18n } = useTranslation();
   const [region, setRegion] = useState<"China" | "Overseas" | "WMM">("China");
   const [searchQuery, setSearchQuery] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
@@ -65,7 +74,7 @@ export default function Home() {
   const syncStatus = syncStatusResp?.data;
 
   useEffect(() => {
-    const id = setInterval(() => setNowTick((t) => t + 1), 30_000);
+    const id = setInterval(() => setNowTick((tick) => tick + 1), 30_000);
     return () => clearInterval(id);
   }, []);
 
@@ -75,12 +84,12 @@ export default function Home() {
       setIsUpdating(false);
       queryClient.invalidateQueries({ queryKey: ["/api/marathons"] });
       queryClient.invalidateQueries({ queryKey: ["/api/marathons/upcoming"] });
-      toast({ title: "数据已更新", duration: 1200 });
+      toast({ title: t("common.dataUpdated"), duration: 1200 });
     }
     wasRunningRef.current = syncStatus.isRunning;
-  }, [syncStatus, queryClient, toast]);
+  }, [syncStatus, queryClient, toast, t]);
 
-  const lastUpdatedText = formatRelativeTime(syncStatus?.lastFinishedAt ?? null);
+  const lastUpdatedText = useRelativeTime(syncStatus?.lastFinishedAt ?? null);
 
   const favoriteMarathonIds = useMemo(
     () => new Set(favorites.map((item) => item.marathon.id)),
@@ -102,8 +111,8 @@ export default function Home() {
   }, [currentUser, viewMode]);
 
   useEffect(() => {
-    document.title = viewMode === "mine" ? "我的收藏 - 马拉松日历" : "马拉松日历";
-  }, [viewMode]);
+    document.title = viewMode === "mine" ? t("app.titleFavorites") : t("app.title");
+  }, [viewMode, t, i18n.language]);
 
   const handleUpdate = async () => {
     if (isUpdating) return;
@@ -113,27 +122,27 @@ export default function Home() {
       const body = (await res.json()) as { data: { status: string; message?: string } };
       const status = body?.data?.status;
       if (status === "started") {
-        toast({ title: "正在获取最新数据…", duration: 1500 });
+        toast({ title: t("common.fetchingLatest"), duration: 1500 });
         queryClient.invalidateQueries({ queryKey: ["/api/marathons/sync-status"] });
       } else if (status === "in_progress") {
-        toast({ title: "数据同步进行中", duration: 1500 });
+        toast({ title: t("common.syncInProgress"), duration: 1500 });
         queryClient.invalidateQueries({ queryKey: ["/api/marathons/sync-status"] });
       } else {
-        toast({ title: body?.data?.message ?? "请稍候再试", duration: 1500 });
+        toast({ title: body?.data?.message ?? t("common.tryAgainLater"), duration: 1500 });
         setIsUpdating(false);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "更新失败";
+      const message = error instanceof Error ? error.message : t("common.updateFailed");
       const match = message.match(/^(\d+):\s*(.*)$/);
       if (match && match[1] === "429") {
         try {
           const payload = JSON.parse(match[2]) as { data?: { message?: string } };
-          toast({ title: payload?.data?.message ?? "请稍候再试", duration: 1500 });
+          toast({ title: payload?.data?.message ?? t("common.tryAgainLater"), duration: 1500 });
         } catch {
-          toast({ title: "请稍候再试", duration: 1500 });
+          toast({ title: t("common.tryAgainLater"), duration: 1500 });
         }
       } else {
-        toast({ title: "更新失败", description: message, duration: 2000 });
+        toast({ title: t("common.updateFailed"), description: message, duration: 2000 });
       }
       setIsUpdating(false);
     }
@@ -146,8 +155,8 @@ export default function Home() {
     }
     if (!currentUser) {
       toast({
-        title: "请先登录",
-        description: "登录后可查看收藏赛事",
+        title: t("common.loginRequired"),
+        description: t("common.loginRequiredHint"),
         duration: 1000,
       });
       return;
@@ -163,6 +172,22 @@ export default function Home() {
     setSearchQuery("");
   };
 
+  const toggleLanguage = () => {
+    const next = i18n.language?.startsWith("en") ? "zh" : "en";
+    void i18n.changeLanguage(next);
+  };
+  const otherLangLabel = i18n.language?.startsWith("en") ? "中" : "EN";
+
+  const monthSuffix = t("filters.monthSuffix");
+  const renderMonthOption = (m: number) =>
+    monthSuffix ? `${m} ${monthSuffix}` : String(m);
+  const monthBadge = monthFilter !== "all"
+    ? (monthSuffix ? `${monthFilter} ${monthSuffix}` : `${monthFilter}`)
+    : null;
+
+  const statusBadgeLabel = (raw: string) =>
+    STATUS_KEY[raw] ? t(STATUS_KEY[raw]) : raw;
+
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 glass-header border-b">
@@ -176,25 +201,36 @@ export default function Home() {
               />
               <div className="flex flex-col min-w-0 leading-tight">
                 <h1 className="text-base font-semibold truncate" data-testid="text-app-title">
-                  马拉松日历
+                  {t("app.title")}
                 </h1>
                 {(lastUpdatedText || syncStatus?.isRunning) && (
                   <span
                     className="text-[10px] text-muted-foreground truncate"
                     data-testid="text-last-updated"
                   >
-                    {syncStatus?.isRunning ? "正在更新…" : lastUpdatedText}
+                    {syncStatus?.isRunning ? t("header.lastUpdated.syncing") : lastUpdatedText}
                   </span>
                 )}
               </div>
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
+              <button
+                className="h-8 px-2 rounded-lg flex items-center justify-center text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+                onClick={toggleLanguage}
+                data-testid="button-language-toggle"
+                title={i18n.language?.startsWith("en") ? "切换到中文" : "Switch to English"}
+                aria-label={i18n.language?.startsWith("en") ? "切换到中文" : "Switch to English"}
+                aria-pressed={i18n.language?.startsWith("en")}
+              >
+                <Languages className="w-[16px] h-[16px] mr-1" />
+                {otherLangLabel}
+              </button>
               <Link href="/my-favorites">
                 <button
                   className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
                   data-testid="link-my-favorites"
-                  title="我的收藏"
+                  title={t("header.myFavorites")}
                 >
                   <Heart className="w-[18px] h-[18px]" />
                 </button>
@@ -203,7 +239,7 @@ export default function Home() {
                 <button
                   className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
                   data-testid="link-my-reviews"
-                  title="我的评论"
+                  title={t("header.myReviews")}
                 >
                   <MessageSquare className="w-[18px] h-[18px]" />
                 </button>
@@ -212,7 +248,7 @@ export default function Home() {
                 <button
                   className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
                   data-testid="link-profile"
-                  title="个人资料"
+                  title={t("header.profile")}
                 >
                   <User className="w-[18px] h-[18px]" />
                 </button>
@@ -222,7 +258,7 @@ export default function Home() {
                 onClick={handleUpdate}
                 disabled={isUpdating}
                 data-testid="button-refresh"
-                title="刷新数据"
+                title={t("header.refresh")}
               >
                 <RefreshCw className={`w-[18px] h-[18px] ${isUpdating ? "animate-spin" : ""}`} />
               </button>
@@ -244,21 +280,21 @@ export default function Home() {
                 className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
                 data-testid="tab-china"
               >
-                大陆赛事
+                {t("tabs.china")}
               </TabsTrigger>
               <TabsTrigger
                 value="Overseas"
                 className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
                 data-testid="tab-overseas"
               >
-                其他赛事
+                {t("tabs.overseas")}
               </TabsTrigger>
               <TabsTrigger
                 value="WMM"
                 className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
                 data-testid="tab-wmm"
               >
-                大满贯
+                {t("tabs.wmm")}
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -271,7 +307,7 @@ export default function Home() {
             }`}
             onClick={handleToggleMine}
             data-testid="button-toggle-mine"
-            title={viewMode === "mine" ? "显示全部赛事" : "只看收藏"}
+            title={viewMode === "mine" ? t("tabs.showAll") : t("tabs.showFavorites")}
           >
             <Heart className={`w-[18px] h-[18px] ${viewMode === "mine" ? "fill-current" : ""}`} />
           </button>
@@ -288,7 +324,7 @@ export default function Home() {
             data-testid="button-toggle-filters"
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            筛选
+            {t("filters.title")}
             {hasActiveFilters && (
               <span className="w-1.5 h-1.5 rounded-full bg-primary" />
             )}
@@ -300,7 +336,7 @@ export default function Home() {
               data-testid="button-clear-filters"
             >
               <X className="w-3 h-3" />
-              清除
+              {t("filters.clear")}
             </button>
           )}
           {hasActiveFilters && !filtersOpen && (
@@ -308,15 +344,15 @@ export default function Home() {
               {searchQuery && (
                 <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{searchQuery}</span>
               )}
-              {monthFilter !== "all" && (
-                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{monthFilter}月</span>
+              {monthBadge && (
+                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{monthBadge}</span>
               )}
               {statusFilter !== "all" && (
-                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{statusFilter}</span>
+                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{statusBadgeLabel(statusFilter)}</span>
               )}
               {sortBy !== "raceDate" && (
                 <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">
-                  {sortBy === "name" ? "按名称" : "按最新"}
+                  {sortBy === "name" ? t("filters.byName") : t("filters.byLatest")}
                 </span>
               )}
             </div>
@@ -337,7 +373,7 @@ export default function Home() {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     type="search"
-                    placeholder="搜索赛事名称或城市..."
+                    placeholder={t("filters.search")}
                     className="pl-9 bg-secondary/30 border-0 rounded-xl h-9 text-sm focus-visible:ring-1 focus-visible:ring-primary/20"
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
@@ -348,13 +384,13 @@ export default function Home() {
                 <div className="grid grid-cols-3 gap-2">
                   <Select value={monthFilter} onValueChange={setMonthFilter}>
                     <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-9 text-sm" data-testid="select-month">
-                      <SelectValue placeholder="月份" />
+                      <SelectValue placeholder={t("filters.month")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">全部月份</SelectItem>
+                      <SelectItem value="all">{t("filters.allMonths")}</SelectItem>
                       {Array.from({ length: 12 }, (_, i) => (
                         <SelectItem key={i + 1} value={`${i + 1}`}>
-                          {i + 1} 月
+                          {renderMonthOption(i + 1)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -362,25 +398,25 @@ export default function Home() {
 
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
                     <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-9 text-sm" data-testid="select-status">
-                      <SelectValue placeholder="状态" />
+                      <SelectValue placeholder={t("filters.status")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">全部状态</SelectItem>
-                      <SelectItem value="报名中">报名中</SelectItem>
-                      <SelectItem value="即将开始">即将开始</SelectItem>
-                      <SelectItem value="已截止">已截止</SelectItem>
+                      <SelectItem value="all">{t("filters.allStatuses")}</SelectItem>
+                      <SelectItem value="报名中">{t("status.registering")}</SelectItem>
+                      <SelectItem value="即将开始">{t("status.openingSoon")}</SelectItem>
+                      <SelectItem value="已截止">{t("status.closed")}</SelectItem>
                     </SelectContent>
                   </Select>
 
                   <div className="flex gap-1.5">
                     <Select value={sortBy} onValueChange={(value) => setSortBy(value as "raceDate" | "name" | "createdAt")}>
                       <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-9 text-sm flex-1" data-testid="select-sort">
-                        <SelectValue placeholder="排序" />
+                        <SelectValue placeholder={t("filters.sort")} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="raceDate">按时间</SelectItem>
-                        <SelectItem value="name">按名称</SelectItem>
-                        <SelectItem value="createdAt">按最新</SelectItem>
+                        <SelectItem value="raceDate">{t("filters.sortByDate")}</SelectItem>
+                        <SelectItem value="name">{t("filters.sortByName")}</SelectItem>
+                        <SelectItem value="createdAt">{t("filters.sortByLatest")}</SelectItem>
                       </SelectContent>
                     </Select>
 
@@ -388,7 +424,7 @@ export default function Home() {
                       className="w-9 h-9 shrink-0 rounded-xl bg-secondary/30 flex items-center justify-center text-sm text-muted-foreground hover:text-foreground transition-colors"
                       onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
                       data-testid="button-sort-order"
-                      title={sortOrder === "asc" ? "升序" : "降序"}
+                      title={sortOrder === "asc" ? t("filters.sortAsc") : t("filters.sortDesc")}
                     >
                       {sortOrder === "asc" ? "↑" : "↓"}
                     </button>

@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Calendar, ChevronRight, ExternalLink, Loader2, MapPin } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { useMarathons } from "@/hooks/useMarathons";
 import { EventDetails } from "./EventDetails";
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/pagination";
 import type { MarathonListItem } from "@/lib/apiClient";
 import { isChinaCountry } from "@shared/utils";
+import { pickLocalizedCity, pickLocalizedName, useLocale } from "@/lib/locale";
 
 // Highlight helper component for search terms
 function HighlightText({ text, highlight }: { text: string; highlight: string }) {
@@ -61,6 +63,8 @@ interface MarathonWithDate extends MarathonListItem {
   month: number;
   day: number;
   registrationStatus: string;
+  localizedName: string;
+  localizedCity: string | null;
 }
 
 type MarathonTableView =
@@ -80,6 +84,23 @@ function getStatusBadgeStyle(status: string) {
   return "bg-muted text-muted-foreground border-0 text-[10px] px-2 h-5";
 }
 
+function translateStatus(status: string, t: (k: string) => string): string {
+  switch (status) {
+    case "报名中":
+      return t("status.registering");
+    case "即将开始":
+      return t("status.openingSoon");
+    case "已截止":
+      return t("status.closed");
+    case "已完赛":
+      return t("status.finished");
+    case "待更新":
+      return t("status.pending");
+    default:
+      return status;
+  }
+}
+
 export function MarathonTable({
   region,
   searchQuery,
@@ -90,6 +111,8 @@ export function MarathonTable({
   externalPage,
   onPageChange,
 }: MarathonTableProps) {
+  const { t, i18n } = useTranslation();
+  const locale = useLocale();
   const [selectedEvent, setSelectedEvent] = useState<MarathonListItem | null>(null);
   const [page, setPage] = useState(1);
   const currentPage = externalPage ?? page;
@@ -131,6 +154,10 @@ export function MarathonTable({
     prevFiltersRef.current = { searchQuery, region, filters };
   }, [searchQuery, region, filters]);
 
+  const weekdays = t("list.weekdays", { returnObjects: true }) as string[];
+  const weekdayPrefix = t("list.weekdayPrefix");
+  const locationFallback = t("list.locationFallback");
+
   const view = useMemo<MarathonTableView>(() => {
     if (!data?.data) return { mode: "grouped", groups: {}, tbd: [] };
 
@@ -145,7 +172,6 @@ export function MarathonTable({
         if (region === "Overseas" && isChinaCountry(marathon.country)) {
           return false;
         }
-        // 大满贯：服务端已用 ID 列表过滤，客户端无需再筛 country。
         if (showMineOnly && !favoriteMarathonIds.has(marathon.id)) {
           return false;
         }
@@ -158,16 +184,19 @@ export function MarathonTable({
       })
       .reduce(
         (acc, marathon) => {
+          const localizedName = pickLocalizedName(marathon, locale);
+          const localizedCity = pickLocalizedCity(marathon, locale);
           const editionDate = marathon.nextEdition?.raceDate;
           if (!editionDate) {
             acc.tbd.push({
               ...marathon,
-              // Keep a stable date to avoid crashing UI; we render it as TBD.
               displayDate: new Date(marathon.createdAt),
               year: filters.year,
               month: 0,
               day: 0,
               registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
+              localizedName,
+              localizedCity,
             } as MarathonWithDate);
             return acc;
           }
@@ -180,13 +209,14 @@ export function MarathonTable({
             month: displayDate.getMonth() + 1,
             day: displayDate.getDate(),
             registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
+            localizedName,
+            localizedCity,
           } as MarathonWithDate);
           return acc;
         },
         { dated: [] as MarathonWithDate[], tbd: [] as MarathonWithDate[] },
       );
 
-    // When the API is sorting by name, preserve the server ordering (avoid reordering paginated results).
     if (filters.sortBy !== "raceDate") {
       return { mode: "flat", events: dated, tbd };
     }
@@ -197,13 +227,13 @@ export function MarathonTable({
 
     const groups: Record<string, MarathonWithDate[]> = {};
     for (const event of sortedByDate) {
-      const key = `${event.year}年${event.month}月`;
+      const key = t("list.monthYear", { year: event.year, month: event.month });
       if (!groups[key]) groups[key] = [];
       groups[key].push(event);
     }
 
     return { mode: "grouped", groups, tbd };
-  }, [data, region, showMineOnly, favoriteMarathonIds, filters.sortBy]);
+  }, [data, region, showMineOnly, favoriteMarathonIds, filters.sortBy, filters.year, locale, t]);
 
   if (isLoading || (showMineOnly && favoritesLoading)) {
     return (
@@ -219,7 +249,7 @@ export function MarathonTable({
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-destructive/10 mb-4">
           <Calendar className="w-8 h-8 text-destructive" />
         </div>
-        <p className="text-destructive font-medium">加载赛事数据失败</p>
+        <p className="text-destructive font-medium">{t("list.loadFailed")}</p>
         <p className="text-sm text-muted-foreground mt-2">{(error as Error).message}</p>
       </div>
     );
@@ -229,12 +259,42 @@ export function MarathonTable({
     view.mode === "grouped"
       ? Object.keys(view.groups).length > 0 || view.tbd.length > 0
       : view.events.length > 0 || view.tbd.length > 0;
-  const emptyTitle = showMineOnly ? "你还没有收藏赛事" : "未找到相关马拉松赛事";
+  const emptyTitle = showMineOnly ? t("list.emptyFavorites") : t("list.emptyDefault");
   const emptyHint = showMineOnly
-    ? "可在赛事详情或弹窗中点击“收藏赛事”后再查看"
+    ? t("list.emptyFavoritesHint")
     : searchQuery
-      ? "尝试使用不同的搜索关键词"
+      ? t("list.emptySearchHint")
       : "";
+
+  // Header label for grouped month: derive both parts from the data, not from the formatted string,
+  // so EN and ZH layouts both work cleanly.
+  const renderMonthHeader = (events: MarathonWithDate[]) => {
+    const sample = events[0];
+    if (!sample) return null;
+    if (i18n.language?.startsWith("en")) {
+      const monthName = new Date(sample.year, sample.month - 1, 1).toLocaleString("en-US", { month: "short" });
+      return (
+        <div className="flex items-baseline gap-2 md:flex-col md:items-start md:gap-0">
+          <span className="text-3xl font-black tracking-tighter text-foreground/20 md:text-4xl">
+            {monthName}
+          </span>
+          <span className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/50 md:mt-1">
+            {sample.year}
+          </span>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-baseline gap-2 md:flex-col md:items-start md:gap-0">
+        <span className="text-3xl font-black tracking-tighter text-foreground/20 md:text-4xl">
+          {sample.month}
+        </span>
+        <span className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/50 md:mt-1">
+          {sample.year}年
+        </span>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-12">
@@ -248,21 +308,12 @@ export function MarathonTable({
                   className="relative grid grid-cols-1 md:grid-cols-[100px_1fr] gap-6"
                 >
                   <div className="md:sticky md:top-44 h-fit">
-                    <div className="flex items-baseline gap-2 md:flex-col md:items-start md:gap-0">
-                      <span className="text-3xl font-black tracking-tighter text-foreground/20 md:text-4xl">
-                        {month.split("年")[1].replace("月", "")}
-                      </span>
-                      <span className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/50 md:mt-1">
-                        {month.split("年")[0]}
-                      </span>
-                    </div>
+                    {renderMonthHeader(events)}
                   </div>
 
                   <div className="space-y-3">
                     {events.map((event, index) => {
-                      const weekDay = ["日", "一", "二", "三", "四", "五", "六"][
-                        event.displayDate.getDay()
-                      ];
+                      const weekDay = weekdays[event.displayDate.getDay()];
                       return (
                         <motion.div
                           key={event.id}
@@ -277,17 +328,17 @@ export function MarathonTable({
                             <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
                               <span className="text-lg leading-none">{event.day}</span>
                               <span className="text-[10px] text-muted-foreground uppercase mt-1">
-                                周{weekDay}
+                                {weekdayPrefix}{weekDay}
                               </span>
                             </div>
 
                             <div className="flex-1 min-w-0">
                               <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
-                                <HighlightText text={event.name} highlight={searchQuery} />
+                                <HighlightText text={event.localizedName} highlight={searchQuery} />
                               </h3>
                               <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
                                 <MapPin className="w-3 h-3 flex-shrink-0" />
-                                <span className="truncate"><HighlightText text={event.city || event.country || "待更新"} highlight={searchQuery} /></span>
+                                <span className="truncate"><HighlightText text={event.localizedCity || event.country || locationFallback} highlight={searchQuery} /></span>
                               </div>
                             </div>
                           </div>
@@ -300,7 +351,7 @@ export function MarathonTable({
                                 rel="noreferrer"
                                 className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
                                 onClick={(e) => e.stopPropagation()}
-                                title="打开官网"
+                                title={t("list.openSite")}
                               >
                                 <ExternalLink className="w-4 h-4 text-muted-foreground" />
                               </a>
@@ -309,7 +360,7 @@ export function MarathonTable({
                               variant="default"
                               className={getStatusBadgeStyle(event.registrationStatus)}
                             >
-                              {event.registrationStatus}
+                              {translateStatus(event.registrationStatus, t)}
                             </Badge>
                             <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                           </div>
@@ -322,9 +373,7 @@ export function MarathonTable({
             ) : (
               <div className="space-y-3">
                 {view.events.map((event, index) => {
-                  const weekDay = ["日", "一", "二", "三", "四", "五", "六"][
-                    event.displayDate.getDay()
-                  ];
+                  const weekDay = weekdays[event.displayDate.getDay()];
                   return (
                     <motion.div
                       key={event.id}
@@ -339,17 +388,17 @@ export function MarathonTable({
                         <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
                           <span className="text-lg leading-none">{event.day}</span>
                           <span className="text-[10px] text-muted-foreground uppercase mt-1">
-                            周{weekDay}
+                            {weekdayPrefix}{weekDay}
                           </span>
                         </div>
 
                         <div className="flex-1 min-w-0">
                           <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
-                            <HighlightText text={event.name} highlight={searchQuery} />
+                            <HighlightText text={event.localizedName} highlight={searchQuery} />
                           </h3>
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
                             <MapPin className="w-3 h-3 flex-shrink-0" />
-                            <span className="truncate"><HighlightText text={event.city || event.country || "待更新"} highlight={searchQuery} /></span>
+                            <span className="truncate"><HighlightText text={event.localizedCity || event.country || locationFallback} highlight={searchQuery} /></span>
                           </div>
                         </div>
                       </div>
@@ -362,7 +411,7 @@ export function MarathonTable({
                             rel="noreferrer"
                             className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
                             onClick={(e) => e.stopPropagation()}
-                            title="打开官网"
+                            title={t("list.openSite")}
                           >
                             <ExternalLink className="w-4 h-4 text-muted-foreground" />
                           </a>
@@ -371,7 +420,7 @@ export function MarathonTable({
                           variant="default"
                           className={getStatusBadgeStyle(event.registrationStatus)}
                         >
-                          {event.registrationStatus}
+                          {translateStatus(event.registrationStatus, t)}
                         </Badge>
                         <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                       </div>
@@ -384,10 +433,8 @@ export function MarathonTable({
             {view.tbd.length > 0 ? (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">待确认日期</div>
-                  <div className="text-xs text-muted-foreground">
-                    已收录官网，但具体比赛日期尚未确认
-                  </div>
+                  <div className="text-sm font-semibold">{t("list.tbdTitle")}</div>
+                  <div className="text-xs text-muted-foreground">{t("list.tbdHint")}</div>
                 </div>
                 {view.tbd.map((event, index) => (
                   <motion.div
@@ -402,16 +449,16 @@ export function MarathonTable({
                     <div className="flex items-center gap-5">
                       <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/30 font-bold border border-border/50">
                         <span className="text-lg leading-none">--</span>
-                        <span className="text-[10px] text-muted-foreground uppercase mt-1">待定</span>
+                        <span className="text-[10px] text-muted-foreground uppercase mt-1">{t("list.tbdShort")}</span>
                       </div>
 
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
-                          <HighlightText text={event.name} highlight={searchQuery} />
+                          <HighlightText text={event.localizedName} highlight={searchQuery} />
                         </h3>
                         <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
                           <MapPin className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate"><HighlightText text={event.city || event.country || "待更新"} highlight={searchQuery} /></span>
+                          <span className="truncate"><HighlightText text={event.localizedCity || event.country || locationFallback} highlight={searchQuery} /></span>
                         </div>
                       </div>
                     </div>
@@ -424,13 +471,13 @@ export function MarathonTable({
                           rel="noreferrer"
                           className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
                           onClick={(e) => e.stopPropagation()}
-                          title="打开官网"
+                          title={t("list.openSite")}
                         >
                           <ExternalLink className="w-4 h-4 text-muted-foreground" />
                         </a>
                       ) : null}
                       <Badge variant="secondary" className="text-[10px] px-2 h-5">
-                        {event.registrationStatus}
+                        {translateStatus(event.registrationStatus, t)}
                       </Badge>
                       <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                     </div>
@@ -450,7 +497,6 @@ export function MarathonTable({
         )}
       </AnimatePresence>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div className="mt-8 flex justify-center">
           <Pagination>

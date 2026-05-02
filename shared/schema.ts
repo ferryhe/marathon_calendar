@@ -36,8 +36,14 @@ export const marathons = pgTable(
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     name: text("name").notNull(),
+    // i18n: 双语赛事名 / 城市名。display 时按 locale 选择并静默回退。
+    // name 字段保留作为"主名"（admin 主表显示、API 兼容），新代码优先读 nameZh / nameEn。
+    nameZh: text("name_zh"),
+    nameEn: text("name_en"),
     canonicalName: text("canonical_name").notNull(),
     city: text("city"),
+    cityZh: text("city_zh"),
+    cityEn: text("city_en"),
     country: text("country"),
     description: text("description"),
     websiteUrl: text("website_url"),

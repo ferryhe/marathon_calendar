@@ -40,20 +40,25 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useLocalizedCity, useLocalizedName } from "@/lib/locale";
+import { useTranslation } from "react-i18next";
 
-function formatDate(dateValue?: string | null) {
-  if (!dateValue) return "待更新";
+function formatDate(dateValue: string | null | undefined, lang = "zh", fallback = "—") {
+  if (!dateValue) return fallback;
   const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return "待更新";
-  return date.toLocaleDateString("zh-CN");
+  if (Number.isNaN(date.getTime())) return fallback;
+  return date.toLocaleDateString(lang.startsWith("en") ? "en-US" : "zh-CN");
 }
 
 export default function MarathonDetailPage() {
+  const { t, i18n } = useTranslation();
   const { toast } = useToast();
   const [matched, params] = useRoute("/marathons/:id");
   const marathonId = matched ? params.id : "";
 
   const { data, isLoading, error } = useMarathon(marathonId);
+  const localizedName = useLocalizedName(data ?? {});
+  const localizedCity = useLocalizedCity(data ?? {});
   const { data: reviews = [] } = useMarathonReviews(marathonId);
   const { data: currentUser } = useCurrentUser();
   const { data: favoriteStatus } = useFavoriteStatus(marathonId, !!marathonId);
@@ -103,7 +108,7 @@ export default function MarathonDetailPage() {
       setAuthPassword("");
     } catch (error) {
       toast({
-        title: isRegisterMode ? "注册失败" : "登录失败",
+        title: isRegisterMode ? t("favorites.registerFailed") : t("favorites.loginFailed"),
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -120,7 +125,7 @@ export default function MarathonDetailPage() {
       }
     } catch (error) {
       toast({
-        title: "操作失败",
+        title: t("detail.operationFailed"),
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -150,7 +155,7 @@ export default function MarathonDetailPage() {
       setComment("");
     } catch (error) {
       toast({
-        title: "提交失败",
+        title: t("detail.operationFailed"),
         description: getFriendlyErrorMessage(error),
         variant: "destructive",
       });
@@ -166,16 +171,16 @@ export default function MarathonDetailPage() {
           <Link href="/">
             <Button variant="outline" size="sm" className="rounded-full">
               <ArrowLeft className="w-4 h-4 mr-1" />
-              返回列表
+              {t("detail.back")}
             </Button>
           </Link>
-          <h1 className="text-xl font-bold tracking-tight">赛事详情</h1>
+          <h1 className="text-xl font-bold tracking-tight">{t("detail.title")}</h1>
         </div>
 
         {isLoading && (
           <Card>
             <CardContent className="py-16 text-center text-muted-foreground">
-              正在加载赛事详情...
+              {t("detail.loading")}
             </CardContent>
           </Card>
         )}
@@ -183,7 +188,7 @@ export default function MarathonDetailPage() {
         {error && (
           <Card>
             <CardContent className="py-16 text-center">
-              <p className="text-destructive font-medium">加载赛事详情失败</p>
+              <p className="text-destructive font-medium">{t("detail.loadFailed")}</p>
               <p className="text-sm text-muted-foreground mt-2">{(error as Error).message}</p>
             </CardContent>
           </Card>
@@ -194,11 +199,11 @@ export default function MarathonDetailPage() {
           const officialDocs = latest?.officialDocuments;
           const docLinks: Array<{ label: string; url?: string }> = officialDocs
             ? [
-                { label: "报名须知", url: officialDocs.registrationNotice },
-                { label: "竞赛规程", url: officialDocs.raceRules },
-                { label: "赛道信息", url: officialDocs.courseInfo },
-                { label: "领物指南", url: officialDocs.packetPickup },
-                { label: "官方网站", url: officialDocs.officialWebsite },
+                { label: t("detail.docs.registrationNotice"), url: officialDocs.registrationNotice },
+                { label: t("detail.docs.raceRules"), url: officialDocs.raceRules },
+                { label: t("detail.docs.courseInfo"), url: officialDocs.courseInfo },
+                { label: t("detail.docs.packetPickup"), url: officialDocs.packetPickup },
+                { label: t("detail.docs.officialWebsite"), url: officialDocs.officialWebsite },
               ].filter((d) => !!d.url)
             : [];
           return (
@@ -206,7 +211,7 @@ export default function MarathonDetailPage() {
             <Card>
               <CardHeader className="space-y-3">
                 <div className="flex flex-wrap items-start gap-2 justify-between">
-                  <CardTitle className="text-2xl leading-tight">{data.name}</CardTitle>
+                  <CardTitle className="text-2xl leading-tight">{localizedName}</CardTitle>
                   {data.certificationGrade && (
                     <Badge
                       variant="secondary"
@@ -220,27 +225,27 @@ export default function MarathonDetailPage() {
                       data-testid={`badge-cert-${data.certificationGrade}`}
                     >
                       <Award className="w-3 h-3 mr-1" />
-                      {data.certificationGrade} 类认证
+                      {data.certificationGrade}{t("detail.certificationSuffix")}
                     </Badge>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
                   <span className="inline-flex items-center gap-1">
                     <MapPin className="w-4 h-4" />
-                    {data.city || data.country || "待更新"}
+                    {localizedCity || data.country || t("list.locationFallback")}
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <Calendar className="w-4 h-4" />
-                    最近赛事：{formatDate(latest?.raceDate)}
+                    {t("detail.latestRaceLabel")}{formatDate(latest?.raceDate, i18n.language, t("list.locationFallback"))}
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <Star className="w-4 h-4" />
-                    评分：{reviewStats.average.toFixed(1)} / 5
+                    {t("detail.ratingLabel")}{reviewStats.average.toFixed(1)} / 5
                   </span>
                   {data.organizer && (
                     <span className="inline-flex items-center gap-1">
                       <Users className="w-4 h-4" />
-                      主办：{data.organizer}
+                      {t("detail.organizerLabel")}{data.organizer}
                     </span>
                   )}
                 </div>
@@ -250,16 +255,16 @@ export default function MarathonDetailPage() {
                 {data.description ? (
                   <p className="text-sm leading-relaxed text-foreground/90">{data.description}</p>
                 ) : (
-                  <p className="text-sm text-muted-foreground">暂无赛事简介</p>
+                  <p className="text-sm text-muted-foreground">{t("detail.noIntroAlt")}</p>
                 )}
 
                 <div className="flex flex-wrap gap-2">
                   {data.websiteUrl ? (
                     <a href={data.websiteUrl} target="_blank" rel="noopener noreferrer" className="inline-flex" data-testid="link-website-marathon">
-                      <Button>前往赛事官网</Button>
+                      <Button>{t("detail.openSite")}</Button>
                     </a>
                   ) : (
-                    <Button disabled data-testid="button-no-website-marathon">暂无官网</Button>
+                    <Button disabled data-testid="button-no-website-marathon">{t("detail.noSite")}</Button>
                   )}
                   <Button
                     variant={isFavorited ? "default" : "outline"}
@@ -273,9 +278,9 @@ export default function MarathonDetailPage() {
                     <Heart className={`w-4 h-4 mr-2 ${isFavorited ? "fill-current" : ""}`} />
                     {currentUser
                       ? isFavorited
-                        ? "已收藏，点击取消"
-                        : "收藏赛事"
-                      : "登录后可收藏"}
+                        ? t("detail.favorited")
+                        : t("detail.favorite")
+                      : t("detail.loginToFavorite")}
                   </Button>
                 </div>
               </CardContent>
@@ -286,7 +291,7 @@ export default function MarathonDetailPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-yellow-500" />
-                    赛事亮点
+                    {t("detail.highlights")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -306,12 +311,12 @@ export default function MarathonDetailPage() {
               latest?.packetPickupLocation) && (
               <Card>
                 <CardHeader>
-                  <CardTitle>赛事信息</CardTitle>
+                  <CardTitle>{t("detail.raceInfo")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {latest.distanceOptions && latest.distanceOptions.length > 0 && (
                     <div>
-                      <p className="text-xs text-muted-foreground mb-2">设项</p>
+                      <p className="text-xs text-muted-foreground mb-2">{t("detail.items")}</p>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {latest.distanceOptions.map((d, i) => (
                           <div
@@ -322,7 +327,7 @@ export default function MarathonDetailPage() {
                             <div className="font-medium">{d.kind}</div>
                             <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3">
                               {typeof d.capacity === "number" && (
-                                <span>{d.capacity.toLocaleString()} 人</span>
+                                <span>{t("detail.capacity", { count: d.capacity })}</span>
                               )}
                               {typeof d.price === "number" && <span>¥{d.price}</span>}
                             </div>
@@ -335,19 +340,19 @@ export default function MarathonDetailPage() {
                     <div className="grid gap-2 sm:grid-cols-3">
                       {latest.startLocation && (
                         <div className="rounded-xl border p-3 text-sm" data-testid="text-start-location">
-                          <p className="text-xs text-muted-foreground mb-1">起点</p>
+                          <p className="text-xs text-muted-foreground mb-1">{t("detail.start")}</p>
                           <p className="font-medium">{latest.startLocation}</p>
                         </div>
                       )}
                       {latest.finishLocation && (
                         <div className="rounded-xl border p-3 text-sm" data-testid="text-finish-location">
-                          <p className="text-xs text-muted-foreground mb-1">终点</p>
+                          <p className="text-xs text-muted-foreground mb-1">{t("detail.finish")}</p>
                           <p className="font-medium">{latest.finishLocation}</p>
                         </div>
                       )}
                       {latest.packetPickupLocation && (
                         <div className="rounded-xl border p-3 text-sm" data-testid="text-pickup-location">
-                          <p className="text-xs text-muted-foreground mb-1">领物</p>
+                          <p className="text-xs text-muted-foreground mb-1">{t("detail.pickup")}</p>
                           <p className="font-medium">{latest.packetPickupLocation}</p>
                         </div>
                       )}
@@ -360,7 +365,7 @@ export default function MarathonDetailPage() {
             {latest?.medalImageUrls && latest.medalImageUrls.length > 0 && (
               <Card>
                 <CardHeader>
-                  <CardTitle>赛事奖牌</CardTitle>
+                  <CardTitle>{t("detail.medals")}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
@@ -375,7 +380,7 @@ export default function MarathonDetailPage() {
                       >
                         <img
                           src={url}
-                          alt={`奖牌 ${i + 1}`}
+                          alt={t("detail.medalAlt", { n: i + 1 })}
                           className="w-full h-full object-contain"
                           loading="lazy"
                         />
@@ -393,13 +398,13 @@ export default function MarathonDetailPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <FileText className="w-5 h-5" />
-                    报名与官方信息
+                    {t("detail.officialInfo")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {docLinks.length > 0 && (
                     <div>
-                      <p className="text-xs text-muted-foreground mb-2">官方文档</p>
+                      <p className="text-xs text-muted-foreground mb-2">{t("detail.officialDocs")}</p>
                       <div className="flex flex-wrap gap-2">
                         {docLinks.map((d) => (
                           <a
@@ -422,7 +427,7 @@ export default function MarathonDetailPage() {
                     <div>
                       <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
                         <Smartphone className="w-3 h-3" />
-                        报名渠道
+                        {t("detail.registrationChannels")}
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {latest.registrationChannels.map((ch, i) => (
@@ -439,7 +444,7 @@ export default function MarathonDetailPage() {
                   )}
                   {data.officialWechatAccount && (
                     <div className="text-sm">
-                      <span className="text-xs text-muted-foreground">官方公众号：</span>
+                      <span className="text-xs text-muted-foreground">{t("detail.officialAccountLabel")}</span>
                       <span className="font-medium" data-testid="text-wechat-account">
                         {data.officialWechatAccount}
                       </span>
@@ -451,27 +456,38 @@ export default function MarathonDetailPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>历年举办信息</CardTitle>
+                <CardTitle>{t("detail.history")}</CardTitle>
               </CardHeader>
               <CardContent>
                 {data.editions.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">暂无历年信息</p>
+                  <p className="text-sm text-muted-foreground">{t("detail.noHistory")}</p>
                 ) : (
                   <div className="space-y-3">
-                    {data.editions.map((edition) => (
-                      <div
-                        key={edition.id}
-                        className="rounded-xl border p-4 flex flex-wrap items-center justify-between gap-3"
-                      >
-                        <div className="space-y-1">
-                          <p className="text-sm font-medium">{edition.year} 年赛事</p>
-                          <p className="text-xs text-muted-foreground">
-                            比赛日期：{formatDate(edition.raceDate)}
-                          </p>
+                    {data.editions.map((edition) => {
+                      const rawStatus = edition.registrationStatus ?? "待更新";
+                      const STATUS_KEY: Record<string, string> = {
+                        报名中: "status.registering",
+                        即将开始: "status.openingSoon",
+                        已截止: "status.closed",
+                        已完赛: "status.finished",
+                        待更新: "status.pending",
+                      };
+                      const statusLabel = STATUS_KEY[rawStatus] ? t(STATUS_KEY[rawStatus]) : rawStatus;
+                      return (
+                        <div
+                          key={edition.id}
+                          className="rounded-xl border p-4 flex flex-wrap items-center justify-between gap-3"
+                        >
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">{edition.year}{t("detail.yearSuffix")}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {t("detail.raceDateLabel")}{formatDate(edition.raceDate, i18n.language, t("status.pending"))}
+                            </p>
+                          </div>
+                          <Badge variant="secondary">{statusLabel}</Badge>
                         </div>
-                        <Badge variant="secondary">{edition.registrationStatus ?? "待更新"}</Badge>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -480,11 +496,11 @@ export default function MarathonDetailPage() {
             {data.sources && data.sources.length > 0 && (
               <Card>
                 <CardHeader>
-                  <CardTitle>其他信息源</CardTitle>
+                  <CardTitle>{t("detail.otherSources")}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-xs text-muted-foreground mb-3">
-                    本页信息来自以下采集源，可点击查看原始页面以获取最新或更详细内容
+                    {t("detail.sourceHint")}
                   </p>
                   <div className="space-y-2">
                     {data.sources.map((source) => (
@@ -508,7 +524,7 @@ export default function MarathonDetailPage() {
                           </div>
                         </div>
                         {source.isPrimary && (
-                          <Badge variant="secondary" className="flex-shrink-0">主源</Badge>
+                          <Badge variant="secondary" className="flex-shrink-0">{t("detail.primarySource")}</Badge>
                         )}
                       </a>
                     ))}
@@ -519,24 +535,24 @@ export default function MarathonDetailPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>评论与评分</CardTitle>
+                <CardTitle>{t("detail.reviews")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="text-sm text-muted-foreground">
-                  共 {reviewStats.count} 条评论，平均分 {reviewStats.average.toFixed(1)}
+                  {t("detail.reviewsSummary", { count: reviewStats.count, avg: reviewStats.average.toFixed(1) })}
                 </div>
 
                 {!currentUser ? (
                   <div className="rounded-xl border p-4 space-y-3 bg-secondary/20">
-                    <div className="text-sm font-medium">登录后可发表评论、编辑和删除自己的评论</div>
+                    <div className="text-sm font-medium">{t("detail.loginToReview")}</div>
                     <Input
-                      placeholder="用户名（3-30位，字母数字下划线）"
+                      placeholder={t("detail.usernamePlaceholder")}
                       value={authUsername}
                       onChange={(event) => setAuthUsername(event.target.value)}
                     />
                     <Input
                       type="password"
-                      placeholder="密码（至少6位）"
+                      placeholder={t("detail.passwordPlaceholder")}
                       value={authPassword}
                       onChange={(event) => setAuthPassword(event.target.value)}
                     />
@@ -546,10 +562,10 @@ export default function MarathonDetailPage() {
                         onClick={submitAuth}
                         disabled={loginMutation.isPending || registerMutation.isPending}
                       >
-                        {isRegisterMode ? "注册并登录" : "登录"}
+                        {isRegisterMode ? t("favorites.registerSubmit") : t("favorites.loginSubmit")}
                       </Button>
                       <Button variant="outline" onClick={() => setIsRegisterMode((value) => !value)}>
-                        {isRegisterMode ? "切换登录" : "切换注册"}
+                        {isRegisterMode ? t("favorites.switchToLogin") : t("favorites.switchToRegister")}
                       </Button>
                     </div>
                   </div>
@@ -558,14 +574,14 @@ export default function MarathonDetailPage() {
                     <div className="rounded-xl border p-4 space-y-3 bg-secondary/20">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">
-                          当前用户：{currentUser.displayName || currentUser.username}
+                          {t("detail.currentUser", { name: currentUser.displayName || currentUser.username })}
                         </span>
                         <Button variant="ghost" size="sm" onClick={() => logoutMutation.mutate()}>
-                          退出登录
+                          {t("detail.logout")}
                         </Button>
                       </div>
                       <div className="flex gap-2 items-center">
-                        <span className="text-sm">评分</span>
+                        <span className="text-sm">{t("detail.rating")}</span>
                         <Input
                           type="number"
                           min={1}
@@ -581,11 +597,11 @@ export default function MarathonDetailPage() {
                       <Textarea
                         value={comment}
                         onChange={(event) => setComment(event.target.value)}
-                        placeholder="写下你对赛事的体验和建议..."
+                        placeholder={t("detail.commentPlaceholder")}
                       />
                       <div className="flex gap-2">
                         <Button onClick={submitReview}>
-                          {editingReviewId ? "保存修改" : "发布评论"}
+                          {editingReviewId ? t("detail.saveEdit") : t("detail.publishReview")}
                         </Button>
                         {editingReviewId && (
                           <Button
@@ -596,13 +612,13 @@ export default function MarathonDetailPage() {
                               setComment("");
                             }}
                           >
-                            取消编辑
+                            {t("detail.cancelEdit")}
                           </Button>
                         )}
                       </div>
                     </div>
 
-                    {reviews.length === 0 ? <p className="text-sm text-muted-foreground">暂无评论</p> : null}
+                    {reviews.length === 0 ? <p className="text-sm text-muted-foreground">{t("detail.noReviewsYet")}</p> : null}
 
                     {reviews.slice(0, 20).map((review) => (
                       <div key={review.id} className="rounded-xl border p-4 space-y-2">
@@ -616,7 +632,7 @@ export default function MarathonDetailPage() {
                               />
                             ) : null}
                             <span className="text-sm font-medium truncate">
-                              {review.userDisplayName} · {review.rating} 分
+                              {review.userDisplayName} · {t("detail.userPoints", { score: review.rating })}
                             </span>
                           </div>
                           <span className="text-xs text-muted-foreground flex-shrink-0">
@@ -625,7 +641,7 @@ export default function MarathonDetailPage() {
                         </div>
 
                         <p className="text-sm text-foreground/90">
-                          {review.comment || "该用户未填写评论内容"}
+                          {review.comment || t("detail.userNoComment")}
                         </p>
 
                         <div className="flex items-center gap-2">
@@ -635,8 +651,8 @@ export default function MarathonDetailPage() {
                             onClick={async () => {
                               if (!currentUser) {
                                 toast({
-                                  title: "需要登录",
-                                  description: "登录后才可以点赞。",
+                                  title: t("detail.loginToLikeTitle"),
+                                  description: t("detail.loginToLikeHint"),
                                   variant: "destructive",
                                 });
                                 return;
@@ -645,7 +661,7 @@ export default function MarathonDetailPage() {
                                 await likeReviewMutation.mutateAsync(review.id);
                               } catch (error) {
                                 toast({
-                                  title: "操作失败",
+                                  title: t("detail.operationFailed"),
                                   description: getFriendlyErrorMessage(error),
                                   variant: "destructive",
                                 });
@@ -653,7 +669,7 @@ export default function MarathonDetailPage() {
                             }}
                           >
                             <ThumbsUp className="w-4 h-4 mr-1" />
-                            点赞 {review.likesCount}
+                            {t("detail.like")} {review.likesCount}
                           </Button>
                           <Button
                             variant="outline"
@@ -661,8 +677,8 @@ export default function MarathonDetailPage() {
                             onClick={async () => {
                               if (!currentUser) {
                                 toast({
-                                  title: "需要登录",
-                                  description: "登录后才可以举报。",
+                                  title: t("detail.loginToReportTitle"),
+                                  description: t("detail.loginToReportHint"),
                                   variant: "destructive",
                                 });
                                 return;
@@ -671,7 +687,7 @@ export default function MarathonDetailPage() {
                                 await reportReviewMutation.mutateAsync(review.id);
                               } catch (error) {
                                 toast({
-                                  title: "操作失败",
+                                  title: t("detail.operationFailed"),
                                   description: getFriendlyErrorMessage(error),
                                   variant: "destructive",
                                 });
@@ -679,7 +695,7 @@ export default function MarathonDetailPage() {
                             }}
                           >
                             <Flag className="w-4 h-4 mr-1" />
-                            举报 {review.reportCount}
+                            {t("detail.report")} {review.reportCount}
                           </Button>
                           {review.userId === currentUser.id && (
                             <>
@@ -692,14 +708,14 @@ export default function MarathonDetailPage() {
                                   setComment(review.comment ?? "");
                                 }}
                               >
-                                编辑
+                                {t("detail.edit")}
                               </Button>
                               <Button
                                 variant="destructive"
                                 size="sm"
                                 onClick={() => deleteReviewMutation.mutate(review.id)}
                               >
-                                删除
+                                {t("detail.delete")}
                               </Button>
                             </>
                           )}

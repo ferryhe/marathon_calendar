@@ -4,7 +4,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import COS from "cos-nodejs-sdk-v5";
 import sharp from "sharp";
-import { eq, and, or, like, sql, desc, asc, inArray, ne } from "drizzle-orm";
+import { eq, and, or, like, ilike, sql, desc, asc, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import {
   users,
@@ -762,7 +762,11 @@ export async function registerRoutes(
           marathon: {
             id: marathons.id,
             name: marathons.name,
+            nameZh: marathons.nameZh,
+            nameEn: marathons.nameEn,
             city: marathons.city,
+            cityZh: marathons.cityZh,
+            cityEn: marathons.cityEn,
             country: marathons.country,
           },
         })
@@ -790,7 +794,11 @@ export async function registerRoutes(
           marathon: {
             id: marathons.id,
             name: marathons.name,
+            nameZh: marathons.nameZh,
+            nameEn: marathons.nameEn,
             city: marathons.city,
+            cityZh: marathons.cityZh,
+            cityEn: marathons.cityEn,
             country: marathons.country,
             websiteUrl: marathons.websiteUrl,
             description: marathons.description,
@@ -872,10 +880,14 @@ export async function registerRoutes(
       if (params.search) {
         conditions.push(
           or(
-            like(marathons.name, `%${params.search}%`),
-            like(marathons.city, `%${params.search}%`),
-            like(marathons.canonicalName, `%${params.search}%`),
-            like(marathons.description, `%${params.search}%`)
+            ilike(marathons.name, `%${params.search}%`),
+            ilike(marathons.nameZh, `%${params.search}%`),
+            ilike(marathons.nameEn, `%${params.search}%`),
+            ilike(marathons.city, `%${params.search}%`),
+            ilike(marathons.cityZh, `%${params.search}%`),
+            ilike(marathons.cityEn, `%${params.search}%`),
+            ilike(marathons.canonicalName, `%${params.search}%`),
+            ilike(marathons.description, `%${params.search}%`)
           )
         );
       }
@@ -1049,9 +1061,13 @@ export async function registerRoutes(
         .from(marathons)
         .where(
           or(
-            like(marathons.name, `%${searchQuery}%`),
-            like(marathons.city, `%${searchQuery}%`),
-            like(marathons.description, `%${searchQuery}%`)
+            ilike(marathons.name, `%${searchQuery}%`),
+            ilike(marathons.nameZh, `%${searchQuery}%`),
+            ilike(marathons.nameEn, `%${searchQuery}%`),
+            ilike(marathons.city, `%${searchQuery}%`),
+            ilike(marathons.cityZh, `%${searchQuery}%`),
+            ilike(marathons.cityEn, `%${searchQuery}%`),
+            ilike(marathons.description, `%${searchQuery}%`)
           )
         )
         .limit(20);
