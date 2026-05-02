@@ -125,8 +125,22 @@ Used `webSearch` to find authoritative race dates / registration windows / offic
 ⚠️ 部分顶级赛事自有平台（上马 shang-ma.com、厦马 xmim.org、杭马 hzim.org）不上 mararun，保留官网。
 ⚠️ CHINARUN 即使作为海外赛事独家渠道，**默认 `is_primary=false`**，让 `marathons.website_url`（官方主域）由 `official` 主源持有；仅当官网完全失效才升为 primary。
 
+### 2026-05-02 NowRun 候选去重入库（59 → 403 总 marathons）
+
+从 NowRun 主页 490 个 2026 race 链接出发，按 city/name 模糊匹配剔除 DB 已存在的，得到 447 个新候选，分两批入库：
+
+**批次 h — 春季已完赛 57 个**（2026-05-02h-nowrun-cn-batch-58.sql）：精选 60 个抓 nowrun 详情页（2 个 404），最终 57 个 race_date < 今天的国内中型/特色赛事（30 全马 + 27 半马），用人类可读 canonical_name（如 `shijiazhuang-marathon-2026`）。覆盖石家庄/雄安/保定/芜湖/蚌埠/阜阳/荆州/十堰/咸宁等 30 个全马城市 + 北京/天津/上海/苏州/扬州等 27 个半马。**注意**：当前 `client/src/components/MarathonTable.tsx` line 153-157 无条件隐藏 race_date<today 的赛事，故批次 h 在前端不可见，仅作历史档案 + 2027 届回归基准。如需可见，要加 `showPast` toggle（见 Known Limitations）。
+
+**批次 i — 上半年后段未结束 277 个**（2026-05-02i-nowrun-cn-upcoming-277.sql）：抓全部剩余 389 候选详情页，筛 race_date >= 2026-05-02 得 277 个未来赛事（5 月 24 / 6 月 13 / 7 月 6 / 8 月 20 / 9 月 35 / 10 月 53 / 11 月 92 / 12 月 34），全部 status=待公布，立即在主页可见。canonical_name 用机械约定 `nowrun-{race_id}-2026`（277 条不可能逐一手工取 pinyin），可后续按需重命名为 SEO slug。
+
+两批均绑定 `nowrun-001-cn-2026` 为非主源（`is_primary=false`），field_sources 用正确的 `{raceDate: {source, updatedAt, value}}` 形态。
+
+**最终库存**：403 marathons（378 China + 25 海外），2026 editions 状态分布：待公布 301 / 已完赛 72 / 报名中 10 / 已截止 8 / 即将开始 2。
+
 ## Known Limitations / Future Work
 
+- `MarathonTable.tsx` line 153-157 无条件过滤 race_date<today 的赛事，导致批次 h 的 57 个春季历史赛事在前端不可见。如需让用户能搜索到 "石家庄马拉松" 等历史赛事，应在 Home.tsx 加 `showPast` 状态 + 状态筛选器加上 `已完赛` 选项 + 把 prop 传给 MarathonTable 让 line 156 条件化。
+- Batch i 的 277 个赛事用机械 canonical_name `nowrun-{id}-2026`，URL 不够 SEO 友好。可在用户点开时按 city pinyin 重命名（保留 alias 表）。
 - Search uses basic `ILIKE` — Chinese fuzzy matching is mediocre
 - WeChat binding in Profile is mocked (no real OAuth)
 - `routes.ts` (~2900 lines) and `AdminData.tsx` (~2700 lines) are oversized

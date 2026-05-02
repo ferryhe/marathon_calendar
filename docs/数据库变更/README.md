@@ -13,6 +13,9 @@
 | `2026-05-02e-mararun-bindings.sql` | 2026-05-02 | mararun 子域名绑定（北京/广州/深圳/南京/武汉/成都） |
 | `2026-05-02f-marathonbm-batch.sql` | 2026-05-02 | marathonbm 批次（含 source 注册） |
 | `2026-05-02g-platform-expansion-overseas-batch.sql` | 2026-05-02 | **chinarun/nowrun/runninginchina 三平台 source + 10 个 chinarun 海外赛事**（澳门/新加坡/首尔/大阪/维也纳/布拉格/皇后镇/吴哥/黄金海岸/阳光海岸） |
+| `2026-05-02h-nowrun-cn-batch-58.sql` | 2026-05-02 | **NowRun 候选去重批次：+57 个国内赛事**（30 全马 + 27 半马，覆盖石家庄/雄安/保定/芜湖/蚌埠/阜阳/荆州/十堰/咸宁/岳阳/永州/安阳/九江/上饶/济宁/德州/荣成/茂名/清远/佛山/柳州/钦州/宜宾/丽水/湖州/宁海/奉化/盐城/淮安/万宁；以及北京/天津/上海/沧州/南京/苏州/扬州/杭州/桐乡/广州/石狮/福州/南平/南昌/吉安/抚州/合肥/安庆/聊城/南宁/重庆/贵阳的 27 个半马；全部已完赛，作为历史档案 + 2027 届回归基准） |
+| `2026-05-02i-nowrun-cn-upcoming-277.sql` | 2026-05-02 | **NowRun 上半年后段未结束赛事大批次：+277 个国内赛事**（5 月 24 / 6 月 13 / 7 月 6 / 8 月 20 / 9 月 35 / 10 月 53 / 11 月 92 / 12 月 34；canonical_name 用机械约定 `nowrun-{race_id}-2026`；全部 status=待公布，绑定 nowrun-001-cn-2026 为非主源） |
+| `2026-05-02j-fix-nowrun-city-corruption.sql` | 2026-05-02 | **修复批次 i 中 19 条被 markdown 解析污染的 city 字段**（北京/天津/上海/重庆下辖区归到主城；横琴→珠海；伊犁塔城地区→塔城；永川/忠县/涪陵→重庆等） |
 
 
 > Schema 级变更（CREATE TABLE / ALTER TABLE 等）由 Drizzle 在 Replit Publish 流程中自动 diff 与同步，不在此目录维护。
