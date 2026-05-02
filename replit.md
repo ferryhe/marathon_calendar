@@ -91,6 +91,16 @@ Used `webSearch` to find authoritative race dates / registration windows / offic
 - Fixed wrong months: 东营黄河口 → October not April.
 - Fixed wrong URLs: 西安 (xian.marathon.org.cn), 青岛 (qd-mls.com), 无锡 (wuxi.marathon.org.cn), 宁波 (shuzixindong).
 
+### 2026-05-02 third-party aggregator binding
+
+国内马拉松大量使用 **最酷 zuicool.com** 和 **马拉马拉 mararun.com** 作为唯一报名通道。已启用这两个 source 并绑定：
+
+- 最酷直链 (`zuicool.com/event/{id}`): 上海 64264, 杭州 88174, 广州 16059, 深圳 79945, 太原 21936, 兰州 49082。
+- mararun 子域名: 成都 `chengdu-marathon.mararun.com`, 深圳 `shenzhen-registration.mararun.com`。
+- 这些 URL 已写入对应 edition 的 `registration_url`，用户点击"报名"即跳转最酷/马拉马拉的一键报名页。
+- 官方网站仍保留在 `marathons.website_url`（信息源），第三方在 `marathon_sources`（备份/对比源 + 报名链接源）。
+- ⚠️ 厦马 2026/01 与宁波 2026/03 在最酷的页面对应已结束的届次，未绑定到 2027 届。同步任务下次拉取最酷时若发现 2027 新页面会自动追加。
+
 ## Known Limitations / Future Work
 
 - Search uses basic `ILIKE` — Chinese fuzzy matching is mediocre
