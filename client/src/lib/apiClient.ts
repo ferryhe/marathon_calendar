@@ -112,11 +112,13 @@ export interface MarathonQueryParams {
   search?: string;
   city?: string;
   country?: string;
+  region?: 'China' | 'Overseas';
   year?: number;
   month?: number;
   status?: string;
   sortBy?: 'name' | 'createdAt' | 'raceDate';
   sortOrder?: 'asc' | 'desc';
+  includePast?: boolean;
 }
 
 export interface CreateReviewPayload {

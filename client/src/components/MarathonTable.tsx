@@ -93,10 +93,8 @@ export function MarathonTable({
   const [selectedEvent, setSelectedEvent] = useState<MarathonListItem | null>(null);
   const [page, setPage] = useState(1);
   const currentPage = externalPage ?? page;
-  const country = region === "China" ? "China" : undefined;
-
   const { data, isLoading, error } = useMarathons({
-    country,
+    region,
     search: searchQuery || undefined,
     limit: 20,
     page: currentPage,

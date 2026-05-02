@@ -87,6 +87,8 @@ const marathonQuerySchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
   // 默认只返回未来赛事；显式传 includePast=true 才返回历史。与前端 MarathonTable 默认过滤行为一致。
   includePast: z.coerce.boolean().default(false),
+  // region=Overseas 表示 country != China（区分 country=China 和"全部非中国"两种语义）
+  region: z.enum(['China', 'Overseas']).optional(),
 });
 
 const searchQuerySchema = z.object({
@@ -889,6 +891,13 @@ export async function registerRoutes(
         } else {
           conditions.push(eq(marathons.country, params.country));
         }
+      }
+
+      // region 优先于 country；Overseas = country != China
+      if (params.region === 'China') {
+        conditions.push(eq(marathons.country, 'China'));
+      } else if (params.region === 'Overseas') {
+        conditions.push(sql`${marathons.country} <> 'China'`);
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
