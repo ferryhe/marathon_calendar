@@ -189,19 +189,30 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
               </Button>
             </Link>
 
-            <Button
-              asChild
-              className="w-full h-14 rounded-2xl text-base font-semibold shadow-xl shadow-primary/10 transition-transform active:scale-[0.97]"
-            >
-              <a
-                href={event.websiteUrl || "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2"
+            {event.websiteUrl ? (
+              <Button
+                asChild
+                className="w-full h-14 rounded-2xl text-base font-semibold shadow-xl shadow-primary/10 transition-transform active:scale-[0.97]"
               >
-                前往官网查看 <ExternalLink className="w-4 h-4" />
-              </a>
-            </Button>
+                <a
+                  href={event.websiteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2"
+                  data-testid="link-website-detail"
+                >
+                  前往官网查看 <ExternalLink className="w-4 h-4" />
+                </a>
+              </Button>
+            ) : (
+              <Button
+                disabled
+                className="w-full h-14 rounded-2xl text-base font-semibold"
+                data-testid="button-no-website"
+              >
+                暂无官网
+              </Button>
+            )}
             <p className="text-center text-[10px] text-muted-foreground mt-4">
               数据来源于公开搜索，请以官方发布为准
             </p>

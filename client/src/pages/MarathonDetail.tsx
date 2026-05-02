@@ -254,10 +254,12 @@ export default function MarathonDetailPage() {
                 )}
 
                 <div className="flex flex-wrap gap-2">
-                  {data.websiteUrl && (
-                    <a href={data.websiteUrl} target="_blank" rel="noopener noreferrer" className="inline-flex">
+                  {data.websiteUrl ? (
+                    <a href={data.websiteUrl} target="_blank" rel="noopener noreferrer" className="inline-flex" data-testid="link-website-marathon">
                       <Button>前往赛事官网</Button>
                     </a>
+                  ) : (
+                    <Button disabled data-testid="button-no-website-marathon">暂无官网</Button>
                   )}
                   <Button
                     variant={isFavorited ? "default" : "outline"}
