@@ -244,14 +244,14 @@ export default function Home() {
                 className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
                 data-testid="tab-china"
               >
-                国内赛事
+                大陆赛事
               </TabsTrigger>
               <TabsTrigger
                 value="Overseas"
                 className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
                 data-testid="tab-overseas"
               >
-                海外赛事
+                其他赛事
               </TabsTrigger>
             </TabsList>
           </Tabs>
