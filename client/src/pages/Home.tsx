@@ -41,7 +41,7 @@ function formatRelativeTime(iso: string | null): string | null {
 }
 
 export default function Home() {
-  const [region, setRegion] = useState<"China" | "Overseas">("China");
+  const [region, setRegion] = useState<"China" | "Overseas" | "WMM">("China");
   const [searchQuery, setSearchQuery] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -235,10 +235,10 @@ export default function Home() {
         <div className="flex items-center gap-2">
           <Tabs
             value={region}
-            onValueChange={(value) => setRegion(value as "China" | "Overseas")}
+            onValueChange={(value) => setRegion(value as "China" | "Overseas" | "WMM")}
             className="flex-1"
           >
-            <TabsList className="grid w-full grid-cols-2 bg-secondary/50 rounded-xl p-1 h-9">
+            <TabsList className="grid w-full grid-cols-3 bg-secondary/50 rounded-xl p-1 h-9">
               <TabsTrigger
                 value="China"
                 className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
@@ -252,6 +252,13 @@ export default function Home() {
                 data-testid="tab-overseas"
               >
                 其他赛事
+              </TabsTrigger>
+              <TabsTrigger
+                value="WMM"
+                className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                data-testid="tab-wmm"
+              >
+                大满贯
               </TabsTrigger>
             </TabsList>
           </Tabs>

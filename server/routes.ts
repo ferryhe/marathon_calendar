@@ -87,8 +87,8 @@ const marathonQuerySchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
   // 默认只返回未来赛事；显式传 includePast=true 才返回历史。与前端 MarathonTable 默认过滤行为一致。
   includePast: z.coerce.boolean().default(false),
-  // region=Overseas 表示 country != China（区分 country=China 和"全部非中国"两种语义）
-  region: z.enum(['China', 'Overseas']).optional(),
+  // region=Overseas 表示 country != China；region=WMM 限定为 7 大满贯赛事
+  region: z.enum(['China', 'Overseas', 'WMM']).optional(),
 });
 
 const searchQuerySchema = z.object({
@@ -893,11 +893,22 @@ export async function registerRoutes(
         }
       }
 
-      // region 优先于 country；Overseas = country != China
+      // region 优先于 country；Overseas = country != China；WMM = 7 大满贯赛事 (UUID 在 dev/prod 一致)
       if (params.region === 'China') {
         conditions.push(eq(marathons.country, 'China'));
       } else if (params.region === 'Overseas') {
         conditions.push(sql`${marathons.country} <> 'China'`);
+      } else if (params.region === 'WMM') {
+        const WMM_IDS = [
+          '45c4f0e6-dbd7-4904-a874-7a5be4b5dfc5', // 东京
+          '5f7ae5ab-bf47-46d2-bd73-ffcd829d0fec', // 伦敦
+          '315803d1-400d-411a-83fe-33e2dc822a5c', // 悉尼
+          'ad3e91c8-b48e-4fc3-9003-a8ff31be8c90', // 柏林
+          '4fbae442-11de-4e20-93e4-fd0fc5076d7d', // 波士顿
+          'be4e78a3-3da6-4530-8f00-44350c24308d', // 纽约
+          '15c99c8e-0be5-4059-b297-6e7a30a1f470', // 芝加哥
+        ];
+        conditions.push(inArray(marathons.id, WMM_IDS));
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

@@ -144,7 +144,7 @@ export interface MarathonQueryParams {
   search?: string;
   city?: string;
   country?: string;
-  region?: 'China' | 'Overseas';
+  region?: 'China' | 'Overseas' | 'WMM';
   year?: number;
   month?: number;
   status?: string;

@@ -39,7 +39,7 @@ function HighlightText({ text, highlight }: { text: string; highlight: string })
 }
 
 interface MarathonTableProps {
-  region: "China" | "Overseas";
+  region: "China" | "Overseas" | "WMM";
   searchQuery: string;
   filters: {
     year: number;
@@ -145,6 +145,7 @@ export function MarathonTable({
         if (region === "Overseas" && isChinaCountry(marathon.country)) {
           return false;
         }
+        // 大满贯：服务端已用 ID 列表过滤，客户端无需再筛 country。
         if (showMineOnly && !favoriteMarathonIds.has(marathon.id)) {
           return false;
         }
