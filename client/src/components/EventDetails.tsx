@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { MarathonListItem } from "@/lib/apiClient";
 import { useLocalizedCity, useLocalizedName } from "@/lib/locale";
+import { StatusBadge } from "./StatusBadge";
 import {
   useAddFavorite,
   useCurrentUser,
@@ -35,14 +36,6 @@ interface EventDetailsProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const STATUS_KEY: Record<string, string> = {
-  报名中: "status.registering",
-  即将开始: "status.openingSoon",
-  已截止: "status.closed",
-  已完赛: "status.finished",
-  待更新: "status.pending",
-};
 
 export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
   const { t } = useTranslation();
@@ -62,8 +55,6 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
   const year = displayDate.getFullYear();
   const month = displayDate.getMonth() + 1;
   const day = displayDate.getDate();
-  const rawStatus = event.nextEdition?.registrationStatus ?? "待更新";
-  const statusLabel = STATUS_KEY[rawStatus] ? t(STATUS_KEY[rawStatus]) : rawStatus;
   const isFavorited = favoriteStatus?.isFavorited ?? false;
 
   const toggleFavorite = async () => {
@@ -94,9 +85,14 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
 
         <div className="bg-secondary/30 p-8 pb-6 sticky top-0 z-10 backdrop-blur-md">
           <div className="flex justify-between items-start mb-4">
-            <Badge variant="secondary" className="rounded-full px-3">
-              {statusLabel}
-            </Badge>
+            <StatusBadge
+              status={event.nextEdition?.status}
+              legacyStatus={event.nextEdition?.registrationStatus}
+              raceDate={event.nextEdition?.raceDate ?? null}
+              registrationStart={event.nextEdition?.registrationOpenDate ?? null}
+              registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
+              size="md"
+            />
           </div>
           <DialogTitle className="text-2xl font-bold tracking-tight leading-tight">
             {localizedName}

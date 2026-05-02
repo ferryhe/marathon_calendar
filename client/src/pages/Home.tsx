@@ -402,9 +402,12 @@ export default function Home() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">{t("filters.allStatuses")}</SelectItem>
-                      <SelectItem value="报名中">{t("status.registering")}</SelectItem>
-                      <SelectItem value="即将开始">{t("status.openingSoon")}</SelectItem>
-                      <SelectItem value="已截止">{t("status.closed")}</SelectItem>
+                      <SelectItem value="upcoming">{t("status.upcoming")}</SelectItem>
+                      <SelectItem value="open">{t("status.open")}</SelectItem>
+                      <SelectItem value="closed">{t("status.closed")}</SelectItem>
+                      <SelectItem value="racing">{t("status.racing")}</SelectItem>
+                      <SelectItem value="ended">{t("status.ended")}</SelectItem>
+                      <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
                     </SelectContent>
                   </Select>
 

@@ -958,11 +958,23 @@ export async function registerRoutes(
       }
 
       if (params.status) {
-        editionConditions.push(eq(marathonEditions.registrationStatus, params.status));
+        // New enum values map to the `status` column; legacy Chinese strings keep
+        // hitting `registration_status` for one release cycle.
+        const NEW_ENUM = new Set(["upcoming", "open", "closed", "racing", "ended", "cancelled"]);
+        if (NEW_ENUM.has(params.status)) {
+          editionConditions.push(eq(marathonEditions.status, params.status));
+        } else {
+          editionConditions.push(eq(marathonEditions.registrationStatus, params.status));
+        }
       }
 
-      // 默认隐藏 race_date 已过的赛事（与前端过滤一致），显式传 status='已完赛' 或 includePast=true 时不过滤
-      if (!params.includePast && params.status !== '已完赛') {
+      // 默认隐藏 race_date 已过的赛事（与前端过滤一致）；显式传 status='已完赛' / 'ended' / 'cancelled' 或 includePast=true 时不过滤
+      if (
+        !params.includePast &&
+        params.status !== '已完赛' &&
+        params.status !== 'ended' &&
+        params.status !== 'cancelled'
+      ) {
         editionConditions.push(
           sql`(${marathonEditions.raceDate} IS NULL OR ${marathonEditions.raceDate} >= CURRENT_DATE)`
         );
@@ -1671,8 +1683,8 @@ export async function registerRoutes(
         .select({
           total: sql<number>`count(*)::int`,
           pendingDate: sql<number>`sum(case when ${marathonEditions.raceDate} is null then 1 else 0 end)::int`,
-          openWithoutUrl: sql<number>`sum(case when ${marathonEditions.registrationStatus} = '报名中' and (${marathonEditions.registrationUrl} is null or ${marathonEditions.registrationUrl} = '') then 1 else 0 end)::int`,
-          finished: sql<number>`sum(case when ${marathonEditions.registrationStatus} = '已完赛' then 1 else 0 end)::int`,
+          openWithoutUrl: sql<number>`sum(case when (${marathonEditions.status} = 'open' or ${marathonEditions.registrationStatus} = '报名中') and (${marathonEditions.registrationUrl} is null or ${marathonEditions.registrationUrl} = '') then 1 else 0 end)::int`,
+          finished: sql<number>`sum(case when ${marathonEditions.status} = 'ended' or ${marathonEditions.registrationStatus} = '已完赛' then 1 else 0 end)::int`,
         })
         .from(marathonEditions);
 
@@ -2025,6 +2037,8 @@ export async function registerRoutes(
           raceDate: marathonEditions.raceDate,
           registrationStatus: marathonEditions.registrationStatus,
           registrationUrl: marathonEditions.registrationUrl,
+          status: marathonEditions.status,
+          isLottery: marathonEditions.isLottery,
           publishStatus: marathonEditions.publishStatus,
           updatedAt: marathonEditions.updatedAt,
         })
@@ -2785,6 +2799,8 @@ export async function registerRoutes(
           raceDate: marathonEditions.raceDate,
           registrationStatus: marathonEditions.registrationStatus,
           registrationUrl: marathonEditions.registrationUrl,
+          status: marathonEditions.status,
+          isLottery: marathonEditions.isLottery,
           publishStatus: marathonEditions.publishStatus,
           publishedAt: marathonEditions.publishedAt,
           updatedAt: marathonEditions.updatedAt,
@@ -2821,13 +2837,20 @@ export async function registerRoutes(
           raceDate: z.string().trim().min(4).optional(),
           registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
           registrationUrl: z.string().trim().url().nullable().optional(),
+          status: z
+            .enum(["upcoming", "open", "closed", "racing", "ended", "cancelled"])
+            .nullable()
+            .optional(),
+          isLottery: z.boolean().optional(),
           publish: z.coerce.boolean().optional(),
         })
         .refine(
           (p) =>
             Boolean(p.raceDate) ||
             p.registrationStatus !== undefined ||
-            p.registrationUrl !== undefined,
+            p.registrationUrl !== undefined ||
+            p.status !== undefined ||
+            p.isLottery !== undefined,
           { message: "At least one field is required" },
         )
         .parse(req.body);
@@ -2863,6 +2886,8 @@ export async function registerRoutes(
             ? { registrationStatus: payload.registrationStatus }
             : {}),
           ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
+          ...(payload.status !== undefined ? { status: payload.status } : {}),
+          ...(payload.isLottery !== undefined ? { isLottery: payload.isLottery } : {}),
         },
         source: {
           sourceId: binding.sourceId,

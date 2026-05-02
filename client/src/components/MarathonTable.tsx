@@ -17,6 +17,7 @@ import {
 import type { MarathonListItem } from "@/lib/apiClient";
 import { isChinaCountry } from "@shared/utils";
 import { pickLocalizedCity, pickLocalizedName, useLocale } from "@/lib/locale";
+import { StatusBadge } from "./StatusBadge";
 
 // Highlight helper component for search terms
 function HighlightText({ text, highlight }: { text: string; highlight: string }) {
@@ -70,36 +71,6 @@ interface MarathonWithDate extends MarathonListItem {
 type MarathonTableView =
   | { mode: "grouped"; groups: Record<string, MarathonWithDate[]>; tbd: MarathonWithDate[] }
   | { mode: "flat"; events: MarathonWithDate[]; tbd: MarathonWithDate[] };
-
-function getStatusBadgeStyle(status: string) {
-  if (status === "报名中") {
-    return "bg-blue-500 hover:bg-blue-600 border-0 text-[10px] px-2 h-5";
-  }
-  if (status === "即将开始") {
-    return "bg-amber-500 hover:bg-amber-600 border-0 text-[10px] px-2 h-5";
-  }
-  if (status === "已截止") {
-    return "bg-muted text-muted-foreground border-0 text-[10px] px-2 h-5";
-  }
-  return "bg-muted text-muted-foreground border-0 text-[10px] px-2 h-5";
-}
-
-function translateStatus(status: string, t: (k: string) => string): string {
-  switch (status) {
-    case "报名中":
-      return t("status.registering");
-    case "即将开始":
-      return t("status.openingSoon");
-    case "已截止":
-      return t("status.closed");
-    case "已完赛":
-      return t("status.finished");
-    case "待更新":
-      return t("status.pending");
-    default:
-      return status;
-  }
-}
 
 export function MarathonTable({
   region,
@@ -164,6 +135,10 @@ export function MarathonTable({
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // When the user explicitly filters by a terminal status (ended/cancelled),
+    // we want past-date editions to render — otherwise the result list is empty.
+    const showPastEditions = filters.status === "ended" || filters.status === "cancelled";
+
     const { dated, tbd } = data.data
       .filter((marathon) => {
         if (region === "China" && !isChinaCountry(marathon.country)) {
@@ -176,7 +151,7 @@ export function MarathonTable({
           return false;
         }
         const raceDate = marathon.nextEdition?.raceDate;
-        if (raceDate) {
+        if (raceDate && !showPastEditions) {
           const d = new Date(raceDate);
           if (d < today) return false;
         }
@@ -356,12 +331,13 @@ export function MarathonTable({
                                 <ExternalLink className="w-4 h-4 text-muted-foreground" />
                               </a>
                             ) : null}
-                            <Badge
-                              variant="default"
-                              className={getStatusBadgeStyle(event.registrationStatus)}
-                            >
-                              {translateStatus(event.registrationStatus, t)}
-                            </Badge>
+                            <StatusBadge
+                              status={event.nextEdition?.status}
+                              legacyStatus={event.registrationStatus}
+                              raceDate={event.nextEdition?.raceDate ?? null}
+                              registrationStart={event.nextEdition?.registrationOpenDate ?? null}
+                              registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
+                            />
                             <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                           </div>
                         </motion.div>
@@ -416,12 +392,13 @@ export function MarathonTable({
                             <ExternalLink className="w-4 h-4 text-muted-foreground" />
                           </a>
                         ) : null}
-                        <Badge
-                          variant="default"
-                          className={getStatusBadgeStyle(event.registrationStatus)}
-                        >
-                          {translateStatus(event.registrationStatus, t)}
-                        </Badge>
+                        <StatusBadge
+                          status={event.nextEdition?.status}
+                          legacyStatus={event.registrationStatus}
+                          raceDate={event.nextEdition?.raceDate ?? null}
+                          registrationStart={event.nextEdition?.registrationOpenDate ?? null}
+                          registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
+                        />
                         <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                       </div>
                     </motion.div>
@@ -476,9 +453,14 @@ export function MarathonTable({
                           <ExternalLink className="w-4 h-4 text-muted-foreground" />
                         </a>
                       ) : null}
-                      <Badge variant="secondary" className="text-[10px] px-2 h-5">
-                        {translateStatus(event.registrationStatus, t)}
-                      </Badge>
+                      <StatusBadge
+                        status={event.nextEdition?.status}
+                        legacyStatus={event.registrationStatus}
+                        raceDate={event.nextEdition?.raceDate ?? null}
+                        registrationStart={event.nextEdition?.registrationOpenDate ?? null}
+                        registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
+                        glow={false}
+                      />
                       <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                     </div>
                   </motion.div>

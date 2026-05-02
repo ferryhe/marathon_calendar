@@ -33,7 +33,8 @@ shared/schema.ts    All Drizzle tables + Zod insert/select schemas
 
 - `users` — auth + profile (display_name, avatar_url, wechat fields)
 - `marathons` — canonical race entity (canonical_name, city, country)
-- `marathon_editions` — year-specific data (race_date, registration_status/url, field_sources jsonb for provenance)
+- `marathon_editions` — year-specific data (race_date, registration_status/url, field_sources jsonb for provenance, `status` enum + `is_lottery` flag added 2026-05-02)
+  - `status` taxonomy (nowrun-aligned, defined in `shared/status.ts`): `upcoming` 待开放 / `open` 报名中 / `closed` 待比赛 / `racing` 比赛中 / `ended` 已结束 / `cancelled` 已取消. Frontend renders via `<StatusBadge>` (open badge gets `.status-open-glow` shimmer). When `status` is null, `resolveEditionStatus` falls back to legacy Chinese `registration_status` then date-derived computation. Legacy `registration_status` kept for one cycle.
 - `sources` — crawler config (strategy: HTML/API, priority, rules in config jsonb)
 - `marathon_sources` — links a marathon to one or more source URLs
 - `raw_crawl_data` — fetched HTML with status (pending/needs_review/processed/failed)

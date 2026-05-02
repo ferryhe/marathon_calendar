@@ -41,6 +41,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useLocalizedCity, useLocalizedName } from "@/lib/locale";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useTranslation } from "react-i18next";
 
 function formatDate(dateValue: string | null | undefined, lang = "zh", fallback = "—") {
@@ -464,15 +465,6 @@ export default function MarathonDetailPage() {
                 ) : (
                   <div className="space-y-3">
                     {data.editions.map((edition) => {
-                      const rawStatus = edition.registrationStatus ?? "待更新";
-                      const STATUS_KEY: Record<string, string> = {
-                        报名中: "status.registering",
-                        即将开始: "status.openingSoon",
-                        已截止: "status.closed",
-                        已完赛: "status.finished",
-                        待更新: "status.pending",
-                      };
-                      const statusLabel = STATUS_KEY[rawStatus] ? t(STATUS_KEY[rawStatus]) : rawStatus;
                       return (
                         <div
                           key={edition.id}
@@ -484,7 +476,14 @@ export default function MarathonDetailPage() {
                               {t("detail.raceDateLabel")}{formatDate(edition.raceDate, i18n.language, t("status.pending"))}
                             </p>
                           </div>
-                          <Badge variant="secondary">{statusLabel}</Badge>
+                          <StatusBadge
+                            status={edition.status}
+                            legacyStatus={edition.registrationStatus}
+                            raceDate={edition.raceDate}
+                            registrationStart={edition.registrationOpenDate}
+                            registrationEnd={edition.registrationCloseDate}
+                            size="md"
+                          />
                         </div>
                       );
                     })}

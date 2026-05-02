@@ -47,7 +47,12 @@
     "openingSoon": "Opening soon",
     "closed": "Closed",
     "finished": "Finished",
-    "pending": "TBD"
+    "pending": "TBD",
+    "upcoming": "Upcoming",
+    "open": "Open Now",
+    "racing": "Race Day",
+    "ended": "Ended",
+    "cancelled": "Cancelled"
   },
   "list": {
     "loadFailed": "Failed to load events",

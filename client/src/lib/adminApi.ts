@@ -403,6 +403,8 @@ export type AdminMarathonEdition = {
   raceDate: string | null;
   registrationStatus: string | null;
   registrationUrl: string | null;
+  status: string | null;
+  isLottery: boolean | null;
   publishStatus: string;
   publishedAt: string | null;
   updatedAt: string;
@@ -433,6 +435,8 @@ export async function updateAdminMarathonEdition(
     raceDate?: string;
     registrationStatus?: string | null;
     registrationUrl?: string | null;
+    status?: "upcoming" | "open" | "closed" | "racing" | "ended" | "cancelled" | null;
+    isLottery?: boolean;
     publish?: boolean;
   },
 ) {

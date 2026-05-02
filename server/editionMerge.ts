@@ -14,6 +14,10 @@ export type EditionIncomingFields = {
   raceDate?: string | null;
   registrationStatus?: string | null;
   registrationUrl?: string | null;
+  // New nowrun-aligned status taxonomy (upcoming|open|closed|racing|ended|cancelled).
+  // Treated as a simple admin-controlled overwrite (no per-field priority merge yet).
+  status?: string | null;
+  isLottery?: boolean;
 };
 
 export type MergeSource = {
@@ -165,6 +169,8 @@ export async function upsertEditionWithMerge(params: {
       raceDate: params.incoming.raceDate ?? null,
       registrationStatus: params.incoming.registrationStatus ?? null,
       registrationUrl: params.incoming.registrationUrl ?? null,
+      status: params.incoming.status ?? null,
+      ...(params.incoming.isLottery !== undefined ? { isLottery: params.incoming.isLottery } : {}),
       publishStatus: params.publish?.status ?? "draft",
       publishedAt:
         (params.publish?.status ?? "draft") === "published"
@@ -278,6 +284,17 @@ export async function upsertEditionWithMerge(params: {
         },
       });
     }
+  }
+
+  // status / isLottery: simple overwrite — admin-controlled, no per-field priority.
+  // status === null explicitly clears the field; status === undefined leaves it.
+  if (params.incoming.status !== undefined) {
+    set.status = params.incoming.status;
+    applied += 1;
+  }
+  if (params.incoming.isLottery !== undefined) {
+    set.isLottery = params.incoming.isLottery;
+    applied += 1;
   }
 
   set.fieldSources = Object.keys(nextFieldSources).length > 0 ? nextFieldSources : null;

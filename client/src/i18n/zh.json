@@ -47,7 +47,12 @@
     "openingSoon": "即将开始",
     "closed": "已截止",
     "finished": "已完赛",
-    "pending": "待更新"
+    "pending": "待更新",
+    "upcoming": "待开放",
+    "open": "报名中",
+    "racing": "比赛中",
+    "ended": "已结束",
+    "cancelled": "已取消"
   },
   "list": {
     "loadFailed": "加载赛事数据失败",

@@ -24,6 +24,10 @@ export interface MarathonEditionDTO {
   registrationUrl: string | null;
   registrationOpenDate: string | null;
   registrationCloseDate: string | null;
+  // New nowrun-aligned status taxonomy. Nullable while migration is in progress —
+  // frontend falls back to deriving from dates via `resolveEditionStatus`.
+  status?: string | null;
+  isLottery?: boolean | null;
   // PR-1 rich fields (NowRun)
   distanceOptions?: DistanceOption[] | null;
   highlights?: string | null;
