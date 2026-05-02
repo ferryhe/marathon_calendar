@@ -30,7 +30,10 @@
 - [研究报告-最酷zuicool爬取方案](./研究报告/研究报告-最酷zuicool爬取方案.md)
 - [研究报告-马拉马拉mararun爬取方案](./研究报告/研究报告-马拉马拉mararun爬取方案.md)
 - [研究报告-百马汇marathonbm爬取方案](./研究报告/研究报告-百马汇marathonbm爬取方案.md)
-- [研究报告-iranshao与shuzixindong状态评估](./研究报告/研究报告-iranshao与shuzixindong状态评估.md)
+- [研究报告-chinarun玩比赛爬取方案](./研究报告/研究报告-chinarun玩比赛爬取方案.md)
+- [研究报告-NowRun-nowrun爬取方案](./研究报告/研究报告-NowRun-nowrun爬取方案.md)
+- [研究报告-runninginchina跑IN中国爬取方案](./研究报告/研究报告-runninginchina跑IN中国爬取方案.md)
+- [研究报告-iranshao与shuzixindong状态评估](./研究报告/研究报告-iranshao与shuzixindong状态评估.md) — **含 joyrun / 42travel 不可爬评估**
 - [研究报告-runchina田协赛历方案](./研究报告/研究报告-runchina田协赛历方案.md)
 
 ### 🔬 早期数据源研究
@@ -52,7 +55,7 @@
 docs/
 ├── README.md                    # 本文档（文档总览）
 ├── 项目计划/                    # 项目规划与状态文档（8 篇）
-├── 研究报告/                    # 技术调研与平台爬取方案（8 篇）
+├── 研究报告/                    # 技术调研与平台爬取方案（11 篇）
 ├── 开发日志/                    # 开发过程记录（16 篇）
 ├── 数据库变更/                  # ⭐ 数据级 SQL 迁移脚本与说明
 ├── 使用说明/                    # 用户和管理员指南（2 篇）
@@ -77,14 +80,17 @@ docs/
 | [技术架构文档](./项目计划/技术架构文档.md) | 2026-02 | 架构 |
 | [项目交付说明](./项目计划/项目交付说明.md) | 2026-02 | 交付规范 |
 
-### 🔬 研究报告（8 篇） — `./研究报告/`
+### 🔬 研究报告（11 篇） — `./研究报告/`
 
 | 文档 | 时间 | 说明 |
 |---|---|---|
 | [研究报告-最酷zuicool爬取方案](./研究报告/研究报告-最酷zuicool爬取方案.md) | 2026-05-02 | ⭐ NEW 直链规律 + 6 绑 |
 | [研究报告-马拉马拉mararun爬取方案](./研究报告/研究报告-马拉马拉mararun爬取方案.md) | 2026-05-02 | ⭐ NEW 子域名 + 6 绑 |
 | [研究报告-百马汇marathonbm爬取方案](./研究报告/研究报告-百马汇marathonbm爬取方案.md) | 2026-05-02 | ⭐ NEW SPA + SSR 首屏 + 交叉验证 |
-| [研究报告-iranshao与shuzixindong状态评估](./研究报告/研究报告-iranshao与shuzixindong状态评估.md) | 2026-05-02 | ⭐ NEW 不可用平台备忘 |
+| [研究报告-chinarun玩比赛爬取方案](./研究报告/研究报告-chinarun玩比赛爬取方案.md) | 2026-05-02 | ⭐ NEW 海外/六大满贯独家专精 |
+| [研究报告-NowRun-nowrun爬取方案](./研究报告/研究报告-NowRun-nowrun爬取方案.md) | 2026-05-02 | ⭐ NEW 对标产品 + 富数据详情 |
+| [研究报告-runninginchina跑IN中国爬取方案](./研究报告/研究报告-runninginchina跑IN中国爬取方案.md) | 2026-05-02 | ⭐ NEW RESTful 全省份 + 官网补全 |
+| [研究报告-iranshao与shuzixindong状态评估](./研究报告/研究报告-iranshao与shuzixindong状态评估.md) | 2026-05-02 | ⭐ NEW 不可爬：iranshao/sxd/joyrun/42travel |
 | [研究报告-runchina田协赛历方案](./研究报告/研究报告-runchina田协赛历方案.md) | 2026-05-02 | ⭐ NEW 田协 PDF 方案 |
 | [研究报告-马拉松数据源调研](./研究报告/研究报告-马拉松数据源调研.md) | 2026-02 | 早期调研 |
 | [研究报告-数据提取与处理方案](./研究报告/研究报告-数据提取与处理方案.md) | 2026-02 | AI 提取方案 |

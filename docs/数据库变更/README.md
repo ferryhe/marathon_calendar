@@ -2,6 +2,19 @@
 
 本目录存放对生产数据库的**数据级变更脚本**（非 schema 变更）。
 
+## 已应用变更索引
+
+| 文件 | 时间 | 影响 |
+|---|---|---|
+| `2026-05-02-第三方平台绑定与赛事数据修正.sql` | 2026-05-02 | 第一批第三方平台 sources + marathon_sources 绑定 |
+| `2026-05-02b-overseas-marathons-batch.sql` | 2026-05-02 | 新增首批海外马拉松（伦敦/纽约/东京/波士顿等） |
+| `2026-05-02c-china-marathons-batch.sql` | 2026-05-02 | 新增国内中型马拉松批次 |
+| `2026-05-02d-zuicool-bindings.sql` | 2026-05-02 | zuicool 直链绑定（上海/杭州/广州/深圳/太原/兰州） |
+| `2026-05-02e-mararun-bindings.sql` | 2026-05-02 | mararun 子域名绑定（北京/广州/深圳/南京/武汉/成都） |
+| `2026-05-02f-marathonbm-batch.sql` | 2026-05-02 | marathonbm 批次（含 source 注册） |
+| `2026-05-02g-platform-expansion-overseas-batch.sql` | 2026-05-02 | **chinarun/nowrun/runninginchina 三平台 source + 10 个 chinarun 海外赛事**（澳门/新加坡/首尔/大阪/维也纳/布拉格/皇后镇/吴哥/黄金海岸/阳光海岸） |
+
+
 > Schema 级变更（CREATE TABLE / ALTER TABLE 等）由 Drizzle 在 Replit Publish 流程中自动 diff 与同步，不在此目录维护。
 > 本目录专门用于跨环境（dev → production）的**数据迁移**。
 

@@ -93,22 +93,37 @@ Used `webSearch` to find authoritative race dates / registration windows / offic
 
 ### 2026-05-02 third-party aggregator binding
 
-国内马拉松大量使用 **最酷 zuicool.com** 和 **马拉马拉 mararun.com** 作为报名通道。已对 5 个第三方平台逐一研究并撰写文档（见 `docs/研究报告/`）：
+国内外马拉松大量使用第三方报名/聚合平台。已对 9 个平台完成研究，按角色分层：
 
-- **最酷 zuicool**（活跃，6 绑）：上海 64264 / 杭州 88174 / 广州 16059 / 深圳 79945 / 太原 21936 / 兰州 49082
-- **马拉马拉 mararun**（活跃，6 绑）：北京/广州/深圳/南京/武汉 用 `{city}-registration.mararun.com`；成都用 `chengdu-marathon.mararun.com`
-- **数字心动 shuzixindong**（活跃，1 绑）：仅宁波有独立子站 `ningbomarathon.shuzixindong.com`，其余子域 DNS 失败；主站是 SPA 不可爬
-- **爱燃烧 iranshao**（活跃，0 绑）：旧 `/races/{id}` URL 全部 404，赛事数据库已下线，仅留新闻
-- **田协 runchina**（活跃，0 绑）：详情页 SPA 不可爬，作为通用权威信息源；建议每年 1 月解析一次官方 PDF 赛事目录
+**第一档（priority 88-92）核心数据源 — 5 个**
 
-详细爬取方案见：
-- `docs/研究报告/研究报告-最酷zuicool爬取方案.md`
-- `docs/研究报告/研究报告-马拉马拉mararun爬取方案.md`
-- `docs/研究报告/研究报告-iranshao与shuzixindong状态评估.md`
-- `docs/研究报告/研究报告-runchina田协赛历方案.md`
+- **最酷 zuicool**（priority 90，6 绑）：上海 64264 / 杭州 88174 / 广州 16059 / 深圳 79945 / 太原 21936 / 兰州 49082
+- **马拉马拉 mararun**（priority 88，6 绑）：北京/广州/深圳/南京/武汉 用 `{city}-registration.mararun.com`；成都用 `chengdu-marathon.mararun.com`
+- **百马汇 marathonbm**（priority 89，批次绑定）：田协官方合作伙伴聚合，398 页约 4000 条赛事候选池
+- **CHINARUN 玩比赛**（priority 92，10 绑）：**海外/六大满贯独家** —— 澳门/新加坡/首尔/大阪/维也纳/布拉格/皇后镇/吴哥/黄金海岸/阳光海岸
+- **跑IN中国 runninginchina**（priority 85）：RESTful 友好分页，详情页含独家「官方网址」字段，可补全 `marathons.website_url`
+
+**第二档（priority 87）对标参考 — 1 个**
+
+- **NowRun 闹跑**（priority 87，0 绑）：本项目最直接的对标产品，Next.js SSR，主页含 ~490 个 2026 race。**仅作发现源 + 对标参考，绝不做主源**；`min_interval_seconds=86400`（每天 1 次）以体现竞品边界
+
+**辅助/已废 — 4 个（详见 iranshao 与 shuzixindong 状态评估报告）**
+
+- **数字心动 shuzixindong**（活跃，1 绑）：仅宁波有独立子站；主 SPA 不可爬
+- **田协 runchina**（活跃，0 绑）：详情页 SPA 不可爬，靠官方 PDF 赛历
+- **爱燃烧 iranshao**（活跃占位，0 绑）：旧 URL 全 404，赛事库已下线
+- **悦跑圈 thejoyrun**（不活跃）：所有赛事数据封闭在 APP 内，web 端只有占位页
+- **42travel**（不活跃）：域名已停运（504/连接超时）
+
+详细爬取方案见 `docs/研究报告/`（共 11 篇研究报告）：
+- `研究报告-最酷zuicool爬取方案.md` · `研究报告-马拉马拉mararun爬取方案.md` · `研究报告-百马汇marathonbm爬取方案.md`
+- `研究报告-chinarun玩比赛爬取方案.md` · `研究报告-NowRun-nowrun爬取方案.md` · `研究报告-runninginchina跑IN中国爬取方案.md`
+- `研究报告-iranshao与shuzixindong状态评估.md`（含 joyrun + 42travel 不可爬评估）
+- `研究报告-runchina田协赛历方案.md`
 
 ⚠️ 厦马 2026/01 与宁波 2026/03 在最酷的页面对应已结束的届次，未绑定到 2027 届。
 ⚠️ 部分顶级赛事自有平台（上马 shang-ma.com、厦马 xmim.org、杭马 hzim.org）不上 mararun，保留官网。
+⚠️ CHINARUN 即使作为海外赛事独家渠道，**默认 `is_primary=false`**，让 `marathons.website_url`（官方主域）由 `official` 主源持有；仅当官网完全失效才升为 primary。
 
 ## Known Limitations / Future Work
 
