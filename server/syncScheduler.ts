@@ -767,6 +767,33 @@ export async function archivePastEditions(): Promise<number> {
   return count;
 }
 
+// 14 天内仍标 "待公布" 的赛事自动推断为 "即将开始"
+// 仅当 registration_status 仍为 "待公布"（即 source 没有给出更精确的状态）才覆盖
+export async function flagImminentEditions(): Promise<number> {
+  ensureDatabase();
+  const result = await pool!.query(`
+    UPDATE marathon_editions e
+    SET registration_status = '即将开始',
+        field_sources = COALESCE(e.field_sources, '{}'::jsonb) || jsonb_build_object(
+          'registrationStatus', jsonb_build_object(
+            'source','auto_imminent',
+            'rule','race_date within 14 days AND status was 待公布',
+            'at', NOW()::text
+          )
+        ),
+        updated_at = NOW()
+    WHERE e.race_date >= CURRENT_DATE
+      AND e.race_date < CURRENT_DATE + INTERVAL '14 days'
+      AND e.registration_status = '待公布'
+    RETURNING e.id
+  `);
+  const count = result.rowCount ?? 0;
+  if (count > 0) {
+    log(`Auto-flagged ${count} imminent edition(s) to 即将开始.`, "sync");
+  }
+  return count;
+}
+
 export async function syncNowOnce() {
   const release = await tryAcquireSchedulerLock();
   if (!release) {
@@ -779,6 +806,12 @@ export async function syncNowOnce() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       log(`archivePastEditions failed: ${message}`, "sync");
+    }
+    try {
+      await flagImminentEditions();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      log(`flagImminentEditions failed: ${message}`, "sync");
     }
     await syncSources();
   } finally {
