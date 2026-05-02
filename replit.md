@@ -93,13 +93,22 @@ Used `webSearch` to find authoritative race dates / registration windows / offic
 
 ### 2026-05-02 third-party aggregator binding
 
-国内马拉松大量使用 **最酷 zuicool.com** 和 **马拉马拉 mararun.com** 作为唯一报名通道。已启用这两个 source 并绑定：
+国内马拉松大量使用 **最酷 zuicool.com** 和 **马拉马拉 mararun.com** 作为报名通道。已对 5 个第三方平台逐一研究并撰写文档（见 `docs/研究报告/`）：
 
-- 最酷直链 (`zuicool.com/event/{id}`): 上海 64264, 杭州 88174, 广州 16059, 深圳 79945, 太原 21936, 兰州 49082。
-- mararun 子域名: 成都 `chengdu-marathon.mararun.com`, 深圳 `shenzhen-registration.mararun.com`。
-- 这些 URL 已写入对应 edition 的 `registration_url`，用户点击"报名"即跳转最酷/马拉马拉的一键报名页。
-- 官方网站仍保留在 `marathons.website_url`（信息源），第三方在 `marathon_sources`（备份/对比源 + 报名链接源）。
-- ⚠️ 厦马 2026/01 与宁波 2026/03 在最酷的页面对应已结束的届次，未绑定到 2027 届。同步任务下次拉取最酷时若发现 2027 新页面会自动追加。
+- **最酷 zuicool**（活跃，6 绑）：上海 64264 / 杭州 88174 / 广州 16059 / 深圳 79945 / 太原 21936 / 兰州 49082
+- **马拉马拉 mararun**（活跃，6 绑）：北京/广州/深圳/南京/武汉 用 `{city}-registration.mararun.com`；成都用 `chengdu-marathon.mararun.com`
+- **数字心动 shuzixindong**（活跃，1 绑）：仅宁波有独立子站 `ningbomarathon.shuzixindong.com`，其余子域 DNS 失败；主站是 SPA 不可爬
+- **爱燃烧 iranshao**（活跃，0 绑）：旧 `/races/{id}` URL 全部 404，赛事数据库已下线，仅留新闻
+- **田协 runchina**（活跃，0 绑）：详情页 SPA 不可爬，作为通用权威信息源；建议每年 1 月解析一次官方 PDF 赛事目录
+
+详细爬取方案见：
+- `docs/研究报告/研究报告-最酷zuicool爬取方案.md`
+- `docs/研究报告/研究报告-马拉马拉mararun爬取方案.md`
+- `docs/研究报告/研究报告-iranshao与shuzixindong状态评估.md`
+- `docs/研究报告/研究报告-runchina田协赛历方案.md`
+
+⚠️ 厦马 2026/01 与宁波 2026/03 在最酷的页面对应已结束的届次，未绑定到 2027 届。
+⚠️ 部分顶级赛事自有平台（上马 shang-ma.com、厦马 xmim.org、杭马 hzim.org）不上 mararun，保留官网。
 
 ## Known Limitations / Future Work
 
