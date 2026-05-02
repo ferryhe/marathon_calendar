@@ -85,6 +85,8 @@ const marathonQuerySchema = z.object({
   status: z.string().optional(),
   sortBy: z.enum(['name', 'createdAt', 'raceDate']).default('raceDate'),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
+  // 默认只返回未来赛事；显式传 includePast=true 才返回历史。与前端 MarathonTable 默认过滤行为一致。
+  includePast: z.coerce.boolean().default(false),
 });
 
 const searchQuerySchema = z.object({
@@ -927,6 +929,13 @@ export async function registerRoutes(
         editionConditions.push(eq(marathonEditions.registrationStatus, params.status));
       }
 
+      // 默认隐藏 race_date 已过的赛事（与前端过滤一致），显式传 status='已完赛' 或 includePast=true 时不过滤
+      if (!params.includePast && params.status !== '已完赛') {
+        editionConditions.push(
+          sql`(${marathonEditions.raceDate} IS NULL OR ${marathonEditions.raceDate} >= CURRENT_DATE)`
+        );
+      }
+
       const editionWhereClause =
         editionConditions.length > 1 ? and(...editionConditions) : editionConditions[0];
 
@@ -951,7 +960,8 @@ export async function registerRoutes(
       const requiresEditionFilter =
         params.year !== undefined ||
         params.month !== undefined ||
-        params.status !== undefined;
+        params.status !== undefined ||
+        !params.includePast;
 
       const enrichedRecords = baseMarathons
         .map((marathon) => {
