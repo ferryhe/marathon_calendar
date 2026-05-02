@@ -198,6 +198,18 @@ PR-1 已完成。Tier B/C 字段（city_guide / weather / lottery_history / race
 
 **Prod 事故记录**：首次跑 prod 时 `EXISTING_MATCH` 硬编码 dev UUIDs，Bordeaux UUID 在 prod 不同导致 FK 失败崩溃；重跑时旧版 `nameAvailable` 用 `(RR1)` 后缀重试逻辑生成 87 条重复"鬼影"，已通过 SQL 一次清理（删除依赖 marathon_sources / marathon_editions 后删 marathons），并把脚本改为 name 查表 + 严格 skip。
 
+### 2026-05-02 Race Roster 官网回填（深挖事件页）
+
+raceroster.com 事件页 JSON-LD 不暴露官网，需从描述块 `event-description__overflow-protector` 抓 `<a href>`。
+
+**抓取改进**（`script/fetch-raceroster-events.ts`）：把旧 `Click here|Website` 锚文本规则（命中率 9% = 18/203）换成"描述块内首个根路径外链 + 黑名单（社媒/CDN/maps/protecht/amazonaws）"，命中率拉到 64% = 130/203。
+
+**回填脚本**（`script/update-raceroster-websites.ts`，新建）：仅给 RR 已绑定但 `website_url IS NULL` 的赛事补官网。**质量过滤**：要求 host 与赛事 slug/`canonical_name` 至少 1 个 ≥4 字符 token 重合，否则视作赞助商/酒店/PDF/慈善噪音并 skip（实际把 90 条候选过滤到 43 条高质量）。dev/prod 各 +43 →（ 18 + 43 = 61）/168 ≈ 36% RR 赛事现在有官网。
+
+**已知遗留**：仍有 47 个赛事被质量过滤误杀（如 "Prince Edward Island Marathon" → peimarathon.ca 因 `peimarathon` 未拆词而落空），admin UI 可手工补。
+
+**完整使用文档** → `.local/skills/raceroster/SKILL.md`
+
 ## Known Limitations / Future Work
 
 - `MarathonTable.tsx` line 153-157 无条件过滤 race_date<today 的赛事，导致批次 h 的 57 个春季历史赛事在前端不可见。如需让用户能搜索到 "石家庄马拉松" 等历史赛事，应在 Home.tsx 加 `showPast` 状态 + 状态筛选器加上 `已完赛` 选项 + 把 prop 传给 MarathonTable 让 line 156 条件化。
