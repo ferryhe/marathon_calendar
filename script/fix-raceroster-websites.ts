@@ -30,6 +30,15 @@ const BLACKLIST = [
   "tiktok.com",
   "mailto:",
   "tel:",
+  // Route/map platforms — not official race sites
+  "gaiagps.com",
+  "strava.app.link",
+  "alltrails.com",
+  "mapmyrun.com",
+  "ridewithgps.com",
+  // Generic registration aggregators (org pages already covered when no overlap)
+  "runsignup.com/race/search",
+  "active.com/search",
 ];
 
 function isAcceptable(href: string): boolean {
