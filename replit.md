@@ -171,6 +171,33 @@ PR-1 已完成。Tier B/C 字段（city_guide / weather / lottery_history / race
 
 **最终库存**：365/378 国内赛事有 NowRun 源（96.6%），365 条 2026 届次 distance_options 全覆盖。
 
+### 2026-05-02 Race Roster 海外全马批量导入
+
+把 raceroster.com 上 ~200 场全程马拉松全部接入日历，海外覆盖从 25 暴增到 ~190。
+
+**抓取脚本**：`script/fetch-raceroster-events.ts`
+- 入口：`https://sitemap.raceroster.com/sitemaps/events_2026.xml`（17,425 URLs）→ 筛 466 含 "marathon" → 人工保留 203 个看似全马 URL → `/tmp/rr-marathon-clean.txt`。
+- 8 路并发 + 12s 超时 + 1 次重试，从每页 `<script type=ld+json>` 提取 Event JSON-LD（name / locality / addressCountry / startDate / image / description）+ best-effort 外链官网。203/203 成功 → `/tmp/rr-events.tsv`。
+- `ISO_TO_NAME` 把 ISO-2 国家码映射成项目命名（DE→Germany / GB→UK / US→USA / KR→South Korea 等）。
+
+**导入脚本**：`script/import-raceroster.ts`（`--apply` 才写库）
+- HTML 实体解码（`&#039;` → `'` 等）。
+- **噪音过滤**（24 条）：charity portal / volunteer / expo / vendors / shakeout / workout / pacer team / first-timer program / corporate challenge / kick-off run / mini marathon / XC / 5 miler 等。
+- **半马过滤**（9 条）：`\bdemi[\s-]?marathon\b`（魁北克 Demi-Marathon 系列）。
+- **国家覆写**（37 条 regex）：raceroster JSON-LD 里 `addressCountry` 反映"卖票方"而非赛事所在地，导致旅游打包赛事错误归类（阿根廷代理卖巴拉圭/秘鲁/玻利维亚 → 全标 AR；南非代理卖整个非洲 → 全标 ZA）。按赛事名 regex 强制覆写城市+国家。
+- **去重**：`dedupeStem(name) | locality_loose | date` 三元组，剥离 "Run for a Reason" / "International" / "(Canada site)" / "Weekend" / "Leg" 等干扰词。
+- **既有匹配表**：`EXISTING_MATCH_BY_NAME` 把 7 个 rr_id 映射到现有海外赛事（柏林/开普敦/巴黎/悉尼/纽约/芝加哥/波尔多）的 Chinese name；运行时按 name 查 UUID（dev/prod 通用）。已存在的赛事只补 `marathon_sources` 绑定（`is_primary=false`），不重插。
+- **新增赛事**：在事务内一次性插 `marathons` + `marathon_editions` (publish_status=published) + `marathon_sources` (is_primary=true)，避免部分写入留孤儿 marathon 行。
+- **幂等**：`nameAvailable()` 严格按 name/canonical_name 唯一约束去查重；命中已存在直接 skip（不再加 `(RR1)` 后缀避免重跑产生鬼影）。
+
+**新建 source 行**：`raceroster-001-international-2026`，name "Race Roster"，type=platform。
+
+**最终库存**：dev 564 / prod 563 marathons，168 / 167 RR 绑定，54 国家（原 25 → 53 海外国家覆盖，新增 38 国如布隆迪、卢旺达、圣马丁、安提瓜、北马里亚纳群岛等）。
+
+**已知 trade-off**：新增 161 个赛事保留英文/原文名（如 "BMW BERLIN-MARATHON 2026"），未译中文。批量翻译留作后续增强工作（可考虑 alias 表）。
+
+**Prod 事故记录**：首次跑 prod 时 `EXISTING_MATCH` 硬编码 dev UUIDs，Bordeaux UUID 在 prod 不同导致 FK 失败崩溃；重跑时旧版 `nameAvailable` 用 `(RR1)` 后缀重试逻辑生成 87 条重复"鬼影"，已通过 SQL 一次清理（删除依赖 marathon_sources / marathon_editions 后删 marathons），并把脚本改为 name 查表 + 严格 skip。
+
 ## Known Limitations / Future Work
 
 - `MarathonTable.tsx` line 153-157 无条件过滤 race_date<today 的赛事，导致批次 h 的 57 个春季历史赛事在前端不可见。如需让用户能搜索到 "石家庄马拉松" 等历史赛事，应在 Home.tsx 加 `showPast` 状态 + 状态筛选器加上 `已完赛` 选项 + 把 prop 传给 MarathonTable 让 line 156 条件化。
