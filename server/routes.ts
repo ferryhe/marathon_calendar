@@ -24,6 +24,7 @@ import {
 } from "@shared/schema";
 import { isChinaCountry, canonicalCountryValue } from "@shared/utils";
 import { db } from "./db";
+import { log } from "./logger";
 import { hashPassword, verifyPassword } from "./auth";
 import {
   AUTO_UPDATE_DISABLED_NEXT_CHECK_AT,
@@ -40,6 +41,26 @@ const reviewPayloadSchema = insertReviewSchema.omit({
   userId: true,
   userDisplayName: true,
 });
+
+const PUBLIC_SYNC_RATE_LIMIT_MS = 60_000;
+let lastPublicSyncTriggerAt = 0;
+let activeSyncPromise: Promise<void> | null = null;
+
+function startBackgroundSync() {
+  if (activeSyncPromise) return activeSyncPromise;
+  const promise = syncNowOnce()
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      log(`Public sync trigger failed: ${message}`, "sync");
+    })
+    .finally(() => {
+      if (activeSyncPromise === promise) {
+        activeSyncPromise = null;
+      }
+    });
+  activeSyncPromise = promise;
+  return promise;
+}
 
 const marathonEditionIdSchema = z.union([
   z.string().uuid(),
@@ -1083,6 +1104,89 @@ export async function registerRoutes(
             averageRating: Number(record.averageRating ?? 0),
           },
         })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/marathons/sync-status", async (_req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const [latestRun] = await database
+        .select({
+          finishedAt: marathonSyncRuns.finishedAt,
+          startedAt: marathonSyncRuns.startedAt,
+          status: marathonSyncRuns.status,
+        })
+        .from(marathonSyncRuns)
+        .where(sql`${marathonSyncRuns.finishedAt} IS NOT NULL`)
+        .orderBy(desc(marathonSyncRuns.finishedAt))
+        .limit(1);
+
+      const now = new Date();
+      const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const recentByStatus = await database
+        .select({
+          status: marathonSyncRuns.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(marathonSyncRuns)
+        .where(sql`${marathonSyncRuns.startedAt} >= ${since24h}`)
+        .groupBy(marathonSyncRuns.status);
+
+      res.json({
+        data: {
+          lastFinishedAt: latestRun?.finishedAt ?? null,
+          lastStatus: latestRun?.status ?? null,
+          isRunning: !!activeSyncPromise,
+          rateLimitedUntil:
+            lastPublicSyncTriggerAt > 0
+              ? new Date(lastPublicSyncTriggerAt + PUBLIC_SYNC_RATE_LIMIT_MS).toISOString()
+              : null,
+          last24h: recentByStatus,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/marathons/refresh", async (_req, res, next) => {
+    try {
+      ensureDatabase();
+
+      if (activeSyncPromise) {
+        return res.json({
+          data: {
+            status: "in_progress" as const,
+            message: "数据同步正在进行中",
+          },
+        });
+      }
+
+      const now = Date.now();
+      const elapsed = now - lastPublicSyncTriggerAt;
+      if (elapsed < PUBLIC_SYNC_RATE_LIMIT_MS) {
+        const retryAfterSeconds = Math.ceil((PUBLIC_SYNC_RATE_LIMIT_MS - elapsed) / 1000);
+        return res.status(429).json({
+          data: {
+            status: "rate_limited" as const,
+            retryAfterSeconds,
+            message: `请求过于频繁，请在 ${retryAfterSeconds} 秒后重试`,
+          },
+        });
+      }
+
+      lastPublicSyncTriggerAt = now;
+      startBackgroundSync();
+
+      res.json({
+        data: {
+          status: "started" as const,
+          triggeredAt: new Date(now).toISOString(),
+          message: "已开始更新数据",
+        },
       });
     } catch (error) {
       next(error);

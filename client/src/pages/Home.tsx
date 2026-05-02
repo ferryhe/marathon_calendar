@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { Heart, MessageSquare, RefreshCw, Search, SlidersHorizontal, User, X } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MarathonTable } from "@/components/MarathonTable";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser, useMyFavorites } from "@/hooks/useAuth";
+import { apiRequest } from "@/lib/queryClient";
 import {
   Select,
   SelectContent,
@@ -14,6 +16,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
+
+type SyncStatus = {
+  lastFinishedAt: string | null;
+  lastStatus: string | null;
+  isRunning: boolean;
+  rateLimitedUntil: string | null;
+  last24h: Array<{ status: string; count: number }>;
+};
+
+function formatRelativeTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return null;
+  const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (diffSec < 60) return "刚刚更新";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} 分钟前更新`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} 小时前更新`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay} 天前更新`;
+  return null;
+}
 
 export default function Home() {
   const [region, setRegion] = useState<"China" | "Overseas">("China");
@@ -25,10 +50,37 @@ export default function Home() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [viewMode, setViewMode] = useState<"all" | "mine">("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [, setNowTick] = useState(0);
+  const wasRunningRef = useRef(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: currentUser } = useCurrentUser();
   const { data: favorites = [], isLoading: isFavoritesLoading } = useMyFavorites(!!currentUser);
+
+  const { data: syncStatusResp } = useQuery<{ data: SyncStatus }>({
+    queryKey: ["/api/marathons/sync-status"],
+    refetchInterval: isUpdating ? 2000 : 60_000,
+  });
+  const syncStatus = syncStatusResp?.data;
+
+  useEffect(() => {
+    const id = setInterval(() => setNowTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!syncStatus) return;
+    if (wasRunningRef.current && !syncStatus.isRunning) {
+      setIsUpdating(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/marathons"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/marathons/upcoming"] });
+      toast({ title: "数据已更新", duration: 1200 });
+    }
+    wasRunningRef.current = syncStatus.isRunning;
+  }, [syncStatus, queryClient, toast]);
+
+  const lastUpdatedText = formatRelativeTime(syncStatus?.lastFinishedAt ?? null);
 
   const favoriteMarathonIds = useMemo(
     () => new Set(favorites.map((item) => item.marathon.id)),
@@ -53,15 +105,38 @@ export default function Home() {
     document.title = viewMode === "mine" ? "我的收藏 - 马拉松日历" : "马拉松日历";
   }, [viewMode]);
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
+    if (isUpdating) return;
     setIsUpdating(true);
-    setTimeout(() => {
+    try {
+      const res = await apiRequest("POST", "/api/marathons/refresh");
+      const body = (await res.json()) as { data: { status: string; message?: string } };
+      const status = body?.data?.status;
+      if (status === "started") {
+        toast({ title: "正在获取最新数据…", duration: 1500 });
+        queryClient.invalidateQueries({ queryKey: ["/api/marathons/sync-status"] });
+      } else if (status === "in_progress") {
+        toast({ title: "数据同步进行中", duration: 1500 });
+        queryClient.invalidateQueries({ queryKey: ["/api/marathons/sync-status"] });
+      } else {
+        toast({ title: body?.data?.message ?? "请稍候再试", duration: 1500 });
+        setIsUpdating(false);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "更新失败";
+      const match = message.match(/^(\d+):\s*(.*)$/);
+      if (match && match[1] === "429") {
+        try {
+          const payload = JSON.parse(match[2]) as { data?: { message?: string } };
+          toast({ title: payload?.data?.message ?? "请稍候再试", duration: 1500 });
+        } catch {
+          toast({ title: "请稍候再试", duration: 1500 });
+        }
+      } else {
+        toast({ title: "更新失败", description: message, duration: 2000 });
+      }
       setIsUpdating(false);
-      toast({
-        title: "已更新",
-        duration: 1000,
-      });
-    }, 800);
+    }
   };
 
   const handleToggleMine = () => {
@@ -99,9 +174,19 @@ export default function Home() {
                 alt=""
                 className="w-6 h-6 rounded-md shrink-0"
               />
-              <h1 className="text-base font-semibold truncate" data-testid="text-app-title">
-                马拉松日历
-              </h1>
+              <div className="flex flex-col min-w-0 leading-tight">
+                <h1 className="text-base font-semibold truncate" data-testid="text-app-title">
+                  马拉松日历
+                </h1>
+                {(lastUpdatedText || syncStatus?.isRunning) && (
+                  <span
+                    className="text-[10px] text-muted-foreground truncate"
+                    data-testid="text-last-updated"
+                  >
+                    {syncStatus?.isRunning ? "正在更新…" : lastUpdatedText}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
