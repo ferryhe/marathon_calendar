@@ -1280,6 +1280,19 @@ export async function registerRoutes(
           ),
         )
         .orderBy(desc(marathonEditions.year));
+
+      // Get associated information sources (NowRun, official websites, etc.)
+      const sources = await database
+        .select({
+          id: marathonSources.id,
+          sourceId: marathonSources.sourceId,
+          sourceUrl: marathonSources.sourceUrl,
+          isPrimary: marathonSources.isPrimary,
+          lastCheckedAt: marathonSources.lastCheckedAt,
+        })
+        .from(marathonSources)
+        .where(eq(marathonSources.marathonId, req.params.id))
+        .orderBy(desc(marathonSources.isPrimary));
       
       // Get reviews with user profile data for avatar/display name rendering.
       const reviews = await database
@@ -1308,6 +1321,7 @@ export async function registerRoutes(
       res.json({
         ...record,
         editions,
+        sources,
         reviews: {
           items: reviews,
           averageRating: avgRating,

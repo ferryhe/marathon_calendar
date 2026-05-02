@@ -3,6 +3,7 @@ import { Link, useRoute } from "wouter";
 import {
   ArrowLeft,
   Calendar,
+  ExternalLink,
   Flag,
   Heart,
   MapPin,
@@ -264,6 +265,46 @@ export default function MarathonDetailPage() {
                 )}
               </CardContent>
             </Card>
+
+            {data.sources && data.sources.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>其他信息源</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    本页信息来自以下采集源，可点击查看原始页面以获取最新或更详细内容
+                  </p>
+                  <div className="space-y-2">
+                    {data.sources.map((source) => (
+                      <a
+                        key={source.id}
+                        href={source.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between gap-3 rounded-xl border p-3 hover:bg-secondary/30 transition-colors"
+                        data-testid={`link-source-${source.id}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <ExternalLink className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {source.sourceId}
+                            </p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {source.sourceUrl}
+                            </p>
+                          </div>
+                        </div>
+                        {source.isPrimary && (
+                          <Badge variant="secondary" className="flex-shrink-0">主源</Badge>
+                        )}
+                      </a>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader>

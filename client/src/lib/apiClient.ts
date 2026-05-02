@@ -27,8 +27,17 @@ export interface MarathonWithEdition extends MarathonDTO {
 
 export type MarathonListItem = MarathonWithEdition;
 
+export interface MarathonSourceDTO {
+  id: string;
+  sourceId: string;
+  sourceUrl: string;
+  isPrimary: boolean;
+  lastCheckedAt: string | null;
+}
+
 export interface MarathonDetail extends MarathonDTO {
   editions: MarathonEditionDTO[];
+  sources?: MarathonSourceDTO[];
   reviews: {
     items: ReviewDTO[];
     averageRating: number;
