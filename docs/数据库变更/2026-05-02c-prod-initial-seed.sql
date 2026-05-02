@@ -165,7 +165,7 @@ INSERT INTO marathon_sources ("id", "marathon_id", "source_id", "source_url", "i
   ('976cd549-ed41-4806-983a-f196587c71b7', '97c3b474-c114-440a-bc70-bd41cc2d1681', 'be031596-9f8b-4a79-a632-f990bedf4d36', 'https://guangzhou-registration.mararun.com/', FALSE, NULL, NULL, NULL, NULL, NULL, '2026-05-02T16:09:11.449049+00:00'),
   ('537e9cb7-b337-487d-baca-2b7c297f1c55', 'd1bf67a6-2bd5-41d2-a92c-31e71fb5974a', 'be031596-9f8b-4a79-a632-f990bedf4d36', 'https://wuhan-registration.mararun.com/', FALSE, NULL, NULL, NULL, NULL, NULL, '2026-05-02T16:09:11.449049+00:00'),
   ('4a3b6040-0838-480a-a5a4-424d811ad27a', '31e3b799-4f25-47af-bf29-2e945a7e8b4a', 'be031596-9f8b-4a79-a632-f990bedf4d36', 'https://nanjing-registration.mararun.com/', FALSE, NULL, NULL, NULL, NULL, NULL, '2026-05-02T16:09:11.449049+00:00')
-ON CONFLICT ("marathon_id", "source_id") DO UPDATE SET "source_url" = EXCLUDED."source_url", "is_primary" = EXCLUDED."is_primary", "last_checked_at" = EXCLUDED."last_checked_at", "last_hash" = EXCLUDED."last_hash", "last_http_status" = EXCLUDED."last_http_status", "last_error" = EXCLUDED."last_error", "next_check_at" = EXCLUDED."next_check_at", "updated_at" = NOW();
+ON CONFLICT ("marathon_id", "source_id") DO UPDATE SET "source_url" = EXCLUDED."source_url", "is_primary" = EXCLUDED."is_primary", "last_checked_at" = EXCLUDED."last_checked_at", "last_hash" = EXCLUDED."last_hash", "last_http_status" = EXCLUDED."last_http_status", "last_error" = EXCLUDED."last_error", "next_check_at" = EXCLUDED."next_check_at";
 
 -- 5) 校验
 SELECT 'sources' AS t, COUNT(*) AS n FROM sources
