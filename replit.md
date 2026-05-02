@@ -137,6 +137,24 @@ Used `webSearch` to find authoritative race dates / registration windows / offic
 
 **最终库存**：403 marathons（378 China + 25 海外），2026 editions 状态分布：待公布 301 / 已完赛 72 / 报名中 10 / 已截止 8 / 即将开始 2。
 
+### 2026-05-02 NowRun 数据丰富化（PR-1）
+
+从 NowRun 详情页解析出每个 race 的富数据，写入 `marathons` + `marathon_editions` 新增字段，并在详情页渲染。
+
+**Schema 新增**：
+- `marathons.{certification_grade, organizer, official_wechat_account}`
+- `marathon_editions.{distance_options(jsonb), highlights, start_location, finish_location, packet_pickup_location, medal_image_urls(text[]), registration_channels(text[]), official_documents(jsonb)}`
+
+**回填脚本**：`script/backfill-nowrun-rich.ts`
+- 对所有 NowRun 绑定的 2026 届次（共 334 条）执行 fetch + 轻量 HTML→md 解析；fetch 带 8s AbortController 超时。
+- CLI: `--offset=N --limit=N --dry --url=...`，分块跑避免单次进程超长。
+- Dev + Prod 各 5 批跑完，extracted=334/334 0 失败。
+- 覆盖率（prod）：cert/organizer 334、wechat 295、distance_options 334、highlights 51、medal 30、channels 50、official_documents 158。
+
+**前端**：`MarathonDetail.tsx` 用 IIFE 包裹 `latest = data.editions[0]`，新增 4 张卡片（赛事亮点 / 赛事信息含设项+起终点+领物 / 赛事奖牌 / 报名与官方信息含文档按钮+渠道Pills+公众号），头部加 A/B/C 类认证 badge 和主办方。`apiClient.ts` 加 `DistanceOption`/`OfficialDocuments`/扩展 `MarathonEditionDTO`。
+
+PR-1 已完成。Tier B/C 字段（city_guide / weather / lottery_history / race_start_time）留待后续 PR。
+
 ## Known Limitations / Future Work
 
 - `MarathonTable.tsx` line 153-157 无条件过滤 race_date<today 的赛事，导致批次 h 的 57 个春季历史赛事在前端不可见。如需让用户能搜索到 "石家庄马拉松" 等历史赛事，应在 Home.tsx 加 `showPast` 状态 + 状态筛选器加上 `已完赛` 选项 + 把 prop 传给 MarathonTable 让 line 156 条件化。

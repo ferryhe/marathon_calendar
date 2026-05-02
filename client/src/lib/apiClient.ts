@@ -1,6 +1,20 @@
 import type { Marathon } from "@shared/schema";
 
 // DTO types with proper date serialization (dates come as ISO strings from API)
+export interface DistanceOption {
+  kind: string;
+  capacity?: number;
+  price?: number;
+}
+
+export interface OfficialDocuments {
+  registrationNotice?: string;
+  raceRules?: string;
+  courseInfo?: string;
+  packetPickup?: string;
+  officialWebsite?: string;
+}
+
 export interface MarathonEditionDTO {
   id: string;
   marathonId: string;
@@ -10,6 +24,15 @@ export interface MarathonEditionDTO {
   registrationUrl: string | null;
   registrationOpenDate: string | null;
   registrationCloseDate: string | null;
+  // PR-1 rich fields (NowRun)
+  distanceOptions?: DistanceOption[] | null;
+  highlights?: string | null;
+  startLocation?: string | null;
+  finishLocation?: string | null;
+  packetPickupLocation?: string | null;
+  medalImageUrls?: string[] | null;
+  registrationChannels?: string[] | null;
+  officialDocuments?: OfficialDocuments | null;
   lastSyncedAt: string | null;
   nextSyncAt: string | null;
   createdAt: string;

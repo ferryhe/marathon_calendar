@@ -41,6 +41,10 @@ export const marathons = pgTable(
     country: text("country"),
     description: text("description"),
     websiteUrl: text("website_url"),
+    // PR-1 (2026-05-02): rich fields harvested from NowRun
+    certificationGrade: text("certification_grade"), // 'A' | 'B' | 'C' | null
+    organizer: text("organizer"),
+    officialWechatAccount: text("official_wechat_account"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -69,6 +73,23 @@ export const marathonEditions = pgTable(
     registrationUrl: text("registration_url"),
     registrationOpenDate: date("registration_open_date"),
     registrationCloseDate: date("registration_close_date"),
+    // PR-1 (2026-05-02): rich fields per edition harvested from NowRun
+    distanceOptions: jsonb("distance_options").$type<
+      Array<{ kind: string; capacity?: number; price?: number }>
+    >(),
+    highlights: text("highlights"),
+    startLocation: text("start_location"),
+    finishLocation: text("finish_location"),
+    packetPickupLocation: text("packet_pickup_location"),
+    medalImageUrls: text("medal_image_urls").array(),
+    registrationChannels: text("registration_channels").array(),
+    officialDocuments: jsonb("official_documents").$type<{
+      registrationNotice?: string;
+      raceRules?: string;
+      courseInfo?: string;
+      packetPickup?: string;
+      officialWebsite?: string;
+    } | null>(),
     // Publishing state: front-end only shows published editions by default.
     publishStatus: text("publish_status").default("draft").notNull(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
