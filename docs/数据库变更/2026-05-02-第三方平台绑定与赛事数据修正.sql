@@ -116,6 +116,23 @@ UPDATE marathon_editions e SET registration_url = 'https://wuhan-registration.ma
   FROM marathons m WHERE e.marathon_id = m.id AND m.canonical_name = 'wuhan-marathon-2027' AND e.year = 2027;
 
 -- -----------------------------------------------------------------------------
+-- Part 3b. 开普敦马拉松日期修正（2026 因申请 WMM 由 10 月改为 5 月）
+-- 来源：https://capetownmarathon.com/why-may-2026/
+-- -----------------------------------------------------------------------------
+UPDATE marathon_editions e
+SET race_date = '2026-05-24',
+    registration_status = '报名中',
+    registration_url = 'https://capetownmarathon.com/international-entry/',
+    field_sources = COALESCE(e.field_sources, '{}'::jsonb) || jsonb_build_object(
+      'raceDate', jsonb_build_object('source','web_search','url','https://capetownmarathon.com/','at', NOW()::text),
+      'registrationStatus', jsonb_build_object('source','web_search','url','https://capetownmarathon.com/marathon/','at', NOW()::text),
+      'registrationUrl', jsonb_build_object('source','web_search','url','https://capetownmarathon.com/international-entry/','at', NOW()::text)
+    ),
+    updated_at = NOW()
+FROM marathons m
+WHERE e.marathon_id = m.id AND m.canonical_name = 'cape-town-marathon-2026' AND e.year = 2026;
+
+-- -----------------------------------------------------------------------------
 -- Part 4. 校验
 -- -----------------------------------------------------------------------------
 
