@@ -96,7 +96,7 @@ export function MarathonTable({
   const { data, isLoading, error } = useMarathons({
     region,
     search: searchQuery || undefined,
-    limit: 20,
+    limit: 100,
     page: currentPage,
     year: filters.year,
     month: filters.month,
