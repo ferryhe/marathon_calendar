@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Xagj-1BS-WSzQbyPYxuND"
+uri = "file://exports/marathon-prod-20260503-0449.tar.gz"
+type = "unspecified"
+title = "Marathon production DB dump (生产库 SQL 备份)"
