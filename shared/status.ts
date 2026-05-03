@@ -24,14 +24,16 @@ export function isEditionStatus(v: unknown): v is EditionStatus {
   return typeof v === "string" && (STATUS_VALUES as readonly string[]).includes(v);
 }
 
-// nowrun-style colorways (Tailwind v4 utility classes)
+// nowrun-style colorways (Tailwind v4 utility classes).
+// Light mode uses -100 backgrounds (not -50) so the badge stands out from the
+// white card background. Borders use -300/400 for stronger edges.
 export const STATUS_COLOR_CLASSES: Record<EditionStatus, string> = {
-  upcoming: "text-amber-600 border-amber-300 bg-amber-50 dark:text-amber-400 dark:border-amber-800/60 dark:bg-amber-900/20",
-  open: "text-emerald-700 border-emerald-300 bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800/60 dark:bg-emerald-900/20",
-  closed: "text-blue-600 border-blue-300 bg-blue-50 dark:text-blue-300 dark:border-blue-800/60 dark:bg-blue-900/20",
-  racing: "text-purple-600 border-purple-300 bg-purple-50 dark:text-purple-300 dark:border-purple-800/60 dark:bg-purple-900/20",
-  ended: "text-gray-500 border-gray-300 bg-gray-100 dark:text-gray-400 dark:border-gray-700 dark:bg-gray-800/40",
-  cancelled: "text-red-600 border-red-300 bg-red-50 dark:text-red-300 dark:border-red-800/60 dark:bg-red-900/20",
+  upcoming: "text-amber-700 border-amber-400 bg-amber-100 dark:text-amber-300 dark:border-amber-700/70 dark:bg-amber-900/30",
+  open: "text-emerald-700 border-emerald-400 bg-emerald-100 dark:text-emerald-300 dark:border-emerald-700/70 dark:bg-emerald-900/30",
+  closed: "text-blue-700 border-blue-400 bg-blue-100 dark:text-blue-300 dark:border-blue-700/70 dark:bg-blue-900/30",
+  racing: "text-purple-700 border-purple-400 bg-purple-100 dark:text-purple-300 dark:border-purple-700/70 dark:bg-purple-900/30",
+  ended: "text-gray-600 border-gray-400 bg-gray-200 dark:text-gray-400 dark:border-gray-600 dark:bg-gray-800/60",
+  cancelled: "text-red-700 border-red-400 bg-red-100 dark:text-red-300 dark:border-red-700/70 dark:bg-red-900/30",
 };
 
 export const STATUS_ICON: Record<EditionStatus, string> = {

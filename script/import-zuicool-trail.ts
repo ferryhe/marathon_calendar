@@ -464,10 +464,9 @@ async function upsertEvent(ev: ParsedEvent, sourceId: string): Promise<"inserted
   return action;
 }
 
+import { computeEditionStatus } from "../shared/status.js";
 function computeStatus(raceDate: string | null): string {
-  if (!raceDate) return "upcoming";
-  const today = new Date().toISOString().slice(0, 10);
-  return raceDate >= today ? "upcoming" : "ended";
+  return computeEditionStatus({ raceDate });
 }
 
 async function main() {

@@ -297,10 +297,12 @@ async function ensureSourceId(): Promise<string> {
   return inserted.rows[0].id;
 }
 
+// Derive status using shared logic so race-day → "racing", past → "ended",
+// future → "upcoming". ITRA exposes no registration window so we never compute
+// "open"/"closed" — that's expected and matches our taxonomy.
+import { computeEditionStatus } from "../shared/status.js";
 function computeStatus(raceDate: string | null): string {
-  if (!raceDate) return "upcoming";
-  const today = new Date().toISOString().slice(0, 10);
-  return raceDate >= today ? "upcoming" : "ended";
+  return computeEditionStatus({ raceDate });
 }
 
 async function upsertEvent(

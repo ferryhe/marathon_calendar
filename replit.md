@@ -211,6 +211,16 @@ raceroster.com 事件页 JSON-LD 不暴露官网，需从描述块 `event-descri
 
 **完整使用文档** → `.local/skills/raceroster/SKILL.md`
 
+### 2026-05-03 越野赛事数据质量审查（链接 / 状态 / 配色）
+
+**链接核查（结论：所有 1213 条越野赛事都有可点击外链）**：itra 886 + zuicool 997 + raceroster 323 + 杂项 4 = 1213 条全部填了 `marathons.website_url`（HEAD 抽样均 200）。`marathon_editions.registration_url` 是 0 — 三个越野源都不暴露报名页直链，前端 EventDetails / MarathonTable / MarathonDetail 都已在没有 reg url 时回退到 website_url，无需改。
+
+**状态来源（结论：越野状态只能从 race_date 推，因为没有报名期）**：itra/zuicool/raceroster 三个 importer 抓不到 registration_open/close_date，所以 `computeStatus(raceDate)` 只输出 `upcoming`/`ended`，永远不会出现 `open`/`closed`。这是数据本身的限制，不是 bug。马拉松类（nowrun + 手工）有报名期，所以保留 419 upcoming / 11 open / 8 closed / 8 racing / 118 ended 的全状态分布。
+
+**状态刷新脚本** `script/refresh-edition-statuses.ts`（dev + prod 已跑）：扫所有 published edition，调用 `recomputeStatus()`（私有版 `resolveEditionStatus`，区别是不会因为 stored=upcoming 就短路返回，让 race-day 能正确翻成 racing、过去日期翻成 ended）。本次跑出 dev=45 / prod=44 处变更（绝大多数 upcoming → racing 36 个 / racing → ended 8 个）。建议每天 cron 一次，或在每次 importer 跑完后顺带跑。`import-itra-trail.ts` / `import-zuicool-trail.ts` 的 `computeStatus` 也改成调 shared `computeEditionStatus`，新导入的赛事就能正确处理 race day。
+
+**配色冲突（白底白字感）**：`STATUS_COLOR_CLASSES` 之前用 `bg-amber-50/blue-50/...` 这些 50 色阶，hex 几乎是纯白（amber-50=#fffbeb），落在 bg-card=#ffffff 的卡片上几乎看不到边界，给人"白底白字"的视错觉。已统一上调到 `bg-{color}-100` + `border-{color}-400` + `text-{color}-700`（暗色模式同步加深到 -700/-30），徽章在白卡片上有明显色块边界。
+
 ### 2026-05-03 首页加国家筛选
 
 海外越野上千条事件后，月份/状态筛选不够用。新增 `/api/marathons/countries?region=&kind=` 端点（按 region+kind 分组返回 `[{country,count}]`，按 count desc 排序），`apiClient.getMarathonCountries()` 包装。`Home.tsx` 加 `countryFilter` 状态 + Select（仅在 `region!==China && countries.length>1` 时显示，避免大陆 1 个国家时占位），切换 region/kind 时自动重置为 "all"。`MarathonTable` props 与 `useMarathons` 透传 `country`。`filters.country` / `filters.allCountries` 已加入 zh/en i18n。后端 `/api/marathons` 已支持 country=eq 早就具备，无需改动。
