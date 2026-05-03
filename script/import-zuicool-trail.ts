@@ -147,30 +147,56 @@ function iso(y: number, m: number, d: number): string {
  *  We extract every "<float>KM" occurrence, dedupe, and surface the matching
  *  organizer-given group label ("kind") so the UI shows e.g. 13.14KM, 21KM.
  */
+/** Normalize a (value, unit) match into canonical "<float>KM".
+ *  Handles km/k/公里 (1:1) and mile/miles/mi/英里 (× 1.609344). Rounds to 2dp,
+ *  trims trailing zeros, then re-appends "KM". Returns null if unit unknown. */
+function toKm(value: string, unit: string): string | null {
+  const u = unit.toLowerCase();
+  let km: number;
+  if (u === "km" || u === "k" || u === "公里") {
+    km = parseFloat(value);
+  } else if (u === "mile" || u === "miles" || u === "mi" || u === "英里") {
+    km = parseFloat(value) * 1.609344;
+  } else {
+    return null;
+  }
+  if (!Number.isFinite(km)) return null;
+  // Round to 2 decimals, trim trailing zeros: 21.0975 → 21.1, 42.195 → 42.2.
+  const s = km.toFixed(2).replace(/\.?0+$/, "");
+  return `${s}KM`;
+}
+
 function parseDistances(desc: string): Array<{ kind: string; capacity?: number }> {
   const out: Array<{ kind: string; capacity?: number }> = [];
   const seen = new Set<string>();
-  // First pass: detail blocks "...XX KM(or K)：YY人" give us name + capacity.
-  // Distance units observed: KM, K, km, 公里 — all stripped to canonical "KM".
-  const detail = desc.matchAll(/(\d+(?:\.\d+)?)\s*(?:KM|km|K|公里)\s*[：:]\s*(\d+)\s*人/g);
+  // Unit alternation, ordered longest-first so "miles" wins over "mi" and
+  // "公里" wins over "里". `K` alone matches but is restricted by the negative
+  // lookahead `(?!\w)` so "K8GAMES" / "Km/h" don't get picked up.
+  const UNIT = "(KM|km|K|公里|miles|mile|mi|英里)";
+  // First pass: detail blocks "...XX <unit>：YY人" give us name + capacity.
+  const detail = desc.matchAll(
+    new RegExp(`(\\d+(?:\\.\\d+)?)\\s*${UNIT}(?!\\w)\\s*[：:]\\s*(\\d+)\\s*人`, "g"),
+  );
   for (const m of detail) {
-    const kind = `${m[1]}KM`;
-    if (seen.has(kind)) continue;
+    const kind = toKm(m[1], m[2]);
+    if (!kind || seen.has(kind)) continue;
     seen.add(kind);
-    const cap = parseInt(m[2], 10);
+    const cap = parseInt(m[3], 10);
     out.push({ kind, capacity: Number.isFinite(cap) ? cap : undefined });
   }
   // Second pass: lead summary "设...100K（1000人）、65K(1500人）..." mixed full/half
-  // width brackets. Capture distance + optional capacity. Require unit suffix
-  // so we don't pick up "2026年" or scale numbers.
+  // width brackets. Require unit suffix so we don't pick up "2026年" or scale.
   const summary = desc.matchAll(
-    /(\d+(?:\.\d+)?)\s*(?:KM|km|K|公里)(?!\w)\s*[（(]?\s*(\d+)?\s*人?\s*[）)]?/g,
+    new RegExp(
+      `(\\d+(?:\\.\\d+)?)\\s*${UNIT}(?!\\w)\\s*[（(]?\\s*(\\d+)?\\s*人?\\s*[）)]?`,
+      "g",
+    ),
   );
   for (const m of summary) {
-    const kind = `${m[1]}KM`;
-    if (seen.has(kind)) continue;
+    const kind = toKm(m[1], m[2]);
+    if (!kind || seen.has(kind)) continue;
     seen.add(kind);
-    const cap = m[2] ? parseInt(m[2], 10) : undefined;
+    const cap = m[3] ? parseInt(m[3], 10) : undefined;
     out.push({ kind, capacity: cap });
   }
   return out;
