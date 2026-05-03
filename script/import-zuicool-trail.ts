@@ -37,6 +37,11 @@ const ONLY_ID = (() => {
   const m = process.argv.find((a) => a.startsWith("--id="));
   return m ? m.split("=")[1] : null;
 })();
+const OFFSET = (() => {
+  const m = process.argv.find((a) => a.startsWith("--offset="));
+  return m ? parseInt(m.split("=")[1], 10) : 0;
+})();
+const ID_CACHE = "/tmp/zuicool_trail_ids.txt";
 
 const DB_URL = process.env.TARGET_DB_URL || process.env.DATABASE_URL;
 if (!DB_URL) {
@@ -254,6 +259,21 @@ async function parseEvent(zuicoolId: string): Promise<ParsedEvent | null> {
 
 async function listTrailEventIds(): Promise<string[]> {
   if (ONLY_ID) return [ONLY_ID];
+  // Reuse cached ID list within a 24h window so chunked re-runs (--offset)
+  // don't re-fetch the listing pages every time.
+  try {
+    const fs = await import("fs");
+    const stat = fs.statSync(ID_CACHE);
+    if (Date.now() - stat.mtimeMs < 24 * 3600 * 1000) {
+      const cached = fs.readFileSync(ID_CACHE, "utf8").trim().split("\n").filter(Boolean);
+      if (cached.length > 100) {
+        console.log(`Using cached ID list (${cached.length} events) from ${ID_CACHE}`);
+        return cached;
+      }
+    }
+  } catch {
+    /* no cache yet */
+  }
   const ids = new Set<string>();
   for (let page = 1; page <= PAGES; page++) {
     const url = `https://zuicool.com/events?type=trail-run&page=${page}&per-page=100`;
@@ -276,7 +296,14 @@ async function listTrailEventIds(): Promise<string[]> {
     if (added === 0) break; // exhausted
     await sleep(400);
   }
-  return [...ids];
+  const list = [...ids];
+  try {
+    const fs = await import("fs");
+    fs.writeFileSync(ID_CACHE, list.join("\n"));
+  } catch {
+    /* non-fatal */
+  }
+  return list;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -301,12 +328,29 @@ async function ensureSourceId(): Promise<string> {
 
 async function upsertEvent(ev: ParsedEvent, sourceId: string): Promise<"inserted" | "updated" | "skipped"> {
   const canonical = `zuicool-${ev.zuicoolId}`;
+  // Match by canonical_name ONLY. Matching by display name would collide with
+  // unrelated road-marathon rows that happen to share a name and silently
+  // flip their race_kind to 'trail' (regression observed 2026-05-03).
   const existing = await pool.query<{ id: string }>(
-    "SELECT id FROM marathons WHERE canonical_name=$1 OR name=$2 LIMIT 1",
-    [canonical, ev.name],
+    "SELECT id FROM marathons WHERE canonical_name=$1 LIMIT 1",
+    [canonical],
   );
 
   if (SKIP_EXISTING && existing.rows[0]) return "skipped";
+
+  // Also bail if a marathon with the same display name already exists under a
+  // different canonical_name (e.g. nowrun-*) — that's a road-marathon row we
+  // must not overwrite.
+  const nameClash = await pool.query<{ id: string; canonical_name: string }>(
+    "SELECT id, canonical_name FROM marathons WHERE name=$1 AND canonical_name<>$2 LIMIT 1",
+    [ev.name, canonical],
+  );
+  if (nameClash.rows[0]) {
+    console.warn(
+      `  ! skip name-clash zuicool-${ev.zuicoolId} → existing ${nameClash.rows[0].canonical_name} ('${ev.name}')`,
+    );
+    return "skipped";
+  }
 
   // Compose city display: "Hangzhou (Lin'an)" style — keep Chinese for now.
   const cityDisplay = ev.district && ev.city
@@ -405,31 +449,56 @@ async function main() {
   const sourceId = DRY ? "dry-source" : await ensureSourceId();
   const ids = await listTrailEventIds();
   console.log(`Total trail events discovered: ${ids.length}`);
-  const targets = ids.slice(0, LIMIT);
+  const targets = ids.slice(OFFSET, OFFSET + LIMIT);
+  console.log(`Processing ${targets.length} events (offset=${OFFSET}, limit=${LIMIT})`);
+
+  // Optimization: when --skip-existing, query DB once for canonical_names that
+  // already exist so we never even fetch their detail pages.
+  let already: Set<string> | null = null;
+  if (SKIP_EXISTING && !DRY) {
+    const r = await pool.query<{ canonical_name: string }>(
+      `SELECT canonical_name FROM marathons WHERE canonical_name LIKE 'zuicool-%'`,
+    );
+    already = new Set(r.rows.map((x) => x.canonical_name.replace(/^zuicool-/, "")));
+    console.log(`Skipping ${already.size} already-imported zuicool events`);
+  }
 
   const stats = { inserted: 0, updated: 0, skipped: 0, failed: 0 };
-  let i = 0;
-  for (const id of targets) {
-    i++;
-    try {
-      const ev = await parseEvent(id);
-      if (!ev) {
-        stats.failed++;
+  // Concurrency pool — fetch up to N detail pages in parallel. zuicool tolerates
+  // 5 parallel connections without throttling.
+  const CONCURRENCY = 5;
+  const pending = [...targets];
+  let processed = 0;
+  async function worker() {
+    while (pending.length) {
+      const id = pending.shift();
+      if (!id) break;
+      processed++;
+      const i = processed;
+      if (already?.has(id)) {
+        stats.skipped++;
         continue;
       }
-      const result = await upsertEvent(ev, sourceId);
-      stats[result]++;
-      if (i % 20 === 0 || result === "inserted") {
-        console.log(
-          `[${i}/${targets.length}] ${result.padEnd(8)} ${ev.name}  ${ev.raceDate ?? "?"}  ${ev.distanceOptions.length}×距离`,
-        );
+      try {
+        const ev = await parseEvent(id);
+        if (!ev) {
+          stats.failed++;
+          continue;
+        }
+        const result = await upsertEvent(ev, sourceId);
+        stats[result]++;
+        if (i % 50 === 0 || result === "inserted") {
+          console.log(
+            `[${i}/${targets.length}] ${result.padEnd(8)} ${ev.name}  ${ev.raceDate ?? "?"}  ${ev.distanceOptions.length}×距离`,
+          );
+        }
+      } catch (err) {
+        stats.failed++;
+        console.warn(`  ! ${id} failed: ${(err as Error).message}`);
       }
-    } catch (err) {
-      stats.failed++;
-      console.warn(`  ! ${id} failed: ${(err as Error).message}`);
     }
-    await sleep(120);
   }
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
   console.log("\n=== Summary ===");
   console.log(stats);
