@@ -51,8 +51,22 @@ const STATUS_KEY: Record<string, string> = {
 
 export default function Home() {
   const { t, i18n } = useTranslation();
-  const [region, setRegion] = useState<"China" | "Overseas" | "WMM">("China");
-  const [kind, setKind] = useState<"marathon" | "trail">("marathon");
+  const [region, setRegion] = useState<"China" | "Overseas" | "WMM">(() => {
+    if (typeof window === "undefined") return "China";
+    const v = window.localStorage.getItem("home.region");
+    return v === "Overseas" || v === "WMM" || v === "China" ? v : "China";
+  });
+  const [kind, setKind] = useState<"marathon" | "trail">(() => {
+    if (typeof window === "undefined") return "marathon";
+    const v = window.localStorage.getItem("home.kind");
+    return v === "trail" ? "trail" : "marathon";
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem("home.region", region); } catch {}
+  }, [region]);
+  useEffect(() => {
+    try { window.localStorage.setItem("home.kind", kind); } catch {}
+  }, [kind]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
