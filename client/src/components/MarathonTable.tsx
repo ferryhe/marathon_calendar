@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Calendar, ChevronRight, ExternalLink, Loader2, MapPin } from "lucide-react";
+import { Calendar, ChevronRight, Loader2, MapPin } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { useMarathons } from "@/hooks/useMarathons";
@@ -325,18 +325,6 @@ export function MarathonTable({
                           </div>
 
                           <div className="flex items-center gap-3">
-                            {event.websiteUrl ? (
-                              <a
-                                href={event.websiteUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
-                                onClick={(e) => e.stopPropagation()}
-                                title={t("list.openSite")}
-                              >
-                                <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                              </a>
-                            ) : null}
                             <StatusBadge
                               status={event.nextEdition?.status}
                               legacyStatus={event.registrationStatus}
@@ -386,18 +374,6 @@ export function MarathonTable({
                       </div>
 
                       <div className="flex items-center gap-3">
-                        {event.websiteUrl ? (
-                          <a
-                            href={event.websiteUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
-                            onClick={(e) => e.stopPropagation()}
-                            title={t("list.openSite")}
-                          >
-                            <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                          </a>
-                        ) : null}
                         <StatusBadge
                           status={event.nextEdition?.status}
                           legacyStatus={event.registrationStatus}
@@ -447,18 +423,6 @@ export function MarathonTable({
                     </div>
 
                     <div className="flex items-center gap-3">
-                      {event.websiteUrl ? (
-                        <a
-                          href={event.websiteUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-accent transition-colors"
-                          onClick={(e) => e.stopPropagation()}
-                          title={t("list.openSite")}
-                        >
-                          <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                        </a>
-                      ) : null}
                       <StatusBadge
                         status={event.nextEdition?.status}
                         legacyStatus={event.registrationStatus}
