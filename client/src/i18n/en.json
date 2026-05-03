@@ -49,7 +49,7 @@
   "status": {
     "registering": "Open",
     "openingSoon": "Opening soon",
-    "closed": "Closed",
+    "closed": "Reg Closed",
     "finished": "Finished",
     "pending": "TBD",
     "upcoming": "Upcoming",

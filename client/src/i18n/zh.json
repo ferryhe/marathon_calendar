@@ -49,7 +49,7 @@
   "status": {
     "registering": "报名中",
     "openingSoon": "即将开始",
-    "closed": "已截止",
+    "closed": "待比赛",
     "finished": "已完赛",
     "pending": "待更新",
     "upcoming": "待开始",
