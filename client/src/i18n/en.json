@@ -35,6 +35,8 @@
     "monthSuffix": "",
     "allStatuses": "All statuses",
     "status": "Status",
+    "country": "Country",
+    "allCountries": "All countries",
     "sort": "Sort",
     "sortByDate": "By date",
     "sortByName": "By name",

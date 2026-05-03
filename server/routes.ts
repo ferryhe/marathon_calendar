@@ -1067,6 +1067,67 @@ export async function registerRoutes(
     }
   });
 
+  // Distinct countries for the marathon list filter, scoped by region + race_kind.
+  // Returns [{ country, count }] sorted by count desc, then name.
+  app.get("/api/marathons/countries", async (req, res, next) => {
+    try {
+      const database = ensureDatabase();
+      const schema = z.object({
+        region: z.enum(["China", "Overseas", "WMM"]).optional(),
+        kind: z.enum(["marathon", "trail"]).optional().default("marathon"),
+      });
+      const params = schema.parse(req.query);
+
+      const conditions = [eq(marathons.raceKind, params.kind)];
+      if (params.region === "China") {
+        conditions.push(eq(marathons.country, "China"));
+      } else if (params.region === "Overseas") {
+        conditions.push(sql`${marathons.country} <> 'China'`);
+      } else if (params.region === "WMM") {
+        const WMM_IDS = [
+          "45c4f0e6-dbd7-4904-a874-7a5be4b5dfc5",
+          "5f7ae5ab-bf47-46d2-bd73-ffcd829d0fec",
+          "315803d1-400d-411a-83fe-33e2dc822a5c",
+          "ad3e91c8-b48e-4fc3-9003-a8ff31be8c90",
+          "4fbae442-11de-4e20-93e4-fd0fc5076d7d",
+          "be4e78a3-3da6-4530-8f00-44350c24308d",
+          "15c99c8e-0be5-4059-b297-6e7a30a1f470",
+        ];
+        conditions.push(inArray(marathons.id, WMM_IDS));
+      }
+      conditions.push(sql`${marathons.country} IS NOT NULL`);
+      // Match the homepage default filter: only count marathons that have a published
+      // edition for the current year with race_date >= today (or TBD). Otherwise
+      // dropdown could list countries that produce 0 visible events.
+      const currentYear = new Date().getFullYear();
+      conditions.push(sql`EXISTS (
+        SELECT 1 FROM ${marathonEditions} e
+        WHERE e.marathon_id = ${marathons.id}
+          AND e.publish_status = 'published'
+          AND e.year = ${currentYear}
+          AND (e.race_date IS NULL OR e.race_date >= CURRENT_DATE)
+      )`);
+
+      const rows = await database
+        .select({
+          country: marathons.country,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(marathons)
+        .where(and(...conditions))
+        .groupBy(marathons.country)
+        .orderBy(sql`count(*) desc`, asc(marathons.country));
+
+      res.json({
+        data: rows
+          .filter((r) => r.country)
+          .map((r) => ({ country: r.country as string, count: r.count })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Search marathons (simplified search endpoint) - MUST come before /:id
   app.get("/api/marathons/search", async (req, res, next) => {
     try {

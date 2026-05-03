@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { Footprints, Heart, MessageSquare, Mountain, RefreshCw, Search, SlidersHorizontal, User, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "@/lib/apiClient";
 import { useTranslation } from "react-i18next";
 import { MarathonTable } from "@/components/MarathonTable";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -56,6 +57,7 @@ export default function Home() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [monthFilter, setMonthFilter] = useState<string>("all");
+  const [countryFilter, setCountryFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"raceDate" | "name" | "createdAt">("raceDate");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [viewMode, setViewMode] = useState<"all" | "mine">("all");
@@ -102,8 +104,21 @@ export default function Home() {
   const hasActiveFilters =
     monthFilter !== "all" ||
     statusFilter !== "all" ||
+    countryFilter !== "all" ||
     sortBy !== "raceDate" ||
     searchQuery !== "";
+
+  const { data: countriesResp } = useQuery({
+    queryKey: ["/api/marathons/countries", region, kind],
+    queryFn: () => apiClient.getMarathonCountries({ region, kind }),
+    staleTime: 5 * 60_000,
+    enabled: region !== "China",
+  });
+  const countries = countriesResp?.data ?? [];
+
+  useEffect(() => {
+    setCountryFilter("all");
+  }, [region, kind]);
 
   useEffect(() => {
     if (!currentUser && viewMode === "mine") {
@@ -168,6 +183,7 @@ export default function Home() {
   const clearFilters = () => {
     setMonthFilter("all");
     setStatusFilter("all");
+    setCountryFilter("all");
     setSortBy("raceDate");
     setSortOrder("asc");
     setSearchQuery("");
@@ -384,6 +400,9 @@ export default function Home() {
               {statusFilter !== "all" && (
                 <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{statusBadgeLabel(statusFilter)}</span>
               )}
+              {countryFilter !== "all" && (
+                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{countryFilter}</span>
+              )}
               {sortBy !== "raceDate" && (
                 <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">
                   {sortBy === "name" ? t("filters.byName") : t("filters.byLatest")}
@@ -414,6 +433,22 @@ export default function Home() {
                     data-testid="input-search"
                   />
                 </div>
+
+                {region !== "China" && countries.length > 1 && (
+                  <Select value={countryFilter} onValueChange={setCountryFilter}>
+                    <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-9 text-sm" data-testid="select-country">
+                      <SelectValue placeholder={t("filters.country")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t("filters.allCountries")}</SelectItem>
+                      {countries.map((c) => (
+                        <SelectItem key={c.country} value={c.country} data-testid={`option-country-${c.country}`}>
+                          {c.country} ({c.count})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
 
                 <div className="grid grid-cols-3 gap-2">
                   <Select value={monthFilter} onValueChange={setMonthFilter}>
@@ -481,6 +516,7 @@ export default function Home() {
             year: currentYear,
             month: monthFilter === "all" ? undefined : Number(monthFilter),
             status: statusFilter === "all" ? undefined : statusFilter,
+            country: countryFilter === "all" ? undefined : countryFilter,
             kind,
             sortBy,
             sortOrder,

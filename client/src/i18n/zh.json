@@ -35,6 +35,8 @@
     "monthSuffix": "月",
     "allStatuses": "全部状态",
     "status": "状态",
+    "country": "国家",
+    "allCountries": "全部国家",
     "sort": "排序",
     "sortByDate": "按时间",
     "sortByName": "按名称",

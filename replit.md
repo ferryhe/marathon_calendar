@@ -211,6 +211,10 @@ raceroster.com 事件页 JSON-LD 不暴露官网，需从描述块 `event-descri
 
 **完整使用文档** → `.local/skills/raceroster/SKILL.md`
 
+### 2026-05-03 首页加国家筛选
+
+海外越野上千条事件后，月份/状态筛选不够用。新增 `/api/marathons/countries?region=&kind=` 端点（按 region+kind 分组返回 `[{country,count}]`，按 count desc 排序），`apiClient.getMarathonCountries()` 包装。`Home.tsx` 加 `countryFilter` 状态 + Select（仅在 `region!==China && countries.length>1` 时显示，避免大陆 1 个国家时占位），切换 region/kind 时自动重置为 "all"。`MarathonTable` props 与 `useMarathons` 透传 `country`。`filters.country` / `filters.allCountries` 已加入 zh/en i18n。后端 `/api/marathons` 已支持 country=eq 早就具备，无需改动。
+
 ## Known Limitations / Future Work
 
 - `MarathonTable.tsx` line 153-157 无条件过滤 race_date<today 的赛事，导致批次 h 的 57 个春季历史赛事在前端不可见。如需让用户能搜索到 "石家庄马拉松" 等历史赛事，应在 Home.tsx 加 `showPast` 状态 + 状态筛选器加上 `已完赛` 选项 + 把 prop 传给 MarathonTable 让 line 156 条件化。

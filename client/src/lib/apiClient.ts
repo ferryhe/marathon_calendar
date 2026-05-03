@@ -231,6 +231,17 @@ class ApiClient {
     return this.request<MarathonDetail>(`/marathons/${id}`);
   }
 
+  async getMarathonCountries(params?: {
+    region?: 'China' | 'Overseas' | 'WMM';
+    kind?: 'marathon' | 'trail';
+  }): Promise<{ data: Array<{ country: string; count: number }> }> {
+    const queryParams = new URLSearchParams();
+    if (params?.region) queryParams.append('region', params.region);
+    if (params?.kind) queryParams.append('kind', params.kind);
+    const query = queryParams.toString();
+    return this.request(`/marathons/countries${query ? `?${query}` : ''}`);
+  }
+
   async searchMarathons(query: string): Promise<{ data: MarathonDTO[] }> {
     return this.request<{ data: MarathonDTO[] }>(`/marathons/search?q=${encodeURIComponent(query)}`);
   }
