@@ -24,16 +24,16 @@ export function isEditionStatus(v: unknown): v is EditionStatus {
   return typeof v === "string" && (STATUS_VALUES as readonly string[]).includes(v);
 }
 
-// nowrun-style colorways (Tailwind v4 utility classes).
-// Light mode uses -100 backgrounds (not -50) so the badge stands out from the
-// white card background. Borders use -300/400 for stronger edges.
+// Solid-color badges — saturated background + white text for unambiguous
+// contrast on any card background (light or dark). Previous pastel-on-pastel
+// (-50/-100 bg with -600/-700 text) was hard to read on the near-white card.
 export const STATUS_COLOR_CLASSES: Record<EditionStatus, string> = {
-  upcoming: "text-amber-700 border-amber-400 bg-amber-100 dark:text-amber-300 dark:border-amber-700/70 dark:bg-amber-900/30",
-  open: "text-emerald-700 border-emerald-400 bg-emerald-100 dark:text-emerald-300 dark:border-emerald-700/70 dark:bg-emerald-900/30",
-  closed: "text-blue-700 border-blue-400 bg-blue-100 dark:text-blue-300 dark:border-blue-700/70 dark:bg-blue-900/30",
-  racing: "text-purple-700 border-purple-400 bg-purple-100 dark:text-purple-300 dark:border-purple-700/70 dark:bg-purple-900/30",
-  ended: "text-gray-600 border-gray-400 bg-gray-200 dark:text-gray-400 dark:border-gray-600 dark:bg-gray-800/60",
-  cancelled: "text-red-700 border-red-400 bg-red-100 dark:text-red-300 dark:border-red-700/70 dark:bg-red-900/30",
+  upcoming: "text-white border-amber-600 bg-amber-500 dark:bg-amber-600 dark:border-amber-500",
+  open: "text-white border-emerald-600 bg-emerald-500 dark:bg-emerald-600 dark:border-emerald-500",
+  closed: "text-white border-blue-600 bg-blue-500 dark:bg-blue-600 dark:border-blue-500",
+  racing: "text-white border-purple-600 bg-purple-500 dark:bg-purple-600 dark:border-purple-500",
+  ended: "text-white border-gray-600 bg-gray-500 dark:bg-gray-600 dark:border-gray-500",
+  cancelled: "text-white border-red-600 bg-red-500 dark:bg-red-600 dark:border-red-500",
 };
 
 export const STATUS_ICON: Record<EditionStatus, string> = {

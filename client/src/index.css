@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Scan shared/ for class names used in StatusBadge etc. — without this,
+   Tailwind v4 only scans the css file's own directory tree and misses
+   STATUS_COLOR_CLASSES strings defined in shared/status.ts. */
+@source "../../shared";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
