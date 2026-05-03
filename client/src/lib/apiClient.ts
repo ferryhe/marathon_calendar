@@ -160,6 +160,8 @@ export interface MarathonQueryParams {
   year?: number;
   month?: number;
   status?: string;
+  // marathon | trail. When omitted, list returns marathon-kind only by default.
+  kind?: 'marathon' | 'trail';
   sortBy?: 'name' | 'createdAt' | 'raceDate';
   sortOrder?: 'asc' | 'desc';
   includePast?: boolean;

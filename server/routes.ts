@@ -83,6 +83,8 @@ const marathonQuerySchema = z.object({
   year: z.coerce.number().int().min(2000).max(2100).optional(),
   month: z.coerce.number().int().min(1).max(12).optional(),
   status: z.string().optional(),
+  // 赛事类型：marathon=路跑马拉松 / trail=越野赛。默认 marathon，前端切换时显式传 trail。
+  kind: z.enum(['marathon', 'trail']).default('marathon'),
   sortBy: z.enum(['name', 'createdAt', 'raceDate']).default('raceDate'),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
   // 默认只返回未来赛事；显式传 includePast=true 才返回历史。与前端 MarathonTable 默认过滤行为一致。
@@ -905,6 +907,9 @@ export async function registerRoutes(
         }
       }
 
+      // race_kind 过滤：marathon / trail。默认 marathon。
+      conditions.push(eq(marathons.raceKind, params.kind));
+
       // region 优先于 country；Overseas = country != China；WMM = 7 大满贯赛事 (UUID 在 dev/prod 一致)
       if (params.region === 'China') {
         conditions.push(eq(marathons.country, 'China'));
@@ -1067,19 +1072,26 @@ export async function registerRoutes(
     try {
       const database = ensureDatabase();
       const { q: searchQuery } = searchQuerySchema.parse(req.query);
-      
+      const kind = z
+        .enum(["marathon", "trail"])
+        .default("marathon")
+        .parse(req.query.kind);
+
       const records = await database
         .select()
         .from(marathons)
         .where(
-          or(
-            ilike(marathons.name, `%${searchQuery}%`),
-            ilike(marathons.nameZh, `%${searchQuery}%`),
-            ilike(marathons.nameEn, `%${searchQuery}%`),
-            ilike(marathons.city, `%${searchQuery}%`),
-            ilike(marathons.cityZh, `%${searchQuery}%`),
-            ilike(marathons.cityEn, `%${searchQuery}%`),
-            ilike(marathons.description, `%${searchQuery}%`)
+          and(
+            eq(marathons.raceKind, kind),
+            or(
+              ilike(marathons.name, `%${searchQuery}%`),
+              ilike(marathons.nameZh, `%${searchQuery}%`),
+              ilike(marathons.nameEn, `%${searchQuery}%`),
+              ilike(marathons.city, `%${searchQuery}%`),
+              ilike(marathons.cityZh, `%${searchQuery}%`),
+              ilike(marathons.cityEn, `%${searchQuery}%`),
+              ilike(marathons.description, `%${searchQuery}%`)
+            )
           )
         )
         .limit(20);
@@ -1100,7 +1112,11 @@ export async function registerRoutes(
           z.coerce.number().int().min(1).max(50).default(10),
         )
         .parse(req.query.limit);
-      
+      const kind = z
+        .enum(["marathon", "trail"])
+        .default("marathon")
+        .parse(req.query.kind);
+
       // Get marathons with editions that have future race dates
       const records = await database
         .select({
@@ -1111,6 +1127,7 @@ export async function registerRoutes(
         .innerJoin(marathonEditions, eq(marathons.id, marathonEditions.marathonId))
         .where(
           and(
+            eq(marathons.raceKind, kind),
             eq(marathonEditions.publishStatus, "published"),
             sql`${marathonEditions.raceDate} >= CURRENT_DATE`,
           ),
@@ -1138,6 +1155,10 @@ export async function registerRoutes(
           z.coerce.number().int().min(1).max(50).default(10),
         )
         .parse(req.query.limit);
+      const kind = z
+        .enum(["marathon", "trail"])
+        .default("marathon")
+        .parse(req.query.kind);
 
       const records = await database
         .select({
@@ -1147,6 +1168,7 @@ export async function registerRoutes(
         })
         .from(marathons)
         .leftJoin(marathonReviews, eq(marathonReviews.marathonId, marathons.id))
+        .where(eq(marathons.raceKind, kind))
         .groupBy(marathons.id)
         .orderBy(
           desc(sql`count(${marathonReviews.id})`),
@@ -2536,15 +2558,29 @@ export async function registerRoutes(
         .object({
           limit: z.coerce.number().int().min(1).max(50).default(20),
           search: z.string().trim().min(1).max(200).optional(),
+          // Admin can scope by kind; omit to see both marathon + trail.
+          kind: z.enum(["marathon", "trail"]).optional(),
         })
         .parse(req.query);
 
-      const whereClause = params.search
-        ? or(
+      const adminConditions = [];
+      if (params.search) {
+        adminConditions.push(
+          or(
             like(marathons.name, `%${params.search}%`),
             like(marathons.canonicalName, `%${params.search}%`),
-          )
-        : undefined;
+          ),
+        );
+      }
+      if (params.kind) {
+        adminConditions.push(eq(marathons.raceKind, params.kind));
+      }
+      const whereClause =
+        adminConditions.length === 0
+          ? undefined
+          : adminConditions.length === 1
+            ? adminConditions[0]
+            : and(...adminConditions);
 
       const records = await database
         .select({
@@ -2555,6 +2591,7 @@ export async function registerRoutes(
           country: marathons.country,
           description: marathons.description,
           websiteUrl: marathons.websiteUrl,
+          raceKind: marathons.raceKind,
         })
         .from(marathons)
         .where(whereClause)

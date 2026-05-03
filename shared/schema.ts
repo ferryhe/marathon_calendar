@@ -51,6 +51,8 @@ export const marathons = pgTable(
     certificationGrade: text("certification_grade"), // 'A' | 'B' | 'C' | null
     organizer: text("organizer"),
     officialWechatAccount: text("official_wechat_account"),
+    // Race kind: 'marathon' (road) | 'trail' (越野). Default 'marathon' for backward compat.
+    raceKind: text("race_kind").default("marathon").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

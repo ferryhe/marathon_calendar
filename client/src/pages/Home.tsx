@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
-import { Heart, Languages, MessageSquare, RefreshCw, Search, SlidersHorizontal, User, X } from "lucide-react";
+import { Footprints, Heart, MessageSquare, Mountain, RefreshCw, Search, SlidersHorizontal, User, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { MarathonTable } from "@/components/MarathonTable";
@@ -51,6 +51,7 @@ const STATUS_KEY: Record<string, string> = {
 export default function Home() {
   const { t, i18n } = useTranslation();
   const [region, setRegion] = useState<"China" | "Overseas" | "WMM">("China");
+  const [kind, setKind] = useState<"marathon" | "trail">("marathon");
   const [searchQuery, setSearchQuery] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -215,6 +216,40 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
+              <div
+                className="h-8 inline-flex items-center rounded-lg bg-secondary/40 p-0.5"
+                role="group"
+                aria-label={t("tabs.kindMarathon") + " / " + t("tabs.kindTrail")}
+              >
+                <button
+                  className={`h-7 px-2 rounded-md inline-flex items-center gap-1 text-xs font-medium transition-colors ${
+                    kind === "marathon"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setKind("marathon")}
+                  data-testid="button-kind-marathon"
+                  aria-pressed={kind === "marathon"}
+                  title={t("tabs.kindMarathon")}
+                >
+                  <Footprints className="w-[14px] h-[14px]" />
+                  <span className="hidden sm:inline">{t("tabs.kindMarathon")}</span>
+                </button>
+                <button
+                  className={`h-7 px-2 rounded-md inline-flex items-center gap-1 text-xs font-medium transition-colors ${
+                    kind === "trail"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setKind("trail")}
+                  data-testid="button-kind-trail"
+                  aria-pressed={kind === "trail"}
+                  title={t("tabs.kindTrail")}
+                >
+                  <Mountain className="w-[14px] h-[14px]" />
+                  <span className="hidden sm:inline">{t("tabs.kindTrail")}</span>
+                </button>
+              </div>
               <button
                 className="h-8 px-2 rounded-lg flex items-center justify-center text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
                 onClick={toggleLanguage}
@@ -223,7 +258,6 @@ export default function Home() {
                 aria-label={i18n.language?.startsWith("en") ? "切换到中文" : "Switch to English"}
                 aria-pressed={i18n.language?.startsWith("en")}
               >
-                <Languages className="w-[16px] h-[16px] mr-1" />
                 {otherLangLabel}
               </button>
               <Link href="/my-favorites">
@@ -447,6 +481,7 @@ export default function Home() {
             year: currentYear,
             month: monthFilter === "all" ? undefined : Number(monthFilter),
             status: statusFilter === "all" ? undefined : statusFilter,
+            kind,
             sortBy,
             sortOrder,
           }}

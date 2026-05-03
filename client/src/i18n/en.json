@@ -22,7 +22,9 @@
     "overseas": "Overseas",
     "wmm": "WMM",
     "showFavorites": "Show favorites only",
-    "showAll": "Show all events"
+    "showAll": "Show all events",
+    "kindMarathon": "Road",
+    "kindTrail": "Trail"
   },
   "filters": {
     "title": "Filter",

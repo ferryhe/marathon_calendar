@@ -22,7 +22,9 @@
     "overseas": "其他赛事",
     "wmm": "大满贯",
     "showFavorites": "只看收藏",
-    "showAll": "显示全部赛事"
+    "showAll": "显示全部赛事",
+    "kindMarathon": "马拉松",
+    "kindTrail": "越野"
   },
   "filters": {
     "title": "筛选",

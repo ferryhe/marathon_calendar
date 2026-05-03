@@ -48,6 +48,7 @@ interface MarathonTableProps {
     year: number;
     month?: number;
     status?: string;
+    kind?: "marathon" | "trail";
     sortBy: "raceDate" | "name" | "createdAt";
     sortOrder?: "asc" | "desc";
   };
@@ -95,6 +96,7 @@ export function MarathonTable({
     year: filters.year,
     month: filters.month,
     status: filters.status,
+    kind: filters.kind,
     sortBy: filters.sortBy,
     sortOrder: filters.sortOrder || "asc",
   });
@@ -118,6 +120,7 @@ export function MarathonTable({
         prev.region !== region ||
         prev.filters.month !== filters.month ||
         prev.filters.status !== filters.status ||
+        prev.filters.kind !== filters.kind ||
         prev.filters.sortBy !== filters.sortBy ||
         prev.filters.sortOrder !== filters.sortOrder) {
       handlePageChange(1);
