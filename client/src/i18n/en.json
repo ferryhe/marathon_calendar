@@ -199,6 +199,43 @@
     "noText": "No text comment.",
     "likesReports": "Likes {{likes}} · Reports {{reports}}"
   },
+  "footer": {
+    "disclaimer": "Non-commercial project. Event info is aggregated from public sources for reference only — please verify with each race's official site.",
+    "about": "About",
+    "copyright": "© {{year}} Marathon Calendar"
+  },
+  "about": {
+    "title": "About",
+    "back": "Back to home",
+    "intro": {
+      "heading": "Who we are",
+      "body": "Marathon Calendar is a non-commercial side project that aggregates publicly listed marathons and trail races worldwide so runners can plan their next event in one place. We charge nothing and run no ads."
+    },
+    "sources": {
+      "heading": "Data sources",
+      "body": "Core event facts (name, date, location, distance, official link) come from the public sources below, and every event page links back to the original. Open any event's detail panel and scroll to \"Other sources\" to see the specific links.",
+      "list": [
+        "ITRA · itra.run (International Trail Running Association calendar)",
+        "Race Roster · raceroster.com (North America & Oceania registration platform)",
+        "Zuicool · zuicool.com (Chinese trail-race aggregator)",
+        "Nowrun · nowrun.cn (Chinese road-race aggregator)",
+        "World Marathon Majors · worldmarathonmajors.com and individual race sites"
+      ]
+    },
+    "disclaimer": {
+      "heading": "Disclaimer",
+      "items": [
+        "This site is not affiliated with any race organizer and does not speak on their behalf.",
+        "Always verify registration, fees, refunds, schedule changes, or cancellations with the official race site. We accept no liability for decisions made based on information on this site.",
+        "We display only publicly available factual metadata (name, date, location, official link). We do not republish race descriptions, photos, or posters that may be copyrighted by the original sites.",
+        "This project is non-commercial. We do not charge users, run ads, or sell data."
+      ]
+    },
+    "takedown": {
+      "heading": "Removal or correction requests",
+      "body": "If you represent a race organizer or rights holder, or notice any inaccuracy, please leave a note in the comments on the relevant event page. We aim to respond within 7 business days."
+    }
+  },
   "common": {
     "unknown": "Unknown",
     "loginRequired": "Please log in first",

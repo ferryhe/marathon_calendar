@@ -54,6 +54,14 @@ The crawler runs via `syncNowOnce()` in `server/syncScheduler.ts`. A PostgreSQL 
 
 The scheduler auto-runs in production or when `SYNC_SCHEDULER_ENABLED=true`. In dev, sync is triggered manually via UI or admin endpoints.
 
+## 2026-05-03 changelog (this session)
+- Removed external-link arrow icons from list rows (`MarathonTable.tsx`); detail dialog/page still has "Open Site" CTA.
+- Status badges switched to saturated `bg-{color}-500 + text-white`; added `@source "../../shared"` to `client/src/index.css` so Tailwind v4 scans `shared/` for class strings.
+- i18n: zh `closed` "已截止"→"待比赛", en "Closed"→"Reg Closed" (disambiguates "registration closed" vs "race ended").
+- HK/Macau/Taiwan are now treated as China: extended `CHINA_COUNTRY_ALIASES` in `shared/utils.ts` and one-shot UPDATE on dev (5 rows) + prod (4 rows) to set `country='China'`. Tab label zh tabs.china "大陆赛事"→"中国".
+- Country filter dropdown capped to `max-h-72` so long lists scroll inside the popover.
+- Added `/about` page (`client/src/pages/About.tsx`) + sticky `Footer` (`client/src/components/Footer.tsx`) with non-commercial disclaimer + data-source list + takedown notice (no email — contact via per-event comments). Routed in `App.tsx`. i18n keys under `footer.*` and `about.*`.
+
 ## Public Sync Endpoints (added 2026-05)
 
 - `POST /api/marathons/refresh` — public, rate-limited (60s global), kicks `syncNowOnce()` in background

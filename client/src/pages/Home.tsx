@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 import { useTranslation } from "react-i18next";
 import { MarathonTable } from "@/components/MarathonTable";
+import { Footer } from "@/components/Footer";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -453,7 +454,7 @@ export default function Home() {
                     <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-9 text-sm" data-testid="select-country">
                       <SelectValue placeholder={t("filters.country")} />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-72">
                       <SelectItem value="all">{t("filters.allCountries")}</SelectItem>
                       {countries.map((c) => (
                         <SelectItem key={c.country} value={c.country} data-testid={`option-country-${c.country}`}>
@@ -540,6 +541,7 @@ export default function Home() {
           favoritesLoading={isFavoritesLoading}
         />
       </main>
+      <Footer />
     </div>
   );
 }
