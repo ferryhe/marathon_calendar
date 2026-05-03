@@ -55,6 +55,9 @@ The crawler runs via `syncNowOnce()` in `server/syncScheduler.ts`. A PostgreSQL 
 The scheduler auto-runs in production or when `SYNC_SCHEDULER_ENABLED=true`. In dev, sync is triggered manually via UI or admin endpoints.
 
 ## 2026-05-03 changelog (this session)
+- 新增台灣賽事資料源 **Bravelog**（`script/import-bravelog.ts`）：JSON API at `/search?start=YYYY/MM/DD&end=YYYY/MM/DD`（需 `X-Requested-With: XMLHttpRequest` header），canonical_name=`bravelog-{uid}`，country='China'，2026 年共匯入 35 場（32 路跑 + 3 越野，DOR 線上跑被過濾）。dev + prod 同步完成。
+- 香港資料源探查：`gobyrun.com/hk` 已停運，`sportsoho.com` 有 Cloudflare 攔截，`runourcity` 是 NGO 非聚合站，`mevents.org.hk` 只有 3-4 場，`worldsmarathons.com` 沒有 HK 篩選。**結論：目前沒有可用的香港聚合源，需手工錄入主要賽事**。完整探查記錄寫在 `.local/skills/crawler-overseas/SKILL.md`。
+- 跨資料源去重策略：靠 (1) 各源獨立 canonical_name 命名空間 (`bravelog-*`, `zuicool-*`, `nowrun-*`)；(2) importer 內 name-clash 守衛（同名但不同 canonical_name 時拒絕覆蓋）。不做模糊自動合併。
 - Removed external-link arrow icons from list rows (`MarathonTable.tsx`); detail dialog/page still has "Open Site" CTA.
 - Status badges switched to saturated `bg-{color}-500 + text-white`; added `@source "../../shared"` to `client/src/index.css` so Tailwind v4 scans `shared/` for class strings.
 - i18n: zh `closed` "已截止"→"待比赛", en "Closed"→"Reg Closed" (disambiguates "registration closed" vs "race ended").
