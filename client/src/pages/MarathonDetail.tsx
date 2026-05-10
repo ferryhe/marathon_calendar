@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   Award,
   Calendar,
+  CheckCircle,
+  Clock,
   ExternalLink,
   FileText,
   Flag,
@@ -15,6 +17,7 @@ import {
   ThumbsUp,
   Users,
 } from "lucide-react";
+import { resolveEditionStatus, STATUS_I18N_KEY } from "@shared/status";
 import { useToast } from "@/hooks/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 import {
@@ -286,6 +289,98 @@ export default function MarathonDetailPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {latest && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-blue-500" />
+                    {t("detail.timeline")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {/* Card 1: Registration Open Date — only show if available */}
+                    {latest.registrationOpenDate && (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center text-blue-500">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-tight">{t("detail.registrationOpens")}</p>
+                        <p className="text-sm font-semibold text-blue-500">
+                          {formatDate(latest.registrationOpenDate, i18n.language)}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Card 2: Registration Close Date — only show if available */}
+                    {latest.registrationCloseDate && (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="w-9 h-9 rounded-xl bg-orange-50 dark:bg-orange-500/10 flex items-center justify-center text-orange-500">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-tight">{t("detail.registrationCloses")}</p>
+                        <p className="text-sm font-semibold text-orange-500">
+                          {formatDate(latest.registrationCloseDate, i18n.language)}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Card 3: Lottery OR Status-aware label — replaces publishedAt misuse */}
+                    {!latest.isLottery ? (
+                      (() => {
+                        const resolved = resolveEditionStatus({
+                          status: latest.registrationStatus,
+                          raceDate: latest.raceDate,
+                          registrationStart: latest.registrationOpenDate,
+                          registrationEnd: latest.registrationCloseDate,
+                        });
+                        const labelKey = STATUS_I18N_KEY[resolved] ?? "detail.registrationDetails";
+                        return (
+                          <div className="flex flex-col gap-1.5">
+                            <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-500/10 flex items-center justify-center text-purple-500">
+                              <CheckCircle className="w-4 h-4" />
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-tight">
+                              {t(labelKey)}
+                            </p>
+                            {latest.registrationStatus ? (
+                              <p className="text-xs font-semibold text-purple-600 dark:text-purple-400">
+                                {latest.registrationStatus}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-muted-foreground">—</p>
+                            )}
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-500/10 flex items-center justify-center text-purple-500">
+                          <CheckCircle className="w-4 h-4" />
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-tight">{t("detail.lotteryResult")}</p>
+                        <p className="text-sm text-muted-foreground">—</p>
+                        <p className="text-[10px] text-muted-foreground">{t("detail.lotteryHint")}</p>
+                      </div>
+                    )}
+
+                    {/* Card 4: Race Date — always show if available */}
+                    {latest.raceDate && (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="w-9 h-9 rounded-xl bg-green-50 dark:bg-green-500/10 flex items-center justify-center text-green-500">
+                          <Flag className="w-4 h-4" />
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-tight">{t("detail.raceDay")}</p>
+                        <p className="text-sm font-semibold text-green-500">
+                          {formatDate(latest.raceDate, i18n.language)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {latest?.highlights && (
               <Card>
