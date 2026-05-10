@@ -17,6 +17,7 @@ import {
   ThumbsUp,
   Users,
 } from "lucide-react";
+import { resolveEditionStatus, STATUS_I18N_KEY } from "@shared/status";
 import { useToast } from "@/hooks/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 import {
@@ -327,37 +328,40 @@ export default function MarathonDetailPage() {
 
                     {/* Card 3: Lottery OR Status-aware label — replaces publishedAt misuse */}
                     {!latest.isLottery ? (
-                      <div className="flex flex-col gap-1.5">
-                        <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-500/10 flex items-center justify-center text-purple-500">
-                          <CheckCircle className="w-4 h-4" />
-                        </div>
-                        <p className="text-xs text-muted-foreground leading-tight">
-                          {latest.registrationStatus === "报名中" || latest.registrationStatus === "Registration Open"
-                            ? t("detail.registrationInProgress")
-                            : latest.registrationStatus === "已截止" || latest.registrationStatus === "Registration Closed"
-                            ? t("detail.registrationClosed")
-                            : t("detail.registrationDetails")}
-                        </p>
-                        {latest.registrationStatus ? (
-                          <p className="text-xs font-semibold text-purple-600 dark:text-purple-400">
-                            {latest.registrationStatus}
-                          </p>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">—</p>
-                        )}
-                      </div>
+                      (() => {
+                        const resolved = resolveEditionStatus({
+                          status: latest.registrationStatus,
+                          raceDate: latest.raceDate,
+                          registrationStart: latest.registrationOpenDate,
+                          registrationEnd: latest.registrationCloseDate,
+                        });
+                        const labelKey = STATUS_I18N_KEY[resolved] ?? "detail.registrationDetails";
+                        return (
+                          <div className="flex flex-col gap-1.5">
+                            <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-500/10 flex items-center justify-center text-purple-500">
+                              <CheckCircle className="w-4 h-4" />
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-tight">
+                              {t(labelKey)}
+                            </p>
+                            {latest.registrationStatus ? (
+                              <p className="text-xs font-semibold text-purple-600 dark:text-purple-400">
+                                {latest.registrationStatus}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-muted-foreground">—</p>
+                            )}
+                          </div>
+                        );
+                      })()
                     ) : (
                       <div className="flex flex-col gap-1.5">
                         <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-500/10 flex items-center justify-center text-purple-500">
                           <CheckCircle className="w-4 h-4" />
                         </div>
                         <p className="text-xs text-muted-foreground leading-tight">{t("detail.lotteryResult")}</p>
-                        <p className="text-sm font-semibold text-purple-500">
-                          {latest.publishedAt ? formatDate(latest.publishedAt, i18n.language) : "—"}
-                        </p>
-                        {latest.publishedAt && (
-                          <p className="text-[10px] text-muted-foreground">{t("detail.lotteryHint")}</p>
-                        )}
+                        <p className="text-sm text-muted-foreground">—</p>
+                        <p className="text-[10px] text-muted-foreground">{t("detail.lotteryHint")}</p>
                       </div>
                     )}
 
