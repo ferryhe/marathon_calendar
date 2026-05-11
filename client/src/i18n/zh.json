@@ -48,6 +48,7 @@
   },
   "status": {
     "upcoming": "报名未开始",
+    "imminent": "即将开始",
     "open": "报名中",
     "closed": "报名已截止",
     "racing": "比赛中",

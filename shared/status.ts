@@ -1,7 +1,8 @@
-// Edition status taxonomy aligned with nowrun.cn:
-//   upcoming  — info available, registration not yet open
-//   open      — registration open (highlighted in UI)
-//   closed    — registration closed but race not yet held ("待比赛")
+// Edition status taxonomy:
+//   upcoming  — registration not yet open (报名未开始)
+//   imminent  — race day approaching / registration closed (即将开始)
+//   open      — registration open (报名中)
+//   closed    — registration closed, race not imminent (报名已截止)
 //   racing    — race day in progress
 //   ended     — race finished
 //   cancelled — race cancelled
@@ -11,6 +12,7 @@
 
 export const STATUS_VALUES = [
   "upcoming",
+  "imminent",
   "open",
   "closed",
   "racing",
@@ -29,6 +31,7 @@ export function isEditionStatus(v: unknown): v is EditionStatus {
 // (-50/-100 bg with -600/-700 text) was hard to read on the near-white card.
 export const STATUS_COLOR_CLASSES: Record<EditionStatus, string> = {
   upcoming: "text-white border-amber-600 bg-amber-500 dark:bg-amber-600 dark:border-amber-500",
+  imminent: "text-white border-orange-600 bg-orange-500 dark:bg-orange-600 dark:border-orange-500",
   open: "text-white border-emerald-600 bg-emerald-500 dark:bg-emerald-600 dark:border-emerald-500",
   closed: "text-white border-blue-600 bg-blue-500 dark:bg-blue-600 dark:border-blue-500",
   racing: "text-white border-purple-600 bg-purple-500 dark:bg-purple-600 dark:border-purple-500",
@@ -37,7 +40,8 @@ export const STATUS_COLOR_CLASSES: Record<EditionStatus, string> = {
 };
 
 export const STATUS_ICON: Record<EditionStatus, string> = {
-  upcoming: "🔜",
+  upcoming: "📋",
+  imminent: "🔜",
   open: "🔥",
   closed: "⏰",
   racing: "🏃",
@@ -48,6 +52,7 @@ export const STATUS_ICON: Record<EditionStatus, string> = {
 // i18n key suffix; combined with `status.${suffix}` in client.
 export const STATUS_I18N_KEY: Record<EditionStatus, string> = {
   upcoming: "status.upcoming",
+  imminent: "status.imminent",
   open: "status.open",
   closed: "status.closed",
   racing: "status.racing",
@@ -67,7 +72,7 @@ export function mapLegacyStatus(legacy: string | null | undefined): EditionStatu
     case "已报满":
       return "closed";
     case "即将开始":
-      return "upcoming";
+      return "imminent";
     case "未开放":
     case "待公布":
     case "待更新":
@@ -107,9 +112,21 @@ function toLocalDay(value: string | Date | null | undefined): Date | null {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-// Date-driven status calculator. Day-precision: race day == "racing" all day in
-// the local timezone. registrationCloseDate is treated as inclusive end-of-day
-// (registration is open through 23:59:59 local on the close date).
+// Date-driven status calculator.
+//
+// Decision logic (prioritized):
+//  1. race < today                  → ended
+//  2. race = today                  → racing
+//  3. race > today, no close date   → imminent ("即将开始")
+//  4. today > close, race - today ≤ 14d → imminent ("即将开始")
+//  5. today > close, race - today > 14d → closed ("报名已截止")
+//  6. open ≤ today ≤ close          → open ("报名中")
+//  7. today < open                  → upcoming ("报名未开始")
+//
+// Day-precision: race day == "racing" all day in local timezone.
+// registrationCloseDate is inclusive (open through 23:59:59 on close date).
+const RACE_IMMINENT_DAYS = 14;
+
 export function computeEditionStatus(input: ComputeStatusInput): EditionStatus {
   if (input.cancelled) return "cancelled";
 
@@ -119,17 +136,32 @@ export function computeEditionStatus(input: ComputeStatusInput): EditionStatus {
   const regStartDay = toLocalDay(input.registrationStart);
   const regEndDay = toLocalDay(input.registrationEnd);
 
+  // Terminal race states
   if (race) {
     if (race.getTime() < today.getTime()) return "ended";
     if (race.getTime() === today.getTime()) return "racing";
   }
 
-  // closed = today is strictly after the close date (close date itself still open)
-  if (regEndDay && today.getTime() > regEndDay.getTime()) return "closed";
+  // Case 3: race_only (future race, no close date) → "即将开始"
+  if (race && !regEndDay) {
+    return "imminent";
+  }
+
+  // Case 4+5: past close date → "报名已截止" or "即将开始"
+  if (regEndDay && today.getTime() > regEndDay.getTime()) {
+    const daysToRace = race
+      ? Math.round((race.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+      : Infinity;
+    if (daysToRace <= RACE_IMMINENT_DAYS) return "imminent"; // "即将开始"
+    return "closed"; // "报名已截止"
+  }
+
+  // Case 6: open window
   if (regStartDay && today.getTime() >= regStartDay.getTime()) {
     if (!regEndDay || today.getTime() <= regEndDay.getTime()) return "open";
   }
 
+  // Case 7: before registration opens
   return "upcoming";
 }
 

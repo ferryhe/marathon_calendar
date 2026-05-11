@@ -48,9 +48,10 @@
   },
   "status": {
     "upcoming": "Upcoming",
+    "imminent": "Imminent",
     "open": "Open Now",
     "closed": "Reg Closed",
-    "racing": "Race Day",
+    "racing": "Racing",
     "ended": "Ended",
     "cancelled": "Cancelled"
   },
