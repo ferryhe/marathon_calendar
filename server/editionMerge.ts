@@ -14,10 +14,16 @@ export type EditionIncomingFields = {
   raceDate?: string | null;
   registrationStatus?: string | null;
   registrationUrl?: string | null;
-  // New nowrun-aligned status taxonomy (upcoming|open|closed|racing|ended|cancelled).
-  // Treated as a simple admin-controlled overwrite (no per-field priority merge yet).
+  // Admin-controlled overwrite fields (no per-field priority merge).
   status?: string | null;
   isLottery?: boolean;
+  // Rich fields — merge by priority (higher rank wins, empty does not override non-empty).
+  highlights?: string | null;
+  distanceOptions?: unknown[] | null;
+  startLocation?: string | null;
+  finishLocation?: string | null;
+  registrationOpenDate?: string | null;
+  registrationCloseDate?: string | null;
 };
 
 export type MergeSource = {
@@ -89,13 +95,25 @@ function buildFieldSourceInfo(params: {
   };
 }
 
-function shouldOverrideField(params: {
+/**
+ * Merge strategy for string fields:
+ * - null/undefined incoming = "no data", never override anything (protected)
+ * - non-empty incoming = normal priority-based merge
+ * - empty string incoming = treated as "no data" (same as null)
+ */
+function shouldOverrideStringField(params: {
   existingValue: string | null;
   existingSource: FieldSourceInfo | null;
-  incomingValue: string;
+  incomingValue: string | null;
   incomingRank: number;
 }) {
-  if (!params.existingValue) return { apply: true, reason: "empty" as const };
+  // null/empty incoming = "no data provided", never override any existing value
+  if (!params.incomingValue) {
+    return { apply: false, reason: "incoming_empty" as const };
+  }
+  if (!params.existingValue) {
+    return { apply: true, reason: "existing_empty" as const };
+  }
   if (params.existingValue === params.incomingValue) {
     return { apply: false, reason: "same" as const };
   }
@@ -106,6 +124,44 @@ function shouldOverrideField(params: {
   return { apply: false, reason: "lower_priority" as const };
 }
 
+/**
+ * Merge strategy for array fields (distanceOptions):
+ * - null/undefined incoming = no data provided, never override
+ * - empty array [] = "no data" signal, only overrides null/empty in DB
+ * - non-empty array = real data, overrides [] or lower-priority non-empty
+ */
+function shouldOverrideArrayField(params: {
+  existingValue: unknown[] | null;
+  existingSource: FieldSourceInfo | null;
+  incomingValue: unknown[];
+  incomingRank: number;
+}) {
+  const incomingEmpty = !params.incomingValue || params.incomingValue.length === 0;
+  const existingEmpty = !params.existingValue || params.existingValue.length === 0;
+
+  // Incoming is empty → never override (no data to contribute)
+  if (incomingEmpty) return { apply: false, reason: "incoming_empty" as const };
+
+  // Existing is empty → incoming non-empty always wins
+  if (existingEmpty) return { apply: true, reason: "existing_empty" as const };
+
+  // Both non-empty → higher rank wins
+  const existingRank = params.existingSource?.rank ?? 0;
+  if (params.incomingRank > existingRank) {
+    return { apply: true, reason: "higher_priority" as const };
+  }
+  return { apply: false, reason: "lower_priority" as const };
+}
+
+type RichFieldName = "highlights" | "startLocation" | "registrationOpenDate" | "registrationCloseDate";
+
+const STRING_RICH_FIELDS: RichFieldName[] = [
+  "highlights",
+  "startLocation",
+  "registrationOpenDate",
+  "registrationCloseDate",
+];
+
 export async function upsertEditionWithMerge(params: {
   database: any;
   marathonId: string;
@@ -113,7 +169,7 @@ export async function upsertEditionWithMerge(params: {
   incoming: EditionIncomingFields;
   source: MergeSource;
   publish?: PublishDecision;
-}) : Promise<MergeResult> {
+}): Promise<MergeResult> {
   const now = new Date();
   const sourceType = params.source.sourceType ?? "unknown";
   const priority = params.source.priority ?? 0;
@@ -126,6 +182,13 @@ export async function upsertEditionWithMerge(params: {
       registrationStatus: marathonEditions.registrationStatus,
       registrationUrl: marathonEditions.registrationUrl,
       fieldSources: marathonEditions.fieldSources,
+      // Rich fields
+      highlights: marathonEditions.highlights,
+      distanceOptions: marathonEditions.distanceOptions,
+      startLocation: marathonEditions.startLocation,
+      finishLocation: marathonEditions.finishLocation,
+      registrationOpenDate: marathonEditions.registrationOpenDate,
+      registrationCloseDate: marathonEditions.registrationCloseDate,
     })
     .from(marathonEditions)
     .where(
@@ -135,33 +198,24 @@ export async function upsertEditionWithMerge(params: {
 
   if (existing.length === 0) {
     const fieldSources: Record<string, FieldSourceInfo> = {};
-    if (params.incoming.raceDate) {
-      fieldSources.raceDate = buildFieldSourceInfo({
-        sourceId: params.source.sourceId,
-        sourceType,
-        priority,
-        value: params.incoming.raceDate,
-        at: now,
-      });
-    }
-    if (params.incoming.registrationStatus) {
-      fieldSources.registrationStatus = buildFieldSourceInfo({
-        sourceId: params.source.sourceId,
-        sourceType,
-        priority,
-        value: params.incoming.registrationStatus,
-        at: now,
-      });
-    }
-    if (params.incoming.registrationUrl) {
-      fieldSources.registrationUrl = buildFieldSourceInfo({
-        sourceId: params.source.sourceId,
-        sourceType,
-        priority,
-        value: params.incoming.registrationUrl,
-        at: now,
-      });
-    }
+    const addFieldSource = (field: string, value: string | null) => {
+      if (value) {
+        fieldSources[field] = buildFieldSourceInfo({
+          sourceId: params.source.sourceId,
+          sourceType,
+          priority,
+          value,
+          at: now,
+        });
+      }
+    };
+    addFieldSource("raceDate", params.incoming.raceDate ?? null);
+    addFieldSource("registrationStatus", params.incoming.registrationStatus ?? null);
+    addFieldSource("registrationUrl", params.incoming.registrationUrl ?? null);
+    addFieldSource("highlights", params.incoming.highlights ?? null);
+    addFieldSource("startLocation", params.incoming.startLocation ?? null);
+    addFieldSource("registrationOpenDate", params.incoming.registrationOpenDate ?? null);
+    addFieldSource("registrationCloseDate", params.incoming.registrationCloseDate ?? null);
 
     await params.database.insert(marathonEditions).values({
       marathonId: params.marathonId,
@@ -169,6 +223,11 @@ export async function upsertEditionWithMerge(params: {
       raceDate: params.incoming.raceDate ?? null,
       registrationStatus: params.incoming.registrationStatus ?? null,
       registrationUrl: params.incoming.registrationUrl ?? null,
+      highlights: params.incoming.highlights ?? null,
+      distanceOptions: params.incoming.distanceOptions ?? null,
+      startLocation: params.incoming.startLocation ?? null,
+      registrationOpenDate: params.incoming.registrationOpenDate ?? null,
+      registrationCloseDate: params.incoming.registrationCloseDate ?? null,
       status: params.incoming.status ?? null,
       ...(params.incoming.isLottery !== undefined ? { isLottery: params.incoming.isLottery } : {}),
       publishStatus: params.publish?.status ?? "draft",
@@ -196,98 +255,70 @@ export async function upsertEditionWithMerge(params: {
 
   let applied = 0;
 
-  if (params.incoming.raceDate) {
-    const existingValue = row.raceDate ? String(row.raceDate) : null;
-    const decision = shouldOverrideField({
-      existingValue,
-      existingSource: fieldSources.raceDate ?? null,
-      incomingValue: params.incoming.raceDate,
-      incomingRank,
-    });
-    if (decision.apply) {
-      set.raceDate = params.incoming.raceDate;
-      nextFieldSources.raceDate = buildFieldSourceInfo({
-        sourceId: params.source.sourceId,
-        sourceType,
-        priority,
-        value: params.incoming.raceDate,
-        at: now,
+  // ── Core string fields ────────────────────────────────────────────────────
+  const stringFieldPairs: Array<{ key: string; value: string | null; existing: string | null }> = [
+    { key: "raceDate", value: params.incoming.raceDate ?? null, existing: row.raceDate ? String(row.raceDate) : null },
+    { key: "registrationStatus", value: params.incoming.registrationStatus ?? null, existing: row.registrationStatus },
+    { key: "registrationUrl", value: params.incoming.registrationUrl ?? null, existing: row.registrationUrl },
+    { key: "highlights", value: params.incoming.highlights ?? null, existing: row.highlights },
+    { key: "startLocation", value: params.incoming.startLocation ?? null, existing: row.startLocation },
+    { key: "finishLocation", value: params.incoming.finishLocation ?? null, existing: row.finishLocation },
+    { key: "registrationOpenDate", value: params.incoming.registrationOpenDate ?? null, existing: row.registrationOpenDate },
+    { key: "registrationCloseDate", value: params.incoming.registrationCloseDate ?? null, existing: row.registrationCloseDate },
+  ];
+
+  for (const { key, value, existing } of stringFieldPairs) {
+    if (value) {
+      const fs = fieldSources[key as keyof typeof fieldSources] ?? null;
+      const decision = shouldOverrideStringField({
+        existingValue: existing,
+        existingSource: fs,
+        incomingValue: value,
+        incomingRank,
       });
-      applied += 1;
-    } else if (decision.reason === "lower_priority" && existingValue) {
-      conflicts.push({
-        field: "raceDate",
-        existing: { value: existingValue, source: fieldSources.raceDate ?? null },
-        incoming: {
-          value: params.incoming.raceDate,
-          source: { sourceId: params.source.sourceId, sourceType, priority, rank: incomingRank },
-        },
-      });
+      if (decision.apply) {
+        set[key] = value;
+        nextFieldSources[key] = buildFieldSourceInfo({
+          sourceId: params.source.sourceId,
+          sourceType,
+          priority,
+          value,
+          at: now,
+        });
+        applied += 1;
+      } else if (decision.reason === "lower_priority" && existing) {
+        conflicts.push({
+          field: key as keyof Required<EditionIncomingFields>,
+          existing: { value: existing, source: fs },
+          incoming: { value, source: { sourceId: params.source.sourceId, sourceType, priority, rank: incomingRank } },
+        });
+      }
     }
   }
 
-  if (params.incoming.registrationStatus) {
-    const existingValue = row.registrationStatus ?? null;
-    const decision = shouldOverrideField({
-      existingValue,
-      existingSource: fieldSources.registrationStatus ?? null,
-      incomingValue: params.incoming.registrationStatus,
+  // ── distanceOptions (array) ────────────────────────────────────────────────
+  if (params.incoming.distanceOptions !== undefined) {
+    const fs = fieldSources.distanceOptions ?? null;
+    const decision = shouldOverrideArrayField({
+      existingValue: row.distanceOptions,
+      existingSource: fs,
+      incomingValue: params.incoming.distanceOptions ?? [],
       incomingRank,
     });
     if (decision.apply) {
-      set.registrationStatus = params.incoming.registrationStatus;
-      nextFieldSources.registrationStatus = buildFieldSourceInfo({
+      set.distanceOptions = params.incoming.distanceOptions;
+      nextFieldSources.distanceOptions = buildFieldSourceInfo({
         sourceId: params.source.sourceId,
         sourceType,
         priority,
-        value: params.incoming.registrationStatus,
+        value: params.incoming.distanceOptions ? JSON.stringify(params.incoming.distanceOptions) : null,
         at: now,
       });
       applied += 1;
-    } else if (decision.reason === "lower_priority" && existingValue) {
-      conflicts.push({
-        field: "registrationStatus",
-        existing: { value: existingValue, source: fieldSources.registrationStatus ?? null },
-        incoming: {
-          value: params.incoming.registrationStatus,
-          source: { sourceId: params.source.sourceId, sourceType, priority, rank: incomingRank },
-        },
-      });
     }
   }
 
-  if (params.incoming.registrationUrl) {
-    const existingValue = row.registrationUrl ?? null;
-    const decision = shouldOverrideField({
-      existingValue,
-      existingSource: fieldSources.registrationUrl ?? null,
-      incomingValue: params.incoming.registrationUrl,
-      incomingRank,
-    });
-    if (decision.apply) {
-      set.registrationUrl = params.incoming.registrationUrl;
-      nextFieldSources.registrationUrl = buildFieldSourceInfo({
-        sourceId: params.source.sourceId,
-        sourceType,
-        priority,
-        value: params.incoming.registrationUrl,
-        at: now,
-      });
-      applied += 1;
-    } else if (decision.reason === "lower_priority" && existingValue) {
-      conflicts.push({
-        field: "registrationUrl",
-        existing: { value: existingValue, source: fieldSources.registrationUrl ?? null },
-        incoming: {
-          value: params.incoming.registrationUrl,
-          source: { sourceId: params.source.sourceId, sourceType, priority, rank: incomingRank },
-        },
-      });
-    }
-  }
-
-  // status / isLottery: simple overwrite — admin-controlled, no per-field priority.
-  // status === null explicitly clears the field; status === undefined leaves it.
+  // ── Admin-controlled fields ────────────────────────────────────────────────
   if (params.incoming.status !== undefined) {
     set.status = params.incoming.status;
     applied += 1;

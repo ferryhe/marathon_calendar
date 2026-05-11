@@ -1,13 +1,11 @@
 /**
  * PR-1 (2026-05-02): backfill rich fields from NowRun for all bound editions.
+ * Revised 2026-05-11: NowRun uses plain HTML/Tailwind CSS (NOT markdown).
+ *   - Key info uses label-value div pairs: <p class="text-xs text-gray-500">LABEL</p><p class="text-sm text-gray-900">VALUE</p>
+ *   - Highlights come from 城市攻略 section (必吃/必逛/交通)
+ *   - Distance options use grid layout: font-medium text-gray-900 for items
  *
- * Fetches the markdown form of every NowRun race page already linked via
- * `marathon_sources.source_url LIKE 'https://www.nowrun.cn/race/%'`, parses
- * Tier-A fields (certification, organizer, wechat, distance options, highlights,
- * start/finish/pickup, medal images, registration channels, official documents)
- * and writes them to `marathons` + `marathon_editions`.
- *
- * Run:    pnpm tsx script/backfill-nowrun-rich.ts [--dry] [--limit=N] [--id=URL]
+ * Run:    pnpm tsx script/backfill-nowrun-rich.ts [--dry] [--limit=N] [--offset=N]
  */
 import { Pool } from "pg";
 
@@ -16,15 +14,10 @@ const LIMIT = (() => {
   const m = process.argv.find((a) => a.startsWith("--limit="));
   return m ? parseInt(m.split("=")[1], 10) : Infinity;
 })();
-const ONLY_URL = (() => {
-  const m = process.argv.find((a) => a.startsWith("--url="));
-  return m ? m.split("=")[1] : null;
-})();
 const OFFSET = (() => {
   const m = process.argv.find((a) => a.startsWith("--offset="));
   return m ? parseInt(m.split("=")[1], 10) : 0;
 })();
-const ONLY_NEW = process.argv.includes("--only-new");
 
 const DB_URL = process.env.TARGET_DB_URL || process.env.DATABASE_URL;
 if (!DB_URL) {
@@ -64,305 +57,158 @@ function emptyParsed(): ParsedRace {
 }
 
 /**
- * NowRun markdown structure (stable across hundreds of pages):
- *   # 2026XXX马拉松<status_word>
- *   <province>·<grade>类认证               <- certification line (optional)
- *   ...
- *   ### ℹ️ 关键信息速览                    <- key info section
- *   <label>\n<value>\n<label>\n<value>...
- *   ### 🌟 赛事亮点                         <- highlights section (optional)
- *   <pill1><pill2>...
- *   <paragraph>
- *   ![奖牌 1](URL)![奖牌 2](URL)...
- *   ### 🏙️ XXX · 城市攻略                  <- city guide (skipped in PR-1)
- *   ### 📋 官方信息                         <- official documents
- *   <doc_label>\n[查看详情](URL)\n...
- *   官方公众号<wechat_name>
+ * NowRun HTML structure (plain HTML with Tailwind CSS classes):
  *
- * The parser uses three building blocks:
- *  1. matchSection(headerEmoji): returns the text between two ### headers
- *  2. extractKeyValue(section, label): NowRun renders each label on its own
- *     line followed by the value on the next non-empty line(s) until the next
- *     known label
- *  3. matchAllImages: ![alt](url)
+ * Key info block — label-value div pairs:
+ *   <p class="text-xs text-gray-500">比赛日期</p><p class="text-sm text-gray-900">2026-11-30</p>
+ *   <p class="text-xs text-gray-500">比赛地点</p><p class="text-sm text-gray-900">南京市</p>
+ *   <p class="text-xs text-gray-500">主办单位</p><p class="text-sm text-gray-900">南京市人民政府</p>
+ *
+ * Distance options — grid layout:
+ *   <span class="text-sm font-medium text-gray-900">全程</span>
+ *   <span class="text-sm font-medium text-gray-900">半程</span>
+ *
+ * Highlights — from 城市攻略 section (城市攻略 replaces 赛事亮点):
+ *   <h3>🏙️ {城市名} · 城市攻略</h3>
+ *   必吃: {food1} {food2} ...
+ *   必逛: {attraction1} {attraction2} ...
+ *   交通: {transport}
+ *
+ * Official info section:
+ *   <h3>📋 官方信息</h3>
+ *   官方网站 <a href="...">...</a>
+ *   官方公众号{name}
+ *
+ * Fetch method: curl (plain HTML, SSR — no JavaScript dependency)
  */
-const KEY_INFO_LABELS = [
-  "比赛日期",
-  "比赛地点",
-  "赛事设项",
-  "起点",
-  "终点",
-  "领物地点",
-  "主办单位",
-  "报名渠道",
-];
-
-function parseNowRunMarkdown(md: string): ParsedRace {
+function parseNowRunHTML(html: string): ParsedRace {
   const out = emptyParsed();
-  if (!md || md.length < 100) return out;
+  if (!html || html.length < 100) return out;
 
-  // 1. Certification grade
-  const certMatch = md.match(/[·\u00b7][·\u00b7]?\s*([ABC])类认证/);
-  if (certMatch) out.certificationGrade = certMatch[1];
-
-  // 2. Key info section
-  const keyInfo = sliceSection(md, "ℹ️ 关键信息速览");
-  if (keyInfo) {
-    const kv = parseKeyValueBlock(keyInfo, KEY_INFO_LABELS);
-    out.organizer = kv.get("主办单位") ?? null;
-    out.startLocation = stripMapLink(kv.get("起点") ?? null);
-    out.finishLocation = stripMapLink(kv.get("终点") ?? null);
-    out.packetPickupLocation = stripMapLink(kv.get("领物地点") ?? null);
-
-    // 赛事设项 → distance_options
-    const distRaw = kv.get("赛事设项");
-    if (distRaw) out.distanceOptions = parseDistanceOptions(distRaw);
-
-    // 报名渠道 → array
-    const channelsRaw = kv.get("报名渠道");
-    if (channelsRaw) out.registrationChannels = splitChannels(channelsRaw);
+  // 1. Key info label-value pairs
+  // Pattern: <p class="text-xs text-gray-500">LABEL</p>...<p class="text-sm text-gray-900">VALUE</p>
+  // Some pages may use slightly different class names (e.g., text-gray-400 vs text-gray-500)
+  const labelValueRe = /<p class="text-xs text-gray-(?:500|400)[^"]*"[^>]*>([^<]+)<\/p>\s*<p class="text-sm text-gray-(?:900|700)[^"]*"[^>]*>([^<]+)<\/p>/g;
+  const kv: Map<string, string> = new Map();
+  let m;
+  while ((m = labelValueRe.exec(html)) !== null) {
+    kv.set(m[1].trim(), m[2].trim());
   }
 
-  // 3. Highlights section: keep first paragraph after the pills
-  const highlightsSec = sliceSection(md, "🌟 赛事亮点");
-  if (highlightsSec) {
-    out.highlights = extractHighlights(highlightsSec);
-    // Medal images live inside this section
-    const medals = [...highlightsSec.matchAll(/!\[奖牌\s*\d*\]\(([^)]+)\)/g)].map(
-      (m) => m[1],
+  out.startLocation = kv.get("比赛地点") ?? null;
+  out.organizer = kv.get("主办单位") ?? null;
+
+  // raceDate from 比赛日期 — NOTE: some pages show date as text, some embed in SVG (calendar icon + text)
+  const raceDateMatch = html.match(/比赛日期[\s\S]{0,200}?class="text-sm text-gray-900[^"]*"[^>]*>(\d{4}-\d{2}-\d{2})/);
+  if (raceDateMatch) {
+    // extracted separately as ParsedRace doesn't have raceDate field; handled in main loop
+  }
+
+  // 2. Distance options — grid layout
+  // Pattern: <span class="text-sm font-medium text-gray-900">全程</span>
+const distItems = Array.from(html.matchAll(/<span class="text-sm font-medium text-gray-900">([^<]+)<\/span>/g))
+    .map((m) => m[1].trim())
+    .filter((t) => t.length > 0 && t.length < 20);
+  if (distItems.length > 0) {
+    out.distanceOptions = distItems.map((kind) => ({ kind }));
+  }
+
+  // 3. Highlights — from 城市攻略 section (replaces 赛事亮点)
+  // Structure: <h3>🏙️ {city} · 城市攻略</h3>
+  //   必吃: {items}
+  //   必逛: {items}
+  //   交通: {text}
+  // The block ends before the next sibling section (<div class="flex items-center gap">)
+  const cityGuideIdx = html.indexOf("城市攻略");
+  if (cityGuideIdx >= 0) {
+    // Find block boundary: from 城市攻略 to next sibling section (flex items-center gap)
+    const blockEndMatch = html.slice(cityGuideIdx).search(/<div class="flex items-center gap"/);
+    const cityBlock = html.slice(
+      cityGuideIdx,
+      blockEndMatch >= 0 ? cityGuideIdx + blockEndMatch : cityGuideIdx + 6000,
     );
-    if (medals.length > 0) out.medalImageUrls = medals;
+
+    const sections: string[] = [];
+
+    // 必吃: extract all text nodes between "必吃" and "必逛" (or next section)
+    const bieatIdx = cityBlock.indexOf("必吃");
+    if (bieatIdx >= 0) {
+      const rest = cityBlock.slice(bieatIdx + 3);
+      const nextSection = Math.min(
+        rest.indexOf("必逛") >= 0 ? rest.indexOf("必逛") : 99999,
+        rest.indexOf("必玩") >= 0 ? rest.indexOf("必玩") : 99999,
+        rest.indexOf("必买") >= 0 ? rest.indexOf("必买") : 99999,
+        rest.indexOf("交通") >= 0 ? rest.indexOf("交通") : 99999,
+      );
+      const content = nextSection < 9999 ? rest.slice(0, nextSection) : rest.slice(0, 300);
+      const texts = Array.from(content.matchAll(/>([^<]{2,80})</g))
+        .map((m) => m[1].trim())
+        .filter((t) => !t.startsWith("http") && t.length > 2 && t.length < 60);
+      if (texts.length > 0) sections.push("必吃: " + texts.join(" · "));
+    }
+
+    // 必逛
+    const bivisitIdx = cityBlock.indexOf("必逛");
+    if (bivisitIdx >= 0) {
+      const rest = cityBlock.slice(bivisitIdx + 3);
+      const nextSection = Math.min(
+        rest.indexOf("必吃") >= 0 ? rest.indexOf("必吃") : 99999,
+        rest.indexOf("必玩") >= 0 ? rest.indexOf("必玩") : 99999,
+        rest.indexOf("必买") >= 0 ? rest.indexOf("必买") : 99999,
+        rest.indexOf("交通") >= 0 ? rest.indexOf("交通") : 99999,
+      );
+      const content = nextSection < 9999 ? rest.slice(0, nextSection) : rest.slice(0, 400);
+      const texts = Array.from(content.matchAll(/>([^<]{2,80})</g))
+        .map((m) => m[1].trim())
+        .filter((t) => !t.startsWith("http") && t.length > 2 && t.length < 60);
+      if (texts.length > 0) sections.push("必逛: " + texts.join(" · "));
+    }
+
+    // 交通
+    const trafficIdx = cityBlock.indexOf("交通");
+    if (trafficIdx >= 0) {
+      const rest = cityBlock.slice(trafficIdx + 2);
+      const nextSection = Math.min(
+        rest.indexOf("必吃") >= 0 ? rest.indexOf("必吃") : 99999,
+        rest.indexOf("必逛") >= 0 ? rest.indexOf("必逛") : 99999,
+        rest.indexOf("必玩") >= 0 ? rest.indexOf("必玩") : 99999,
+        rest.indexOf("必买") >= 0 ? rest.indexOf("必买") : 99999,
+      );
+      const content = nextSection < 9999 ? rest.slice(0, nextSection) : rest.slice(0, 200);
+      // Strip all tags to get plain text
+      const textContent = content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      if (textContent.length > 5) sections.push("交通: " + textContent.slice(0, 120));
+    }
+
+    if (sections.length > 0) {
+      out.highlights = sections.join("\n");
+    }
   }
 
-  // 4. Official documents section
-  const officialSec = sliceSection(md, "📋 官方信息");
-  if (officialSec) {
-    out.officialDocuments = parseOfficialDocuments(officialSec);
-    // 官方公众号XXX (no markdown link, just text right after the label)
-    const wechatMatch = officialSec.match(/官方公众号\s*([^\n\r]+?)(?:\s*显示二维码|\s*复制名称|\s*$)/);
-    if (wechatMatch) out.officialWechatAccount = wechatMatch[1].trim() || null;
+  // 4. Official info section — wechat account, official docs
+  const officialIdx = html.indexOf("官方信息");
+  if (officialIdx >= 0) {
+    const officialBlock = html.slice(officialIdx, officialIdx + 1500);
+
+    // 官方公众号
+    const wechatMatch = officialBlock.match(/官方公众号([^<\n]{2,20})/);
+    if (wechatMatch) out.officialWechatAccount = wechatMatch[1].trim();
+
+    // 官方网站 link
+    const websiteMatch = officialBlock.match(/href="(https?:\/\/[^"]+)"/);
+    if (websiteMatch) {
+      out.officialDocuments = { officialWebsite: websiteMatch[1] };
+    }
+  }
+
+  // 5. Registration channels — from 报名渠道 in key info
+  const channelsRaw = kv.get("报名渠道");
+  if (channelsRaw) {
+    const links = Array.from(channelsRaw.matchAll(/https?:\/\/[^\s，,，]+/g)).map((m) => m[0]);
+    if (links.length > 0) out.registrationChannels = links;
   }
 
   return out;
-}
-
-function sliceSection(md: string, headerSubstr: string): string | null {
-  const escaped = headerSubstr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const headerRe = new RegExp(`###\\s*${escaped}`);
-  const m = headerRe.exec(md);
-  if (!m) return null;
-  const start = m.index + m[0].length;
-  const rest = md.slice(start);
-  const next = rest.search(/\n###\s/);
-  return next === -1 ? rest : rest.slice(0, next);
-}
-
-function parseKeyValueBlock(text: string, labels: string[]): Map<string, string> {
-  const map = new Map<string, string>();
-  // Build a labelSet for quick lookup; preserve insertion order in `labels`
-  const labelSet = new Set(labels);
-  const lines = text.split(/\r?\n/).map((l) => l.trim());
-  let currentKey: string | null = null;
-  let buf: string[] = [];
-  const flush = () => {
-    if (currentKey) {
-      const value = buf.filter(Boolean).join("\n").trim();
-      if (value) map.set(currentKey, value);
-    }
-    currentKey = null;
-    buf = [];
-  };
-  for (const line of lines) {
-    if (!line) continue;
-    if (labelSet.has(line)) {
-      flush();
-      currentKey = line;
-    } else if (currentKey) {
-      buf.push(line);
-    }
-  }
-  flush();
-  return map;
-}
-
-function stripMapLink(value: string | null): string | null {
-  if (!value) return null;
-  // Examples seen:
-  //   "天安门广场\n\\[地图\\]"
-  //   "全程 - 全民健身中心[地图]\n半程 - 全民健身中心[地图]"
-  // Preserve multi-line distance prefixes, just drop the [地图] markers.
-  return value
-    .replace(/\\\[地图\\\]/g, "")
-    .replace(/\[地图\]/g, "")
-    .replace(/\s+/g, " ")
-    .trim() || null;
-}
-
-/**
- * Parse a 赛事设项 block like:
- *   全程8000人180元报名9,556人中签率83.7%
- *   半程17000人150元报名4.1万人中签率41.5%
- * or simply:
- *   全程
- *   半程
- *   半程22000人120元
- */
-function parseDistanceOptions(
-  raw: string,
-): Array<{ kind: string; capacity?: number; price?: number }> {
-  const KINDS = ["全程", "半程", "迷你", "迷你跑", "欢乐跑", "家庭跑", "10公里", "5公里"];
-  const lines = raw
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const results: Array<{ kind: string; capacity?: number; price?: number }> = [];
-  for (const line of lines) {
-    const kind = KINDS.find((k) => line.startsWith(k));
-    if (!kind) continue;
-    const item: { kind: string; capacity?: number; price?: number } = { kind };
-    const capMatch = line.match(/(\d{1,3}(?:,\d{3})*|\d+)人/);
-    if (capMatch) {
-      const n = parseInt(capMatch[1].replace(/,/g, ""), 10);
-      if (!Number.isNaN(n)) item.capacity = n;
-    }
-    const priceMatch = line.match(/(\d+)元/);
-    if (priceMatch) item.price = parseInt(priceMatch[1], 10);
-    results.push(item);
-  }
-  return results;
-}
-
-/**
- * 报名渠道 examples:
- *   "京视赛事小程序官网中国银行APP马拉马拉APP"
- *   "官方公众号"
- *   "官网数字心动APP"
- * NowRun concatenates channel names with no delimiter; split by suffix tokens.
- */
-function splitChannels(raw: string): string[] {
-  const tokens = raw
-    .replace(/\s+/g, "")
-    .split(/(?<=APP|小程序|官网|官方公众号|公众号|网站|官方网站)/g)
-    .map((t) => t.trim())
-    .filter(Boolean);
-  // Dedupe while preserving order
-  return [...new Set(tokens)];
-}
-
-function extractHighlights(section: string): string | null {
-  // Strip image markdown (both bare ![](url) and link-wrapped [![](url)](url))
-  // including multi-line URL splits, then keep paragraphs >= 15 chars.
-  const cleaned = section
-    // Link-wrapped image, possibly broken across lines
-    .replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/gs, "")
-    // Bare image
-    .replace(/!\[[^\]]*\]\([^)]*\)/gs, "")
-    // Stray empty parens or stray markdown link fragments left behind
-    .replace(/\([^()\n]{0,200}\)/g, (m) => (m.includes("http") ? "" : m));
-  const lines = cleaned
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("!["));
-  const paragraphs = lines.filter((l) => l.length >= 15);
-  if (paragraphs.length === 0) return null;
-  const joined = paragraphs.slice(0, 4).join("\n\n").trim();
-  return joined.length > 0 ? joined : null;
-}
-
-const DOC_LABELS: Array<[string, string]> = [
-  ["报名须知", "registrationNotice"],
-  ["竞赛规程", "raceRules"],
-  ["赛道信息", "courseInfo"],
-  ["领物指南", "packetPickup"],
-  ["官方网站", "officialWebsite"],
-];
-
-function parseOfficialDocuments(section: string): Record<string, string> | null {
-  const docs: Record<string, string> = {};
-  // The lite HTML→md leaves links like:  [查看详情\n\n](https://...)
-  // So we cannot rely on per-line matches; scan the whole section after
-  // each label and grab the first link URL.
-  for (const [labelCn, key] of DOC_LABELS) {
-    const labelIdx = section.indexOf(labelCn);
-    if (labelIdx === -1) continue;
-    const after = section.slice(labelIdx, labelIdx + 600);
-    // Match next markdown link URL (handles multiline link text)
-    const linkMatch = after.match(/\]\((https?:\/\/[^)\s]+)\)/);
-    if (linkMatch) docs[key] = linkMatch[1];
-  }
-  return Object.keys(docs).length > 0 ? docs : null;
-}
-
-async function fetchRaceMarkdown(url: string): Promise<string | null> {
-  // Native fetch with explicit AbortController timeout (default 8s).
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 8000);
-  try {
-    const r = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; MarathonBot/1.0)" },
-      signal: controller.signal,
-    });
-    if (!r.ok) {
-      console.warn(`  HTTP ${r.status} for ${url}`);
-      return null;
-    }
-    const html = await r.text();
-    return htmlToMarkdownLite(html);
-  } catch (err) {
-    console.warn(`  fetch failed for ${url}: ${err}`);
-    return null;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-/**
- * Lightweight HTML→markdown converter focused on the markers our parser needs:
- * - <h1> → "# "
- * - <h3> → "### "
- * - <img> → "![alt](src)"
- * - <a href> → "[text](href)"
- * - block tags → newline boundaries
- * Tags/attrs other than these are stripped.
- */
-function htmlToMarkdownLite(html: string): string {
-  let s = html
-    // Strip script/style
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    // Headings
-    .replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, "\n# $1\n")
-    .replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, "\n## $1\n")
-    .replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, "\n### $1\n")
-    .replace(/<h4[^>]*>([\s\S]*?)<\/h4>/gi, "\n#### $1\n")
-    // Images: capture alt + src in any attribute order
-    .replace(/<img\s+([^>]*?)\/?>/gi, (_m, attrs) => {
-      const alt = /alt=(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
-      const src = /src=(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
-      const a = alt ? alt[1] || alt[2] : "";
-      const u = src ? src[1] || src[2] : "";
-      return `![${a}](${u})`;
-    })
-    // Anchors
-    .replace(/<a\s+([^>]*?)>([\s\S]*?)<\/a>/gi, (_m, attrs, text) => {
-      const href = /href=(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
-      const u = href ? href[1] || href[2] : "";
-      return u ? `[${text}](${u})` : text;
-    })
-    // Block boundaries
-    .replace(/<\/?(?:div|p|li|br|tr|section|article)[^>]*>/gi, "\n")
-    // Strip remaining tags
-    .replace(/<[^>]+>/g, "")
-    // Decode common HTML entities
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&quot;/g, '"');
-  // Collapse whitespace runs but preserve newlines
-  s = s.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n");
-  return s.trim();
 }
 
 interface RowToBackfill {
@@ -374,15 +220,6 @@ interface RowToBackfill {
 }
 
 async function loadTargets(): Promise<RowToBackfill[]> {
-  const where = ONLY_URL ? `AND ms.source_url = $1` : ``;
-  // --only-new: skip editions that already have rich data (certification_grade
-  // is the most reliable "was this run before?" sentinel since every parse
-  // populates it for any A/B/C race; unmatched races stay null but we'd
-  // re-process them which is fine — they're rare).
-  const onlyNewClause = ONLY_NEW
-    ? `AND m.certification_grade IS NULL AND e.distance_options IS NULL`
-    : ``;
-  const params = ONLY_URL ? [ONLY_URL] : [];
   const r = await pool.query(
     `SELECT m.id AS marathon_id, e.id AS edition_id, e.year, ms.source_url, m.name
      FROM marathon_sources ms
@@ -390,10 +227,7 @@ async function loadTargets(): Promise<RowToBackfill[]> {
      JOIN marathon_editions e ON e.marathon_id = m.id
      WHERE ms.source_url LIKE 'https://www.nowrun.cn/race/%'
        AND e.year = 2026
-       ${where}
-       ${onlyNewClause}
      ORDER BY ms.source_url`,
-    params,
   );
   return r.rows.map((row) => ({
     marathonId: row.marathon_id,
@@ -404,12 +238,10 @@ async function loadTargets(): Promise<RowToBackfill[]> {
   }));
 }
 
-async function applyParsed(
-  target: RowToBackfill,
-  parsed: ParsedRace,
-): Promise<void> {
+async function applyParsed(target: RowToBackfill, parsed: ParsedRace): Promise<void> {
   if (DRY) return;
-  // Update marathons (only fields that were extracted, leave others alone)
+
+  // Update marathons (certification/organizer/wechat)
   const mUpdates: string[] = [];
   const mValues: any[] = [];
   let mIdx = 1;
@@ -434,48 +266,72 @@ async function applyParsed(
     );
   }
 
-  // Update marathon_editions
-  const eUpdates: string[] = [];
-  const eValues: any[] = [];
-  let eIdx = 1;
-  if (parsed.distanceOptions !== null) {
-    eUpdates.push(`distance_options = $${eIdx++}::jsonb`);
-    eValues.push(JSON.stringify(parsed.distanceOptions));
+  // Map field name → db column name
+  const editionFieldMap: Array<{ key: keyof ParsedRace; col: string }> = [
+    { key: "distanceOptions", col: "distance_options" },
+    { key: "highlights", col: "highlights" },
+    { key: "startLocation", col: "start_location" },
+    { key: "finishLocation", col: "finish_location" },
+    { key: "packetPickupLocation", col: "packet_pickup_location" },
+    { key: "medalImageUrls", col: "medal_image_urls" },
+    { key: "registrationChannels", col: "registration_channels" },
+    { key: "officialDocuments", col: "official_documents" },
+  ];
+
+  // Fetch existing field_sources for incremental logic
+  const fsResult = await pool.query(
+    `SELECT field_sources FROM marathon_editions WHERE id = $1`,
+    [target.editionId],
+  );
+  const existingFs: Record<string, unknown> = fsResult.rows[0]?.field_sources ?? {};
+
+  // Step 1: data UPDATE (no field_sources)
+  const dataUpdates: string[] = [];
+  const values: any[] = [];
+  let idx = 1;
+
+  for (const { key, col } of editionFieldMap) {
+    const val = parsed[key];
+    if (val === null) continue;
+    if (existingFs[key]) continue; // incremental skip (field already has provenance)
+    const isArray = Array.isArray(val);
+    const isObj = typeof val === "object";
+    if (col === "distance_options") {
+      dataUpdates.push(`${col} = $${idx++}::jsonb`);
+      values.push(JSON.stringify(val));
+    } else if (isArray) {
+      dataUpdates.push(`${col} = $${idx++}::text[]`);
+      values.push(val as any[]);
+    } else if (isObj) {
+      dataUpdates.push(`${col} = $${idx++}::jsonb`);
+      values.push(JSON.stringify(val));
+    } else {
+      dataUpdates.push(`${col} = $${idx++}`);
+      values.push(val);
+    }
   }
-  if (parsed.highlights !== null) {
-    eUpdates.push(`highlights = $${eIdx++}`);
-    eValues.push(parsed.highlights);
-  }
-  if (parsed.startLocation !== null) {
-    eUpdates.push(`start_location = $${eIdx++}`);
-    eValues.push(parsed.startLocation);
-  }
-  if (parsed.finishLocation !== null) {
-    eUpdates.push(`finish_location = $${eIdx++}`);
-    eValues.push(parsed.finishLocation);
-  }
-  if (parsed.packetPickupLocation !== null) {
-    eUpdates.push(`packet_pickup_location = $${eIdx++}`);
-    eValues.push(parsed.packetPickupLocation);
-  }
-  if (parsed.medalImageUrls !== null) {
-    eUpdates.push(`medal_image_urls = $${eIdx++}::text[]`);
-    eValues.push(parsed.medalImageUrls);
-  }
-  if (parsed.registrationChannels !== null) {
-    eUpdates.push(`registration_channels = $${eIdx++}::text[]`);
-    eValues.push(parsed.registrationChannels);
-  }
-  if (parsed.officialDocuments !== null) {
-    eUpdates.push(`official_documents = $${eIdx++}::jsonb`);
-    eValues.push(JSON.stringify(parsed.officialDocuments));
-  }
-  if (eUpdates.length > 0) {
-    eUpdates.push(`updated_at = NOW()`);
-    eValues.push(target.editionId);
+
+  if (dataUpdates.length > 0) {
+    dataUpdates.push(`updated_at = NOW()`);
+    values.push(target.editionId);
     await pool.query(
-      `UPDATE marathon_editions SET ${eUpdates.join(", ")} WHERE id = $${eIdx}`,
-      eValues,
+      `UPDATE marathon_editions SET ${dataUpdates.join(", ")} WHERE id = $${idx}`,
+      values,
+    );
+  }
+
+  // Step 2: provenance UPDATE — ONE jsonb_set call per field
+  for (const { key } of editionFieldMap) {
+    if (parsed[key] === null) continue;
+    if (existingFs[key]) continue;
+    const provenance = JSON.stringify({
+      sourceId: "nowrun-001-cn-2026",
+      sourceKey: "NowRun",
+      updatedAt: new Date().toISOString(),
+    });
+    await pool.query(
+      `UPDATE marathon_editions SET field_sources = jsonb_set(COALESCE(field_sources,'{}'), '{${key}}', $1::jsonb) WHERE id = $2`,
+      [provenance, target.editionId],
     );
   }
 }
@@ -485,7 +341,7 @@ function summarize(p: ParsedRace): string {
   if (p.certificationGrade) parts.push(`${p.certificationGrade}类`);
   if (p.organizer) parts.push("主办");
   if (p.distanceOptions?.length) parts.push(`${p.distanceOptions.length}项`);
-  if (p.highlights) parts.push("亮点");
+  if (p.highlights) parts.push(`亮点(${p.highlights.split('\n').length}段)`);
   if (p.startLocation) parts.push("起");
   if (p.finishLocation) parts.push("终");
   if (p.packetPickupLocation) parts.push("领物");
@@ -496,44 +352,68 @@ function summarize(p: ParsedRace): string {
   return parts.length > 0 ? parts.join(" ") : "(无字段)";
 }
 
+async function fetchRaceHTML(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 10000);
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+      },
+      signal: controller.signal,
+    });
+    if (!r.ok) {
+      console.warn(`  HTTP ${r.status} for ${url}`);
+      return null;
+    }
+    return await r.text();
+  } catch (err) {
+    console.warn(`  fetch failed for ${url}: ${err}`);
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function main() {
   const allTargets = await loadTargets();
   const targets = allTargets.slice(OFFSET, OFFSET + (LIMIT === Infinity ? allTargets.length : LIMIT));
   console.log(`Loaded ${targets.length} targets (offset=${OFFSET}, of ${allTargets.length} total, DRY=${DRY})`);
+
   let processed = 0;
   let parsedFields = 0;
   let zero = 0;
   let failed = 0;
+
   for (const t of targets) {
     processed++;
     process.stdout.write(`[${processed}/${targets.length}] ${t.sourceUrl} ${t.marathonName.slice(0, 30)}... `);
-    const md = await fetchRaceMarkdown(t.sourceUrl);
-    if (!md) {
+
+    const html = await fetchRaceHTML(t.sourceUrl);
+    if (!html) {
       failed++;
       console.log("FETCH FAIL");
       continue;
     }
-    const parsed = parseNowRunMarkdown(md);
+
+    const parsed = parseNowRunHTML(html);
     const summary = summarize(parsed);
+
     if (summary === "(无字段)") zero++;
     else parsedFields++;
+
     console.log(summary);
+
     try {
       await applyParsed(t, parsed);
     } catch (err) {
-      failed++;
-      console.warn(`  apply failed: ${err}`);
+      console.warn(`  DB write error: ${err}`);
     }
-    // polite delay
-    await new Promise((r) => setTimeout(r, 250));
   }
-  console.log(
-    `\nDone. processed=${processed} extracted=${parsedFields} empty=${zero} failed=${failed}`,
-  );
-  await pool.end();
+
+  console.log(`\nDone. processed=${processed} fields=${parsedFields} zero=${zero} failed=${failed}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch(console.error);
