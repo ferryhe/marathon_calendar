@@ -330,7 +330,8 @@ export default function MarathonDetailPage() {
                     {!latest.isLottery ? (
                       (() => {
                         const resolved = resolveEditionStatus({
-                          status: latest.registrationStatus,
+                          status: latest.status,
+                          legacyStatus: latest.registrationStatus,
                           raceDate: latest.raceDate,
                           registrationStart: latest.registrationOpenDate,
                           registrationEnd: latest.registrationCloseDate,

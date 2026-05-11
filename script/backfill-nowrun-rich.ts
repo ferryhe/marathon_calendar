@@ -98,12 +98,6 @@ function parseNowRunHTML(html: string): ParsedRace {
   out.startLocation = kv.get("比赛地点") ?? null;
   out.organizer = kv.get("主办单位") ?? null;
 
-  // raceDate from 比赛日期 — NOTE: some pages show date as text, some embed in SVG (calendar icon + text)
-  const raceDateMatch = html.match(/比赛日期[\s\S]{0,200}?class="text-sm text-gray-900[^"]*"[^>]*>(\d{4}-\d{2}-\d{2})/);
-  if (raceDateMatch) {
-    // extracted separately as ParsedRace doesn't have raceDate field; handled in main loop
-  }
-
   // 2. Distance options — grid layout
   // Pattern: <span class="text-sm font-medium text-gray-900">全程</span>
 const distItems = Array.from(html.matchAll(/<span class="text-sm font-medium text-gray-900">([^<]+)<\/span>/g))
