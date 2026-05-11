@@ -153,15 +153,6 @@ function shouldOverrideArrayField(params: {
   return { apply: false, reason: "lower_priority" as const };
 }
 
-type RichFieldName = "highlights" | "startLocation" | "registrationOpenDate" | "registrationCloseDate";
-
-const STRING_RICH_FIELDS: RichFieldName[] = [
-  "highlights",
-  "startLocation",
-  "registrationOpenDate",
-  "registrationCloseDate",
-];
-
 export async function upsertEditionWithMerge(params: {
   database: any;
   marathonId: string;
@@ -214,8 +205,19 @@ export async function upsertEditionWithMerge(params: {
     addFieldSource("registrationUrl", params.incoming.registrationUrl ?? null);
     addFieldSource("highlights", params.incoming.highlights ?? null);
     addFieldSource("startLocation", params.incoming.startLocation ?? null);
+    addFieldSource("finishLocation", params.incoming.finishLocation ?? null);
     addFieldSource("registrationOpenDate", params.incoming.registrationOpenDate ?? null);
     addFieldSource("registrationCloseDate", params.incoming.registrationCloseDate ?? null);
+    // distanceOptions is jsonb, not a string — store its JSON representation as the value
+    if (params.incoming.distanceOptions) {
+      fieldSources["distanceOptions"] = buildFieldSourceInfo({
+        sourceId: params.source.sourceId,
+        sourceType,
+        priority,
+        value: JSON.stringify(params.incoming.distanceOptions),
+        at: now,
+      });
+    }
 
     await params.database.insert(marathonEditions).values({
       marathonId: params.marathonId,
