@@ -64,6 +64,7 @@ export function mapLegacyStatus(legacy: string | null | undefined): EditionStatu
     case "报名中":
       return "open";
     case "已截止":
+    case "已报满":
       return "closed";
     case "即将开始":
       return "upcoming";

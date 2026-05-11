@@ -47,15 +47,11 @@
     "byLatest": "按最新"
   },
   "status": {
-    "registering": "报名中",
-    "openingSoon": "即将开始",
-    "closed": "待比赛",
-    "finished": "已完赛",
-    "pending": "待更新",
-    "upcoming": "待开始",
+    "upcoming": "报名未开始",
     "open": "报名中",
+    "closed": "报名已截止",
     "racing": "比赛中",
-    "ended": "已结束",
+    "ended": "已完赛",
     "cancelled": "已取消"
   },
   "list": {

@@ -45,9 +45,16 @@ function useRelativeTime(iso: string | null): string | null {
 }
 
 const STATUS_KEY: Record<string, string> = {
-  报名中: "status.registering",
-  即将开始: "status.openingSoon",
-  已截止: "status.closed",
+  "报名中":   "status.open",         // 报名中
+  "即将开始": "status.upcoming",      // 即将开始 → 报名未开始
+  "已截止":   "status.closed",       // 已截止 → 报名已截止
+  "待公布":   "status.upcoming",     // 待公布 → 报名未开始
+  "未开放":   "status.upcoming",     // 未开放 → 报名未开始
+  "已报满":   "status.closed",       // 已报满 → 报名已截止（报名满了）
+  "已完赛":   "status.ended",        // 已完赛
+  "已结束":   "status.ended",        // 已结束 → 已完赛
+  "已取消":   "status.cancelled",     // 已取消
+  "待更新":   "status.upcoming",     // 待更新 → 报名未开始
 };
 
 export default function Home() {

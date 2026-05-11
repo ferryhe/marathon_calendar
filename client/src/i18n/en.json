@@ -47,13 +47,9 @@
     "byLatest": "Latest"
   },
   "status": {
-    "registering": "Open",
-    "openingSoon": "Opening soon",
-    "closed": "Reg Closed",
-    "finished": "Finished",
-    "pending": "TBD",
     "upcoming": "Upcoming",
     "open": "Open Now",
+    "closed": "Reg Closed",
     "racing": "Race Day",
     "ended": "Ended",
     "cancelled": "Cancelled"

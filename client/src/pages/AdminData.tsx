@@ -56,8 +56,11 @@ function formatDateTime(value?: string | null) {
 
 const REGISTRATION_STATUS_OPTIONS = [
   { value: "报名中", label: "报名中（open）" },
-  { value: "即将开始", label: "即将开始（upcoming）" },
-  { value: "已截止", label: "已截止（closed）" },
+  { value: "报名未开始", label: "报名未开始（upcoming）" },
+  { value: "报名已截止", label: "报名已截止（closed）" },
+  { value: "比赛中", label: "比赛中（racing）" },
+  { value: "已完赛", label: "已完赛（ended）" },
+  { value: "已取消", label: "已取消（cancelled）" },
 ] as const;
 
 function normalizeRegistrationStatus(input?: string | null): string {
@@ -72,8 +75,11 @@ function normalizeRegistrationStatus(input?: string | null): string {
   // Map common English/raw variants into canonical values.
   const normalized = raw.toLowerCase().replace(/[_\s-]+/g, "");
   if (["open", "registering", "registrationopen"].includes(normalized)) return "报名中";
-  if (["upcoming", "notopen", "comingsoon", "notyetopen"].includes(normalized)) return "即将开始";
-  if (["closed", "close", "deadlinepassed", "soldout", "ended"].includes(normalized)) return "已截止";
+  if (["upcoming", "notopen", "comingsoon", "notyetopen"].includes(normalized)) return "报名未开始";
+  if (["closed", "close", "deadlinepassed", "soldout"].includes(normalized)) return "报名已截止";
+  if (["racing"].includes(normalized)) return "比赛中";
+  if (["ended", "finished"].includes(normalized)) return "已完赛";
+  if (["cancelled", "canceled"].includes(normalized)) return "已取消";
 
   return "";
 }
