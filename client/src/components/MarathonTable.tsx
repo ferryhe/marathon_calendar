@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Calendar, ChevronRight, Loader2, MapPin } from "lucide-react";
+import { useLocation } from "wouter";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { useMarathons } from "@/hooks/useMarathons";
@@ -78,12 +79,11 @@ export function MarathonTable({
   region,
   searchQuery,
   filters,
-  showMineOnly = false,
-  favoriteMarathonIds = new Set<string>(),
-  favoritesLoading = false,
-  externalPage,
-  onPageChange,
+  showMineOnly,
+  favoriteMarathonIds,
+  favoritesLoading,
 }: MarathonTableProps) {
+  const [, setLocation] = useLocation();
   const { t, i18n } = useTranslation();
   const locale = useLocale();
   const [selectedEvent, setSelectedEvent] = useState<MarathonListItem | null>(null);
@@ -305,7 +305,7 @@ export function MarathonTable({
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: index * 0.03 }}
                           className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
-                          onClick={() => setSelectedEvent(event)}
+                          onClick={() => setLocation(`/marathons/${event.id}`)}
                           data-testid={`row-event-${event.id}`}
                         >
                           <div className="flex items-center gap-5">
@@ -354,25 +354,23 @@ export function MarathonTable({
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.03 }}
                       className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
-                      onClick={() => setSelectedEvent(event)}
+                      onClick={() => setLocation(`/marathons/${event.id}`)}
                       data-testid={`row-event-${event.id}`}
                     >
-                      <div className="flex items-center gap-5">
-                        <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
-                          <span className="text-lg leading-none">{event.day}</span>
-                          <span className="text-[10px] text-muted-foreground uppercase mt-1">
-                            {weekdayPrefix}{weekDay}
-                          </span>
-                        </div>
+                      <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-secondary/50 font-bold border border-border/50">
+                        <span className="text-lg leading-none">{event.day}</span>
+                        <span className="text-[10px] text-muted-foreground uppercase mt-1">
+                          {weekdayPrefix}{weekDay}
+                        </span>
+                      </div>
 
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
-                            <HighlightText text={event.localizedName} highlight={searchQuery} />
-                          </h3>
-                          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
-                            <MapPin className="w-3 h-3 flex-shrink-0" />
-                            <span className="truncate"><HighlightText text={event.localizedCity || event.country || locationFallback} highlight={searchQuery} /></span>
-                          </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-base line-clamp-1 group-hover:text-primary transition-colors">
+                          <HighlightText text={event.localizedName} highlight={searchQuery} />
+                        </h3>
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-medium">
+                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate"><HighlightText text={event.localizedCity || event.country || locationFallback} highlight={searchQuery} /></span>
                         </div>
                       </div>
 
@@ -405,7 +403,7 @@ export function MarathonTable({
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.02 }}
                     className="group relative flex items-center justify-between p-4 bg-card hover:bg-accent/50 active:scale-[0.98] transition-all rounded-2xl border cursor-pointer"
-                    onClick={() => setSelectedEvent(event)}
+                    onClick={() => setLocation(`/marathons/${event.id}`)}
                     data-testid={`row-event-tbd-${event.id}`}
                   >
                     <div className="flex items-center gap-5">
