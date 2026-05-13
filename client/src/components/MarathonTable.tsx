@@ -82,6 +82,7 @@ export function MarathonTable({
   showMineOnly,
   favoriteMarathonIds,
   favoritesLoading,
+  externalPage,
 }: MarathonTableProps) {
   const [, setLocation] = useLocation();
   const { t, i18n } = useTranslation();
