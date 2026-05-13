@@ -75,6 +75,25 @@ export default function Home() {
   useEffect(() => {
     try { window.localStorage.setItem("home.kind", kind); } catch {}
   }, [kind]);
+  // WMM only exists for marathon — reset to China when switching to trail
+  useEffect(() => {
+    if (kind === "trail" && region === "WMM") {
+      setRegion("China");
+    }
+  }, [kind, region]);
+  // Restore scroll position when returning from detail page
+  const scrollYRef = useRef<number>(0);
+  useEffect(() => {
+    const saved = window.sessionStorage.getItem("home.scrollY");
+    if (saved) {
+      window.scrollTo({ top: Number(saved), behavior: "instant" as any });
+    }
+    const handleScroll = () => {
+      window.sessionStorage.setItem("home.scrollY", String(window.scrollY));
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -346,7 +365,7 @@ export default function Home() {
             onValueChange={(value) => setRegion(value as "China" | "Overseas" | "WMM")}
             className="flex-1"
           >
-            <TabsList className="grid w-full grid-cols-3 bg-secondary/50 rounded-xl p-1 h-9">
+            <TabsList className={`grid w-full bg-secondary/50 rounded-xl p-1 h-9 ${kind === "trail" ? "grid-cols-2" : "grid-cols-3"}`}>
               <TabsTrigger
                 value="China"
                 className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
@@ -363,6 +382,7 @@ export default function Home() {
               </TabsTrigger>
               <TabsTrigger
                 value="WMM"
+                hidden={kind === "trail"}
                 className="rounded-lg text-sm h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
                 data-testid="tab-wmm"
               >
