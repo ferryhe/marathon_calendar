@@ -965,7 +965,7 @@ export async function registerRoutes(
       if (params.status) {
         // New enum values map to the `status` column; legacy Chinese strings keep
         // hitting `registration_status` for one release cycle.
-        const NEW_ENUM = new Set(["upcoming", "open", "closed", "racing", "ended", "cancelled"]);
+        const NEW_ENUM = new Set(["upcoming", "imminent", "open", "closed", "racing", "ended", "cancelled"]);
         if (NEW_ENUM.has(params.status)) {
           editionConditions.push(eq(marathonEditions.status, params.status));
         } else {
@@ -974,11 +974,15 @@ export async function registerRoutes(
       }
 
       // 默认隐藏 race_date 已过的赛事（与前端过滤一致）；显式传 status='已完赛' / 'ended' / 'cancelled' 或 includePast=true 时不过滤
+      // imminent/racing/closed 状态本身表示赛事在近期/进行中/报名截止，不需要按日期过滤
       if (
         !params.includePast &&
         params.status !== '已完赛' &&
         params.status !== 'ended' &&
-        params.status !== 'cancelled'
+        params.status !== 'cancelled' &&
+        params.status !== 'imminent' &&
+        params.status !== 'racing' &&
+        params.status !== 'closed'
       ) {
         editionConditions.push(
           sql`(${marathonEditions.raceDate} IS NULL OR ${marathonEditions.raceDate} >= CURRENT_DATE)`

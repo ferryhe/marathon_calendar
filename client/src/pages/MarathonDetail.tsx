@@ -49,9 +49,13 @@ import { useTranslation } from "react-i18next";
 
 function formatDate(dateValue: string | null | undefined, lang = "zh", fallback = "—") {
   if (!dateValue) return fallback;
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return fallback;
-  return date.toLocaleDateString(lang.startsWith("en") ? "en-US" : "zh-CN");
+  const [y, m, d] = dateValue.split("-").map(Number);
+  if (!y || !m || !d) return fallback;
+  if (lang.startsWith("en")) {
+    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${monthNames[m - 1]} ${d}, ${y}`;
+  }
+  return `${y}年${m}月${d}日`;
 }
 
 export default function MarathonDetailPage() {

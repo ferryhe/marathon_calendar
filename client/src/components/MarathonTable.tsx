@@ -158,8 +158,9 @@ export function MarathonTable({
         }
         const raceDate = marathon.nextEdition?.raceDate;
         if (raceDate && !showPastEditions) {
-          const d = new Date(raceDate);
-          if (d < today) return false;
+          const [y, m, d] = raceDate.split("-").map(Number);
+          const raceDay = new Date(y!, m! - 1, d!);
+          if (raceDay < today) return false;
         }
         return true;
       })
@@ -171,7 +172,7 @@ export function MarathonTable({
           if (!editionDate) {
             acc.tbd.push({
               ...marathon,
-              displayDate: new Date(marathon.createdAt),
+              displayDate: null,
               year: filters.year,
               month: 0,
               day: 0,
@@ -182,13 +183,14 @@ export function MarathonTable({
             return acc;
           }
 
-          const displayDate = new Date(editionDate);
+          const [ey, em, ed] = editionDate.split("-").map(Number);
+          const displayDate = new Date(ey!, em! - 1, ed!);
           acc.dated.push({
             ...marathon,
             displayDate,
-            year: displayDate.getFullYear(),
-            month: displayDate.getMonth() + 1,
-            day: displayDate.getDate(),
+            year: ey,
+            month: em,
+            day: ed,
             registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
             localizedName,
             localizedCity,
@@ -253,7 +255,8 @@ export function MarathonTable({
     const sample = events[0];
     if (!sample) return null;
     if (i18n.language?.startsWith("en")) {
-      const monthName = new Date(sample.year, sample.month - 1, 1).toLocaleString("en-US", { month: "short" });
+      const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const monthName = monthNames[sample.month - 1];
       return (
         <div className="flex items-baseline gap-2 md:flex-col md:items-start md:gap-0">
           <span className="text-3xl font-black tracking-tighter text-foreground/20 md:text-4xl">
