@@ -52,6 +52,8 @@ interface MarathonTableProps {
     kind?: "marathon" | "trail";
     sortBy: "raceDate" | "name" | "createdAt";
     sortOrder?: "asc" | "desc";
+    roadTag?: string;
+    trailTag?: string;
   };
   showMineOnly?: boolean;
   favoriteMarathonIds?: Set<string>;
@@ -101,6 +103,8 @@ export function MarathonTable({
     kind: filters.kind,
     sortBy: filters.sortBy,
     sortOrder: filters.sortOrder || "asc",
+    roadTag: filters.roadTag,
+    trailTag: filters.trailTag,
   });
 
   const paginationInfo = data?.pagination;
@@ -125,7 +129,9 @@ export function MarathonTable({
         prev.filters.country !== filters.country ||
         prev.filters.kind !== filters.kind ||
         prev.filters.sortBy !== filters.sortBy ||
-        prev.filters.sortOrder !== filters.sortOrder) {
+        prev.filters.sortOrder !== filters.sortOrder ||
+        prev.filters.roadTag !== filters.roadTag ||
+        prev.filters.trailTag !== filters.trailTag) {
       handlePageChange(1);
     }
     prevFiltersRef.current = { searchQuery, region, filters };

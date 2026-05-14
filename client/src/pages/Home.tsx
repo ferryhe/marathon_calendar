@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
+import { ROAD_TAG_LABELS, TRAIL_TAG_LABELS } from "@/lib/tagLabels";
 
 type SyncStatus = {
   lastFinishedAt: string | null;
@@ -83,6 +84,7 @@ export default function Home() {
   const [sortBy, setSortBy] = useState<"raceDate" | "name" | "createdAt">("raceDate");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [viewMode, setViewMode] = useState<"all" | "mine">("all");
+  const [tagFilter, setTagFilter] = useState<string>("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [, setNowTick] = useState(0);
   const wasRunningRef = useRef(false);
@@ -127,6 +129,7 @@ export default function Home() {
     monthFilter !== "all" ||
     statusFilter !== "all" ||
     countryFilter !== "all" ||
+    tagFilter !== "all" ||
     sortBy !== "raceDate" ||
     searchQuery !== "";
 
@@ -141,6 +144,10 @@ export default function Home() {
   useEffect(() => {
     setCountryFilter("all");
   }, [region, kind]);
+
+  useEffect(() => {
+    setTagFilter("all");
+  }, [kind]);
 
   useEffect(() => {
     if (!currentUser && viewMode === "mine") {
@@ -206,6 +213,7 @@ export default function Home() {
     setMonthFilter("all");
     setStatusFilter("all");
     setCountryFilter("all");
+    setTagFilter("all");
     setSortBy("raceDate");
     setSortOrder("asc");
     setSearchQuery("");
@@ -425,6 +433,13 @@ export default function Home() {
               {countryFilter !== "all" && (
                 <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">{countryFilter}</span>
               )}
+              {tagFilter !== "all" && (
+                <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">
+                  {kind === "marathon"
+                    ? (ROAD_TAG_LABELS[tagFilter as keyof typeof ROAD_TAG_LABELS] ?? tagFilter)
+                    : (TRAIL_TAG_LABELS[tagFilter as keyof typeof TRAIL_TAG_LABELS] ?? tagFilter)}
+                </span>
+              )}
               {sortBy !== "raceDate" && (
                 <span className="shrink-0 bg-secondary/50 px-2 py-0.5 rounded-full">
                   {sortBy === "name" ? t("filters.byName") : t("filters.byLatest")}
@@ -524,6 +539,41 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
+
+                {/* 标签筛选：路跑/越野各自选项 */}
+                <Select
+                  value={tagFilter}
+                  onValueChange={(value) => {
+                    setTagFilter(value);
+                  }}
+                >
+                  <SelectTrigger className="bg-secondary/30 border-0 rounded-xl h-9 text-sm" data-testid="select-tag">
+                    <SelectValue placeholder={t("filters.tag")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {kind === "marathon" ? (
+                      <>
+                        <SelectItem value="all">{t("filters.allTags")}</SelectItem>
+                        <SelectItem value="marathon">{t("tags.marathon")}</SelectItem>
+                        <SelectItem value="half_marathon">{t("tags.halfMarathon")}</SelectItem>
+                        <SelectItem value="10k">{t("tags.10k")}</SelectItem>
+                        <SelectItem value="5k">{t("tags.5k")}</SelectItem>
+                        <SelectItem value="other">{t("tags.other")}</SelectItem>
+                      </>
+                    ) : (
+                      <>
+                        <SelectItem value="all">{t("filters.allTags")}</SelectItem>
+                        <SelectItem value="Short">{t("tags.short")}</SelectItem>
+                        <SelectItem value="20K">{t("tags.20k")}</SelectItem>
+                        <SelectItem value="42K">{t("tags.42k")}</SelectItem>
+                        <SelectItem value="50K">{t("tags.50k")}</SelectItem>
+                        <SelectItem value="100K">{t("tags.100k")}</SelectItem>
+                        <SelectItem value="100M">{t("tags.100m")}</SelectItem>
+                        <SelectItem value="200K+">{t("tags.200kPlus")}</SelectItem>
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
             </motion.div>
           )}
@@ -542,6 +592,9 @@ export default function Home() {
             kind,
             sortBy,
             sortOrder,
+            ...(kind === "marathon"
+              ? { roadTag: tagFilter === "all" ? undefined : tagFilter }
+              : { trailTag: tagFilter === "all" ? undefined : tagFilter }),
           }}
           showMineOnly={viewMode === "mine"}
           favoriteMarathonIds={favoriteMarathonIds}

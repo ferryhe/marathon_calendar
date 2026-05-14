@@ -44,7 +44,23 @@
     "sortAsc": "升序",
     "sortDesc": "降序",
     "byName": "按名称",
-    "byLatest": "按最新"
+    "byLatest": "按最新",
+    "allTags": "全部标签",
+    "tag": "标签"
+  },
+  "tags": {
+    "marathon": "全马",
+    "halfMarathon": "半马",
+    "10k": "10公里",
+    "5k": "5公里",
+    "other": "其他",
+    "short": "短距离",
+    "20k": "20公里",
+    "42k": "42公里",
+    "50k": "50公里",
+    "100k": "100公里",
+    "100m": "百英里",
+    "200kPlus": "200公里+"
   },
   "status": {
     "upcoming": "报名未开始",

@@ -47,6 +47,8 @@ import { useLocalizedCity, useLocalizedName } from "@/lib/locale";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useTranslation } from "react-i18next";
 
+import { ROAD_TAG_LABELS, TRAIL_TAG_LABELS } from "@/lib/tagLabels";
+
 function formatDate(dateValue: string | null | undefined, lang = "zh", fallback = "—") {
   if (!dateValue) return fallback;
   const date = new Date(dateValue);
@@ -230,6 +232,16 @@ export default function MarathonDetailPage() {
                     >
                       <Award className="w-3 h-3 mr-1" />
                       {data.certificationGrade}{t("detail.certificationSuffix")}
+                    </Badge>
+                  )}
+                  {latest?.roadTag && (
+                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                      {ROAD_TAG_LABELS[latest.roadTag as keyof typeof ROAD_TAG_LABELS] ?? latest.roadTag}
+                    </Badge>
+                  )}
+                  {latest?.trailTag && (
+                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                      {TRAIL_TAG_LABELS[latest.trailTag as keyof typeof TRAIL_TAG_LABELS] ?? latest.trailTag}
                     </Badge>
                   )}
                 </div>

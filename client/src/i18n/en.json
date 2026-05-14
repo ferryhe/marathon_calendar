@@ -44,7 +44,23 @@
     "sortAsc": "Ascending",
     "sortDesc": "Descending",
     "byName": "By name",
-    "byLatest": "Latest"
+    "byLatest": "Latest",
+    "allTags": "All tags",
+    "tag": "Tag"
+  },
+  "tags": {
+    "marathon": "Marathon",
+    "halfMarathon": "Half",
+    "10k": "10K",
+    "5k": "5K",
+    "other": "Other",
+    "short": "Short",
+    "20k": "20K",
+    "42k": "42K",
+    "50k": "50K",
+    "100k": "100K",
+    "100m": "100M",
+    "200kPlus": "200K+"
   },
   "status": {
     "upcoming": "Upcoming",

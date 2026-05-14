@@ -96,6 +96,12 @@ export const marathonEditions = pgTable(
     finishLocation: text("finish_location"),
     packetPickupLocation: text("packet_pickup_location"),
     medalImageUrls: text("medal_image_urls").array(),
+    // Standardized race-category tags (populated after tag-converter SQL runs)
+    roadTag: text("road_tag"),
+    roadTags: text("road_tags").array(),
+    trailTag: text("trail_tag"),
+    trailTags: text("trail_tags").array(),
+    distanceKm: doublePrecision("distance_km"),
     registrationChannels: text("registration_channels").array(),
     officialDocuments: jsonb("official_documents").$type<{
       registrationNotice?: string;

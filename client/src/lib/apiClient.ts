@@ -28,6 +28,9 @@ export interface MarathonEditionDTO {
   // frontend falls back to deriving from dates via `resolveEditionStatus`.
   status?: string | null;
   isLottery?: boolean | null;
+  roadTag?: string;
+  trailTag?: string;
+  distanceKm?: number;
   // PR-1 rich fields (NowRun)
   distanceOptions?: DistanceOption[] | null;
   highlights?: string | null;
@@ -165,6 +168,8 @@ export interface MarathonQueryParams {
   sortBy?: 'name' | 'createdAt' | 'raceDate';
   sortOrder?: 'asc' | 'desc';
   includePast?: boolean;
+  roadTag?: string;
+  trailTag?: string;
 }
 
 export interface CreateReviewPayload {
