@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
+  doublePrecision,
   integer,
   jsonb,
   pgTable,
@@ -258,7 +259,7 @@ export const reviewLikes = pgTable(
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     reviewId: varchar("review_id")
-      .references(() => marathonReviews.id)
+      .references(() => marathonReviews.id, { onDelete: "cascade" })
       .notNull(),
     userId: varchar("user_id")
       .references(() => users.id)
@@ -277,7 +278,7 @@ export const reviewReports = pgTable(
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     reviewId: varchar("review_id")
-      .references(() => marathonReviews.id)
+      .references(() => marathonReviews.id, { onDelete: "cascade" })
       .notNull(),
     userId: varchar("user_id")
       .references(() => users.id)

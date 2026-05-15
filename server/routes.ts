@@ -2,7 +2,7 @@
 import { type Server } from "http";
 import path from "path";
 import { promises as fs } from "fs";
-import COS from "cos-nodejs-sdk-v5";
+import { createHash, createHmac } from "crypto";
 import sharp from "sharp";
 import { eq, and, or, like, ilike, sql, desc, asc, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
@@ -356,14 +356,6 @@ const COS_SECRET_ID = process.env.COS_SECRET_ID;
 const COS_SECRET_KEY = process.env.COS_SECRET_KEY;
 const COS_PUBLIC_BASE_URL = process.env.COS_PUBLIC_BASE_URL;
 
-const cosClient =
-  COS_REGION && COS_SECRET_ID && COS_SECRET_KEY
-    ? new COS({
-        SecretId: COS_SECRET_ID,
-        SecretKey: COS_SECRET_KEY,
-      })
-    : null;
-
 function getCosPublicUrl(key: string) {
   const normalized = key.replace(/^\/+/, "");
   if (COS_PUBLIC_BASE_URL) {
@@ -378,6 +370,74 @@ function getCosPublicUrl(key: string) {
   return `https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/${normalized}`;
 }
 
+function sha1Hex(value: string) {
+  return createHash("sha1").update(value).digest("hex");
+}
+
+function hmacSha1Hex(key: string | Buffer, value: string) {
+  return createHmac("sha1", key).update(value).digest("hex");
+}
+
+function encodeCosPath(key: string) {
+  return `/${key
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")}`;
+}
+
+function createCosAuthorization(method: string, host: string, pathname: string) {
+  if (!COS_SECRET_ID || !COS_SECRET_KEY) {
+    throw new Error("COS credentials are required for COS uploads");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const keyTime = `${now};${now + 600}`;
+  const headerList = "host";
+  const urlParamList = "";
+  const httpString = `${method.toLowerCase()}\n${pathname}\n\nhost=${host}\n`;
+  const stringToSign = `sha1\n${keyTime}\n${sha1Hex(httpString)}\n`;
+  const signKey = hmacSha1Hex(COS_SECRET_KEY, keyTime);
+  const signature = hmacSha1Hex(signKey, stringToSign);
+
+  return [
+    "q-sign-algorithm=sha1",
+    `q-ak=${COS_SECRET_ID}`,
+    `q-sign-time=${keyTime}`,
+    `q-key-time=${keyTime}`,
+    `q-header-list=${headerList}`,
+    `q-url-param-list=${urlParamList}`,
+    `q-signature=${signature}`,
+  ].join("&");
+}
+
+async function putCosObject(
+  key: string,
+  body: Buffer,
+  contentType: string,
+  cacheControl: string,
+) {
+  if (!COS_REGION) {
+    throw new Error("COS_REGION is required for COS uploads");
+  }
+
+  const host = `${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com`;
+  const pathname = encodeCosPath(key);
+  const response = await fetch(`https://${host}${pathname}`, {
+    method: "PUT",
+    headers: {
+      Authorization: createCosAuthorization("PUT", host, pathname),
+      "Cache-Control": cacheControl,
+      "Content-Type": contentType,
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => response.statusText);
+    throw new Error(`COS upload failed: ${response.status} ${detail || response.statusText}`);
+  }
+}
+
 async function uploadAvatarObject(
   userId: string,
   ext: string,
@@ -386,27 +446,13 @@ async function uploadAvatarObject(
   const now = Date.now();
   const objectKey = `avatars/${userId}/${now}.${ext}`;
 
-  if (cosClient && COS_REGION) {
-    await new Promise<void>((resolve, reject) => {
-      cosClient.putObject(
-        {
-          Bucket: COS_BUCKET,
-          Region: COS_REGION,
-          Key: objectKey,
-          Body: buffer,
-          ContentLength: buffer.length,
-          ContentType: `image/${ext === "jpg" ? "jpeg" : ext}`,
-          CacheControl: "public, max-age=31536000, immutable",
-        },
-        (err) => {
-          if (err) {
-            return reject(err);
-          }
-
-          return resolve();
-        },
-      );
-    });
+  if (COS_REGION && COS_SECRET_ID && COS_SECRET_KEY) {
+    await putCosObject(
+      objectKey,
+      buffer,
+      `image/${ext === "jpg" ? "jpeg" : ext}`,
+      "public, max-age=31536000, immutable",
+    );
 
     return {
       avatarUrl: getCosPublicUrl(objectKey),
@@ -656,6 +702,9 @@ export async function registerRoutes(
     try {
       const database = ensureDatabase();
       requireAuth(req);
+      if (process.env.NODE_ENV === "production") {
+        return res.status(403).json({ message: "Direct WeChat binding is disabled" });
+      }
       const payload = bindWechatPayloadSchema.parse(req.body);
 
       const userId = req.session.userId!;
@@ -968,7 +1017,15 @@ export async function registerRoutes(
       if (params.status) {
         // New enum values map to the `status` column; legacy Chinese strings keep
         // hitting `registration_status` for one release cycle.
-        const NEW_ENUM = new Set(["upcoming", "open", "closed", "racing", "ended", "cancelled"]);
+        const NEW_ENUM = new Set([
+          "upcoming",
+          "imminent",
+          "open",
+          "closed",
+          "racing",
+          "ended",
+          "cancelled",
+        ]);
         if (NEW_ENUM.has(params.status)) {
           editionConditions.push(eq(marathonEditions.status, params.status));
         } else {
@@ -1308,8 +1365,9 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/marathons/archive-past", async (_req, res, next) => {
+  app.post("/api/marathons/archive-past", async (req, res, next) => {
     try {
+      requireAdmin(req);
       ensureDatabase();
       const archivedCount = await archivePastEditions();
       res.json({
@@ -1326,8 +1384,9 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/marathons/refresh", async (_req, res, next) => {
+  app.post("/api/marathons/refresh", async (req, res, next) => {
     try {
+      requireAdmin(req);
       ensureDatabase();
 
       if (activeSyncPromise) {
@@ -1471,6 +1530,7 @@ export async function registerRoutes(
 
   app.post("/api/marathons", async (req, res, next) => {
     try {
+      requireAdmin(req);
       const database = ensureDatabase();
       const parsed = insertMarathonSchema.parse({
         ...req.body,
@@ -1617,6 +1677,8 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Permission denied" });
       }
 
+      await database.delete(reviewLikes).where(eq(reviewLikes.reviewId, req.params.id));
+      await database.delete(reviewReports).where(eq(reviewReports.reviewId, req.params.id));
       await database.delete(marathonReviews).where(eq(marathonReviews.id, req.params.id));
       res.json({ success: true });
     } catch (error) {
@@ -2950,7 +3012,7 @@ export async function registerRoutes(
           registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
           registrationUrl: z.string().trim().url().nullable().optional(),
           status: z
-            .enum(["upcoming", "open", "closed", "racing", "ended", "cancelled"])
+            .enum(["upcoming", "imminent", "open", "closed", "racing", "ended", "cancelled"])
             .nullable()
             .optional(),
           isLottery: z.boolean().optional(),

@@ -47,6 +47,10 @@ if (!sessionSecretEnv && !isProduction) {
   );
 }
 
+if (isProduction) {
+  app.set("trust proxy", 1);
+}
+
 const sessionStore = (() => {
   if (!isProduction) {
     return new MemoryStore({
@@ -100,10 +104,72 @@ const avatarDir = path.join(uploadsRoot, "avatars");
 mkdirSync(avatarDir, { recursive: true });
 app.use("/uploads", express.static(uploadsRoot));
 
+const LOG_REDACTED_KEY_PATTERN = /password|token|secret|rawContent/i;
+const LOG_MAX_STRING_LENGTH = 200;
+const LOG_MAX_OBJECT_KEYS = 12;
+const LOG_MAX_ARRAY_ITEMS = 5;
+const LOG_MAX_DEPTH = 3;
+
+function summarizeJsonForLog(value: unknown, depth = 0): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return value.length > LOG_MAX_STRING_LENGTH
+      ? `${value.slice(0, LOG_MAX_STRING_LENGTH)}...(${value.length} chars)`
+      : value;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      type: "array",
+      length: value.length,
+      sample: value.slice(0, LOG_MAX_ARRAY_ITEMS).map((item) => summarizeJsonForLog(item, depth + 1)),
+    };
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === "object") {
+    if (depth >= LOG_MAX_DEPTH) {
+      return "[object]";
+    }
+
+    const entries = Object.entries(value as Record<string, unknown>);
+    const summary: Record<string, unknown> = {};
+    for (const [key, entryValue] of entries.slice(0, LOG_MAX_OBJECT_KEYS)) {
+      summary[key] = LOG_REDACTED_KEY_PATTERN.test(key)
+        ? "[redacted]"
+        : summarizeJsonForLog(entryValue, depth + 1);
+    }
+    if (entries.length > LOG_MAX_OBJECT_KEYS) {
+      summary._truncatedKeys = entries.length - LOG_MAX_OBJECT_KEYS;
+    }
+    return summary;
+  }
+
+  return `[${typeof value}]`;
+}
+
+function stringifyLogSummary(value: unknown) {
+  try {
+    return JSON.stringify(summarizeJsonForLog(value));
+  } catch {
+    return '"[unserializable]"';
+  }
+}
+
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  let capturedJsonResponse: unknown = undefined;
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
@@ -115,8 +181,8 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      if (capturedJsonResponse !== undefined) {
+        logLine += ` :: ${stringifyLogSummary(capturedJsonResponse)}`;
       }
 
       log(logLine);
