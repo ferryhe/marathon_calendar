@@ -153,13 +153,14 @@ npm run dev:client
 
 ## 📱 功能特性
 
-**当前版本**: v0.6 Alpha（约60%完成）  
-**最后更新**: 2026年2月16日
+**当前状态**: 阶段一开发中（约88%完成，数据采集与第三方平台覆盖已基本闭环）
+
+**最后更新**: 2026年5月
 
 ### ✅ 已完成功能
 
 #### 用户系统
-- ✅ 用户注册/登录（Passport.js认证）
+- ✅ 用户注册/登录（express-session + scrypt 密码哈希）
 - ✅ 用户个人资料管理
 - ✅ 头像上传（支持腾讯云COS/本地存储）
 - ✅ 微信账号绑定接口（API就绪）
@@ -183,8 +184,8 @@ npm run dev:client
 
 ### 🟡 进行中功能
 
-- 🟡 数据采集爬虫（框架就绪，爬虫开发中）
-- 🟡 AI提取优化（模板生成已就绪）
+- 🟡 数据采集覆盖扩展与质量校验
+- 🟡 AI 兜底提取与规则模板生成优化
 - 🟡 管理后台UI优化
 
 ### ⏳ 计划中功能
@@ -197,8 +198,9 @@ npm run dev:client
 - ⏳ 数据分析报告
 
 详细的项目状态和开发计划请查看：
-- [项目现状总结-2026-02-16](./docs/项目计划/项目现状总结-2026-02-16.md)
-- [下一步开发计划-2026-02-16](./docs/项目计划/下一步开发计划-2026-02-16.md)
+- [项目进度检查报告-2026-03-08](./docs/项目计划/项目进度检查报告-2026-03-08.md)
+- [下一步开发计划-2026-03-08](./docs/项目计划/下一步开发计划-2026-03-08.md)
+- [开发日志-2026-05-02 第三方平台研究与数据修正](./docs/开发日志/开发日志-2026-05-02-第三方平台研究与数据修正.md)
 - [项目计划-完整开发路线图](./docs/项目计划/项目计划-完整开发路线图.md)
 
 ## 🏗️ 技术栈
@@ -216,12 +218,13 @@ npm run dev:client
 - Drizzle ORM
 - PostgreSQL
 - Redis
-- Passport.js
+- express-session
+- scrypt 密码哈希
 
 ### 数据采集
-- Puppeteer (网页爬虫)
-- Cheerio (HTML解析)
-- 通义千问 API (AI辅助提取)
+- fetch + Cheerio (HTML 获取与解析)
+- 规则模板 / JSON-LD / 正则提取
+- OpenAI-compatible API (可选 AI 兜底提取与规则生成)
 
 ### 云服务
 - 腾讯云
@@ -251,12 +254,13 @@ MIT License
 ## Crawler Module
 
 ### Overview
-The Crawler module is designed to automate the data collection process from various sources. It fetches, processes, and stores data efficiently.
+The crawler module automates data collection from official race sites and third-party platforms. It fetches HTML, extracts candidate edition data with rules, JSON-LD, regex, and Cheerio parsing, then stores raw results for admin review before publishing.
 
 ### Features
-- Automated data fetching
-- Data processing pipelines
-- Integration with existing schemas
+- Scheduled and manual data fetching
+- Rule-based extraction with JSON-LD and regex fallback
+- Optional OpenAI-compatible AI fallback when rule-based extraction fails
+- Admin review flow integrated with the existing schemas
 
 ### Schema Extensions
 The following extensions have been made to enhance data structure compatibility:

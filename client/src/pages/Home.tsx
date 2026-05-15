@@ -10,7 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser, useMyFavorites } from "@/hooks/useAuth";
-import { apiRequest } from "@/lib/queryClient";
+import { marathonKeys } from "@/hooks/useMarathons";
 import {
   Select,
   SelectContent,
@@ -109,7 +109,7 @@ export default function Home() {
     if (!syncStatus) return;
     if (wasRunningRef.current && !syncStatus.isRunning) {
       setIsUpdating(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/marathons"] });
+      queryClient.invalidateQueries({ queryKey: marathonKeys.lists() });
       queryClient.invalidateQueries({ queryKey: ["/api/marathons/upcoming"] });
       toast({ title: t("common.dataUpdated"), duration: 1200 });
     }
@@ -163,32 +163,16 @@ export default function Home() {
     if (isUpdating) return;
     setIsUpdating(true);
     try {
-      const res = await apiRequest("POST", "/api/marathons/refresh");
-      const body = (await res.json()) as { data: { status: string; message?: string } };
-      const status = body?.data?.status;
-      if (status === "started") {
-        toast({ title: t("common.fetchingLatest"), duration: 1500 });
-        queryClient.invalidateQueries({ queryKey: ["/api/marathons/sync-status"] });
-      } else if (status === "in_progress") {
-        toast({ title: t("common.syncInProgress"), duration: 1500 });
-        queryClient.invalidateQueries({ queryKey: ["/api/marathons/sync-status"] });
-      } else {
-        toast({ title: body?.data?.message ?? t("common.tryAgainLater"), duration: 1500 });
-        setIsUpdating(false);
-      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: marathonKeys.all }),
+        queryClient.invalidateQueries({ queryKey: ["/api/marathons/countries"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/marathons/sync-status"] }),
+      ]);
+      toast({ title: t("common.dataUpdated"), duration: 1200 });
     } catch (error) {
       const message = error instanceof Error ? error.message : t("common.updateFailed");
-      const match = message.match(/^(\d+):\s*(.*)$/);
-      if (match && match[1] === "429") {
-        try {
-          const payload = JSON.parse(match[2]) as { data?: { message?: string } };
-          toast({ title: payload?.data?.message ?? t("common.tryAgainLater"), duration: 1500 });
-        } catch {
-          toast({ title: t("common.tryAgainLater"), duration: 1500 });
-        }
-      } else {
-        toast({ title: t("common.updateFailed"), description: message, duration: 2000 });
-      }
+      toast({ title: t("common.updateFailed"), description: message, duration: 2000 });
+    } finally {
       setIsUpdating(false);
     }
   };

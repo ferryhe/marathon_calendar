@@ -228,6 +228,7 @@ export async function upsertEditionWithMerge(params: {
       highlights: params.incoming.highlights ?? null,
       distanceOptions: params.incoming.distanceOptions ?? null,
       startLocation: params.incoming.startLocation ?? null,
+      finishLocation: params.incoming.finishLocation ?? null,
       registrationOpenDate: params.incoming.registrationOpenDate ?? null,
       registrationCloseDate: params.incoming.registrationCloseDate ?? null,
       status: params.incoming.status ?? null,
