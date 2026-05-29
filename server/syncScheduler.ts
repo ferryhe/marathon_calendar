@@ -760,9 +760,9 @@ export async function archivePastEditions(): Promise<number> {
   ensureDatabase();
   const result = await pool!.query(`
     UPDATE marathon_editions e
-    SET registration_status = '已完赛',
+    SET status = 'ended',
         field_sources = COALESCE(e.field_sources, '{}'::jsonb) || jsonb_build_object(
-          'registrationStatus', jsonb_build_object(
+          'status', jsonb_build_object(
             'source','auto_archive',
             'rule','race_date < CURRENT_DATE',
             'at', NOW()::text
@@ -770,7 +770,7 @@ export async function archivePastEditions(): Promise<number> {
         ),
         updated_at = NOW()
     WHERE e.race_date < CURRENT_DATE - INTERVAL '1 day'
-      AND e.registration_status NOT IN ('已完赛','已结束','已取消')
+      AND e.status NOT IN ('ended', 'cancelled')
     RETURNING e.id
   `);
   const count = result.rowCount ?? 0;
@@ -781,23 +781,23 @@ export async function archivePastEditions(): Promise<number> {
 }
 
 // 14 天内仍标 "待公布" 的赛事自动推断为 "即将开始"
-// 仅当 registration_status 仍为 "待公布"（即 source 没有给出更精确的状态）才覆盖
+// 仅当 status 仍为 upcoming/open（即 source 没有给出更精确的状态）才覆盖
 export async function flagImminentEditions(): Promise<number> {
   ensureDatabase();
   const result = await pool!.query(`
     UPDATE marathon_editions e
-    SET registration_status = '即将开始',
+    SET status = 'imminent',
         field_sources = COALESCE(e.field_sources, '{}'::jsonb) || jsonb_build_object(
-          'registrationStatus', jsonb_build_object(
+          'status', jsonb_build_object(
             'source','auto_imminent',
-            'rule','race_date within 14 days AND status was 待公布',
+            'rule','race_date within 14 days AND status was upcoming/open',
             'at', NOW()::text
           )
         ),
         updated_at = NOW()
     WHERE e.race_date >= CURRENT_DATE
       AND e.race_date < CURRENT_DATE + INTERVAL '14 days'
-      AND e.registration_status = '待公布'
+      AND e.status IN ('upcoming', 'open')
     RETURNING e.id
   `);
   const count = result.rowCount ?? 0;
