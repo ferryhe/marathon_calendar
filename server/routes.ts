@@ -73,6 +73,17 @@ const reviewPayloadWithEditionSchema = reviewPayloadSchema.extend({
   marathonEditionId: marathonEditionIdSchema,
 });
 
+const EDITION_STATUS_VALUES = [
+  "upcoming",
+  "imminent",
+  "open",
+  "closed",
+  "racing",
+  "ended",
+  "cancelled",
+] as const;
+const EDITION_STATUS_SET = new Set<string>(EDITION_STATUS_VALUES);
+
 // Query parameter schemas
 const marathonQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -1015,22 +1026,12 @@ export async function registerRoutes(
       }
 
       if (params.status) {
-        // New enum values map to the `status` column; legacy Chinese strings keep
-        // hitting `registration_status` for one release cycle.
-        const NEW_ENUM = new Set([
-          "upcoming",
-          "imminent",
-          "open",
-          "closed",
-          "racing",
-          "ended",
-          "cancelled",
-        ]);
-        if (NEW_ENUM.has(params.status)) {
-          editionConditions.push(eq(marathonEditions.status, params.status));
-        } else {
-          editionConditions.push(eq(marathonEditions.registrationStatus, params.status));
+        if (!EDITION_STATUS_SET.has(params.status)) {
+          return res.status(400).json({
+            message: `Unsupported status: ${params.status}`,
+          });
         }
+        editionConditions.push(eq(marathonEditions.status, params.status));
       }
 
       // road_tag 过滤（仅路跑时生效）
@@ -1042,12 +1043,11 @@ export async function registerRoutes(
         editionConditions.push(eq(marathonEditions.trailTag, params.trailTag));
       }
 
-      // 默认隐藏 race_date 已过的赛事（与前端过滤一致）；显式传 status='已完赛' / 'ended' / 'cancelled' 或 includePast=true 时不过滤
+      // 默认隐藏 race_date 已过的赛事（与前端过滤一致）；显式传 status='ended' / 'cancelled' 或 includePast=true 时不过滤
       if (
         !params.includePast &&
-        params.status !== '已完赛' &&
-        params.status !== 'ended' &&
-        params.status !== 'cancelled'
+        params.status !== "ended" &&
+        params.status !== "cancelled"
       ) {
         editionConditions.push(
           sql`(${marathonEditions.raceDate} IS NULL OR ${marathonEditions.raceDate} >= CURRENT_DATE)`
@@ -2414,7 +2414,6 @@ export async function registerRoutes(
         .object({
           year: z.coerce.number().int().min(2000).max(2100).optional(),
           raceDate: z.string().trim().min(4).optional(),
-          registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
           registrationUrl: z.string().trim().url().nullable().optional(),
           note: z.string().trim().max(2000).optional(),
           publish: z.coerce.boolean().optional(),
@@ -2428,7 +2427,6 @@ export async function registerRoutes(
         .refine(
           (p) =>
             Boolean(p.raceDate) ||
-            p.registrationStatus !== undefined ||
             p.registrationUrl !== undefined ||
             p.name !== undefined ||
             p.canonicalName !== undefined ||
@@ -2456,7 +2454,6 @@ export async function registerRoutes(
 
       const hasEditionInput =
         Boolean(payload.raceDate) ||
-        payload.registrationStatus !== undefined ||
         payload.registrationUrl !== undefined;
 
       const year =
@@ -2473,13 +2470,10 @@ export async function registerRoutes(
           database,
           marathonId: raw.marathonId,
           year: year!,
-          incoming: {
-            ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
-            ...(payload.registrationStatus !== undefined
-              ? { registrationStatus: payload.registrationStatus }
-              : {}),
-            ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
-          },
+        incoming: {
+          ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
+          ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
+        },
           source: {
             sourceId: raw.sourceId,
             sourceType: "manual",
@@ -2563,8 +2557,6 @@ export async function registerRoutes(
               incoming: {
                 year: year ?? null,
                 raceDate: payload.raceDate ?? null,
-                registrationStatus:
-                  payload.registrationStatus !== undefined ? payload.registrationStatus : null,
                 registrationUrl: payload.registrationUrl !== undefined ? payload.registrationUrl : null,
                 marathon: {
                   name: payload.name ?? null,
@@ -3009,7 +3001,6 @@ export async function registerRoutes(
         .object({
           year: z.coerce.number().int().min(2000).max(2100).optional(),
           raceDate: z.string().trim().min(4).optional(),
-          registrationStatus: z.string().trim().min(1).max(200).nullable().optional(),
           registrationUrl: z.string().trim().url().nullable().optional(),
           status: z
             .enum(["upcoming", "imminent", "open", "closed", "racing", "ended", "cancelled"])
@@ -3021,7 +3012,6 @@ export async function registerRoutes(
         .refine(
           (p) =>
             Boolean(p.raceDate) ||
-            p.registrationStatus !== undefined ||
             p.registrationUrl !== undefined ||
             p.status !== undefined ||
             p.isLottery !== undefined,
@@ -3056,9 +3046,6 @@ export async function registerRoutes(
         year,
         incoming: {
           ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
-          ...(payload.registrationStatus !== undefined
-            ? { registrationStatus: payload.registrationStatus }
-            : {}),
           ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
           ...(payload.status !== undefined ? { status: payload.status } : {}),
           ...(payload.isLottery !== undefined ? { isLottery: payload.isLottery } : {}),
