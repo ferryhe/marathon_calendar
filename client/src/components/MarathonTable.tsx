@@ -72,7 +72,6 @@ interface MarathonWithDate extends MarathonListItem {
   year: number;
   month: number;
   day: number;
-  registrationStatus: string;
   localizedName: string;
   localizedCity: string | null;
 }
@@ -188,7 +187,6 @@ export function MarathonTable({
               year: filters.year,
               month: 0,
               day: 0,
-              registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
               localizedName,
               localizedCity,
             } as MarathonWithDate);
@@ -203,7 +201,6 @@ export function MarathonTable({
             year: ey,
             month: em,
             day: ed,
-            registrationStatus: marathon.nextEdition?.registrationStatus ?? "待更新",
             localizedName,
             localizedCity,
           } as MarathonWithDate);
@@ -340,12 +337,11 @@ export function MarathonTable({
                           </div>
 
                           <div className="flex items-center gap-3">
-                            <StatusBadge
-                              status={event.nextEdition?.status}
-                              legacyStatus={event.registrationStatus}
-                              raceDate={event.nextEdition?.raceDate ?? null}
-                              registrationStart={event.nextEdition?.registrationOpenDate ?? null}
-                              registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
+                          <StatusBadge
+                            status={event.nextEdition?.status}
+                            raceDate={event.nextEdition?.raceDate ?? null}
+                            registrationStart={event.nextEdition?.registrationOpenDate ?? null}
+                            registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
                             />
                             <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                           </div>
@@ -389,12 +385,11 @@ export function MarathonTable({
                       </div>
 
                       <div className="flex items-center gap-3">
-                        <StatusBadge
-                          status={event.nextEdition?.status}
-                          legacyStatus={event.registrationStatus}
-                          raceDate={event.nextEdition?.raceDate ?? null}
-                          registrationStart={event.nextEdition?.registrationOpenDate ?? null}
-                          registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
+                          <StatusBadge
+                            status={event.nextEdition?.status}
+                            raceDate={event.nextEdition?.raceDate ?? null}
+                            registrationStart={event.nextEdition?.registrationOpenDate ?? null}
+                            registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
                         />
                         <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                       </div>
@@ -440,7 +435,6 @@ export function MarathonTable({
                     <div className="flex items-center gap-3">
                       <StatusBadge
                         status={event.nextEdition?.status}
-                        legacyStatus={event.registrationStatus}
                         raceDate={event.nextEdition?.raceDate ?? null}
                         registrationStart={event.nextEdition?.registrationOpenDate ?? null}
                         registrationEnd={event.nextEdition?.registrationCloseDate ?? null}

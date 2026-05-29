@@ -349,7 +349,6 @@ export default function MarathonDetailPage() {
                       (() => {
                         const resolved = resolveEditionStatus({
                           status: latest.status,
-                          legacyStatus: latest.registrationStatus,
                           raceDate: latest.raceDate,
                           registrationStart: latest.registrationOpenDate,
                           registrationEnd: latest.registrationCloseDate,
@@ -363,13 +362,9 @@ export default function MarathonDetailPage() {
                             <p className="text-xs text-muted-foreground leading-tight">
                               {t(labelKey)}
                             </p>
-                            {latest.registrationStatus ? (
-                              <p className="text-xs font-semibold text-purple-600 dark:text-purple-400">
-                                {latest.registrationStatus}
-                              </p>
-                            ) : (
-                              <p className="text-sm text-muted-foreground">—</p>
-                            )}
+                            <p className="text-sm font-semibold text-purple-600 dark:text-purple-400">
+                              {t(labelKey)}
+                            </p>
                           </div>
                         );
                       })()
@@ -592,7 +587,6 @@ export default function MarathonDetailPage() {
                           </div>
                           <StatusBadge
                             status={edition.status}
-                            legacyStatus={edition.registrationStatus}
                             raceDate={edition.raceDate}
                             registrationStart={edition.registrationOpenDate}
                             registrationEnd={edition.registrationCloseDate}

@@ -20,7 +20,6 @@ export interface MarathonEditionDTO {
   marathonId: string;
   year: number;
   raceDate: string | null;
-  registrationStatus: string | null;
   registrationUrl: string | null;
   registrationOpenDate: string | null;
   registrationCloseDate: string | null;

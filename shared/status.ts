@@ -62,31 +62,6 @@ export const STATUS_I18N_KEY: Record<EditionStatus, string> = {
 
 // Map legacy Chinese-string statuses to the new enum. Non-recognized values
 // fall back to null so callers can still derive from dates.
-export function mapLegacyStatus(legacy: string | null | undefined): EditionStatus | null {
-  if (!legacy) return null;
-  const v = legacy.trim();
-  switch (v) {
-    case "报名中":
-      return "open";
-    case "已截止":
-    case "已报满":
-      return "closed";
-    case "即将开始":
-      return "imminent";
-    case "未开放":
-    case "待公布":
-    case "待更新":
-      return "upcoming";
-    case "已完赛":
-    case "已结束":
-      return "ended";
-    case "已取消":
-      return "cancelled";
-    default:
-      return null;
-  }
-}
-
 export interface ComputeStatusInput {
   raceDate?: string | Date | null;
   registrationStart?: string | Date | null;
@@ -165,11 +140,9 @@ export function computeEditionStatus(input: ComputeStatusInput): EditionStatus {
   return "upcoming";
 }
 
-// Resolve the "best" status: prefer explicit stored value, else derive from
-// dates, else legacy string mapping, else upcoming as ultimate fallback.
+// Resolve the "best" status: explicit stored value wins, otherwise derive from dates.
 export function resolveEditionStatus(params: {
   status?: string | null;
-  legacyStatus?: string | null;
   raceDate?: string | Date | null;
   registrationStart?: string | Date | null;
   registrationEnd?: string | Date | null;
@@ -179,7 +152,6 @@ export function resolveEditionStatus(params: {
   // 1. Explicit new-enum value wins.
   if (isEditionStatus(params.status)) return params.status;
 
-  const legacy = mapLegacyStatus(params.legacyStatus);
   const computed = computeEditionStatus({
     raceDate: params.raceDate,
     registrationStart: params.registrationStart,
@@ -187,19 +159,6 @@ export function resolveEditionStatus(params: {
     cancelled: params.cancelled ?? false,
     now: params.now,
   });
-
-  // 2. Race-date-derived terminal states (ended/racing) always trump legacy hints.
-  if (computed === "ended" || computed === "racing") return computed;
-
-  // 3. Legacy "ended"/"cancelled" are trusted when no race-date overrides them.
-  if (legacy === "ended" || legacy === "cancelled") return legacy;
-
-  // 4. Otherwise prefer legacy open/closed/upcoming over the date-only fallback,
-  //    since legacy reflects a human-curated signal that may be more accurate
-  //    than what we can derive from incomplete date fields.
-  if (legacy === "open" || legacy === "closed" || legacy === "upcoming") {
-    return legacy;
-  }
 
   return computed;
 }

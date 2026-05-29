@@ -87,7 +87,6 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
           <div className="flex justify-between items-start mb-4">
             <StatusBadge
               status={event.nextEdition?.status}
-              legacyStatus={event.nextEdition?.registrationStatus}
               raceDate={event.nextEdition?.raceDate ?? null}
               registrationStart={event.nextEdition?.registrationOpenDate ?? null}
               registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
