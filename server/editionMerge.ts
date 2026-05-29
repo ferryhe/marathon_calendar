@@ -12,6 +12,9 @@ export type FieldSourceInfo = {
 
 export type EditionIncomingFields = {
   raceDate?: string | null;
+  // Kept temporarily for callsites still sending legacy field until API layer migration.
+  // This value is not merged anymore.
+  registrationStatus?: string | null;
   registrationUrl?: string | null;
   // Admin-controlled overwrite fields (no per-field priority merge).
   status?: string | null;
