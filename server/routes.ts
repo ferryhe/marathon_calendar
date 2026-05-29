@@ -1842,8 +1842,8 @@ export async function registerRoutes(
         .select({
           total: sql<number>`count(*)::int`,
           pendingDate: sql<number>`sum(case when ${marathonEditions.raceDate} is null then 1 else 0 end)::int`,
-          openWithoutUrl: sql<number>`sum(case when (${marathonEditions.status} = 'open' or ${marathonEditions.registrationStatus} = '报名中') and (${marathonEditions.registrationUrl} is null or ${marathonEditions.registrationUrl} = '') then 1 else 0 end)::int`,
-          finished: sql<number>`sum(case when ${marathonEditions.status} = 'ended' or ${marathonEditions.registrationStatus} = '已完赛' then 1 else 0 end)::int`,
+          openWithoutUrl: sql<number>`sum(case when ${marathonEditions.status} = 'open' and (${marathonEditions.registrationUrl} is null or ${marathonEditions.registrationUrl} = '') then 1 else 0 end)::int`,
+          finished: sql<number>`sum(case when ${marathonEditions.status} = 'ended' then 1 else 0 end)::int`,
         })
         .from(marathonEditions);
 
@@ -2194,7 +2194,6 @@ export async function registerRoutes(
           id: marathonEditions.id,
           year: marathonEditions.year,
           raceDate: marathonEditions.raceDate,
-          registrationStatus: marathonEditions.registrationStatus,
           registrationUrl: marathonEditions.registrationUrl,
           status: marathonEditions.status,
           isLottery: marathonEditions.isLottery,
@@ -2963,7 +2962,6 @@ export async function registerRoutes(
           marathonId: marathonEditions.marathonId,
           year: marathonEditions.year,
           raceDate: marathonEditions.raceDate,
-          registrationStatus: marathonEditions.registrationStatus,
           registrationUrl: marathonEditions.registrationUrl,
           status: marathonEditions.status,
           isLottery: marathonEditions.isLottery,

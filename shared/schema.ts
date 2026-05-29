@@ -78,14 +78,12 @@ export const marathonEditions = pgTable(
       .notNull(),
     year: integer("year").notNull(),
     raceDate: date("race_date"),
-    registrationStatus: text("registration_status"),
     registrationUrl: text("registration_url"),
     registrationOpenDate: date("registration_open_date"),
     registrationCloseDate: date("registration_close_date"),
-    // New nowrun-aligned status taxonomy: upcoming|open|closed|racing|ended|cancelled.
+    // New nowrun-aligned status taxonomy: upcoming|open|closed|imminent|racing|ended|cancelled.
     // Nullable: when missing, frontend derives status from dates via
-    // `computeEditionStatus` in shared/status.ts. Eventually replaces
-    // registrationStatus once all sources/UI are migrated.
+    // `computeEditionStatus` in shared/status.ts.
     status: text("status"),
     isLottery: boolean("is_lottery").default(false).notNull(),
     // PR-1 (2026-05-02): rich fields per edition harvested from NowRun
