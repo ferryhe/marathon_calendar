@@ -51,7 +51,9 @@ import { ROAD_TAG_LABELS, TRAIL_TAG_LABELS } from "@/lib/tagLabels";
 
 function formatDate(dateValue: string | null | undefined, lang = "zh", fallback = "—") {
   if (!dateValue) return fallback;
-  const [y, m, d] = dateValue.split("-").map(Number);
+  // ISO timestamps (e.g. createdAt) contain 'T'; take only the date portion
+  const datePart = dateValue.includes("T") ? dateValue.split("T")[0] : dateValue;
+  const [y, m, d] = datePart!.split("-").map(Number);
   if (!y || !m || !d) return fallback;
   if (lang.startsWith("en")) {
     const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
