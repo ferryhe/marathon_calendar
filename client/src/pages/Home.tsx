@@ -110,7 +110,7 @@ export default function Home() {
     if (wasRunningRef.current && !syncStatus.isRunning) {
       setIsUpdating(false);
       queryClient.invalidateQueries({ queryKey: marathonKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: ["/api/marathons/upcoming"] });
+      queryClient.invalidateQueries({ queryKey: marathonKeys.upcoming() });
       toast({ title: t("common.dataUpdated"), duration: 1200 });
     }
     wasRunningRef.current = syncStatus.isRunning;

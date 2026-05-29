@@ -126,6 +126,9 @@ function summarizeJsonForLog(value: unknown, depth = 0): unknown {
   }
 
   if (Array.isArray(value)) {
+    if (depth >= LOG_MAX_DEPTH) {
+      return `[array(${value.length})]`;
+    }
     return {
       type: "array",
       length: value.length,
