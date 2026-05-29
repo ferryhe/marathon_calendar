@@ -117,7 +117,7 @@ export type AdminRawCrawlDetail = AdminRawCrawl & {
     id: string;
     year: number;
     raceDate: string | null;
-    registrationStatus: string | null;
+    status: string | null;
     registrationUrl: string | null;
     publishStatus: string;
     updatedAt: string;
@@ -312,7 +312,7 @@ export async function resolveAdminRawCrawl(
   payload: {
     year?: number;
     raceDate?: string;
-    registrationStatus?: string | null;
+    status?: "upcoming" | "imminent" | "open" | "closed" | "racing" | "ended" | "cancelled" | null;
     registrationUrl?: string | null;
     note?: string;
     publish?: boolean;
@@ -401,9 +401,8 @@ export type AdminMarathonEdition = {
   marathonId: string;
   year: number;
   raceDate: string | null;
-  registrationStatus: string | null;
-  registrationUrl: string | null;
   status: string | null;
+  registrationUrl: string | null;
   isLottery: boolean | null;
   publishStatus: string;
   publishedAt: string | null;
@@ -433,7 +432,6 @@ export async function updateAdminMarathonEdition(
   payload: {
     year?: number;
     raceDate?: string;
-    registrationStatus?: string | null;
     registrationUrl?: string | null;
     status?: "upcoming" | "imminent" | "open" | "closed" | "racing" | "ended" | "cancelled" | null;
     isLottery?: boolean;
