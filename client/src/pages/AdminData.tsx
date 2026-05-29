@@ -46,7 +46,10 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isChinaCountry } from "@shared/utils";
-import { type EditionStatus } from "@shared/status";
+import {
+  type EditionStatus,
+  normalizeEditionStatusForStorage,
+} from "@shared/status";
 
 function formatDateTime(value?: string | null) {
   if (!value) return "-";
@@ -66,36 +69,7 @@ const EDITION_STATUS_OPTIONS = [
 ] as const;
 
 function normalizeEditionStatus(input?: string | null): "" | EditionStatus {
-  const raw = (input ?? "").trim();
-  if (!raw) return "";
-
-  // Keep existing canonical Chinese values.
-  if (EDITION_STATUS_OPTIONS.some((x) => x.value === raw)) {
-    return raw as EditionStatus;
-  }
-
-  // Map common English/raw variants into canonical values.
-  const normalized = raw.toLowerCase().replace(/[_\s-]+/g, "");
-  if (
-    [
-      "upcoming",
-      "notopen",
-      "comingsoon",
-      "notyetopen",
-      "报名未开始",
-      "待公布",
-      "未开放",
-      "待更新",
-    ].includes(normalized)
-  ) return "upcoming";
-  if (["imminent", "startingsoon", "abouttostart", "即将开始"].includes(normalized)) return "imminent";
-  if (["open", "registering", "registrationopen", "报名中"].includes(normalized)) return "open";
-  if (["closed", "close", "deadlinepassed", "soldout", "报名已截止", "已报满"].includes(normalized)) return "closed";
-  if (["racing", "比赛中"].includes(normalized)) return "racing";
-  if (["ended", "finished", "已完赛", "已结束"].includes(normalized)) return "ended";
-  if (["cancelled", "canceled", "已取消"].includes(normalized)) return "cancelled";
-
-  return "";
+  return normalizeEditionStatusForStorage(input);
 }
 
 function formatRawStatusLabel(status: string): string {

@@ -53,6 +53,7 @@ const STATUS_KEY: Record<string, string> = {
   racing: "status.racing",
   ended: "status.ended",
   cancelled: "status.cancelled",
+  tba: "status.tba",
 };
 
 export default function Home() {

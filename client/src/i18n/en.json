@@ -69,7 +69,8 @@
     "closed": "Reg Closed",
     "racing": "Racing",
     "ended": "Ended",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "tba": "TBA"
   },
   "list": {
     "loadFailed": "Failed to load events",

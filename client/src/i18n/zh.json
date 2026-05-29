@@ -69,7 +69,8 @@
     "closed": "报名已截止",
     "racing": "比赛中",
     "ended": "已完赛",
-    "cancelled": "已取消"
+    "cancelled": "已取消",
+    "tba": "待定"
   },
   "list": {
     "loadFailed": "加载赛事数据失败",
