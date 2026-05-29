@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isChinaCountry } from "@shared/utils";
+import { type EditionStatus } from "@shared/status";
 
 function formatDateTime(value?: string | null) {
   if (!value) return "-";
@@ -54,34 +55,45 @@ function formatDateTime(value?: string | null) {
   return date.toLocaleString("zh-CN");
 }
 
-const REGISTRATION_STATUS_OPTIONS = [
-  { value: "报名中",       label: "报名中（open）" },
-  { value: "报名未开始",   label: "报名未开始（upcoming）" },
-  { value: "即将开始",     label: "即将开始（imminent）" },
-  { value: "报名已截止",   label: "报名已截止（closed）" },
-  { value: "比赛中",       label: "比赛中（racing）" },
-  { value: "已完赛",       label: "已完赛（ended）" },
-  { value: "已取消",       label: "已取消（cancelled）" },
+const EDITION_STATUS_OPTIONS = [
+  { value: "upcoming", label: "报名未开始（upcoming）" },
+  { value: "imminent", label: "即将开始（imminent）" },
+  { value: "open", label: "报名中（open）" },
+  { value: "closed", label: "报名已截止（closed）" },
+  { value: "racing", label: "比赛中（racing）" },
+  { value: "ended", label: "已完赛（ended）" },
+  { value: "cancelled", label: "已取消（cancelled）" },
 ] as const;
 
-function normalizeRegistrationStatus(input?: string | null): string {
+function normalizeEditionStatus(input?: string | null): "" | EditionStatus {
   const raw = (input ?? "").trim();
   if (!raw) return "";
 
   // Keep existing canonical Chinese values.
-  if (REGISTRATION_STATUS_OPTIONS.some((x) => x.value === raw)) {
-    return raw;
+  if (EDITION_STATUS_OPTIONS.some((x) => x.value === raw)) {
+    return raw as EditionStatus;
   }
 
   // Map common English/raw variants into canonical values.
   const normalized = raw.toLowerCase().replace(/[_\s-]+/g, "");
-  if (["open", "registering", "registrationopen"].includes(normalized)) return "报名中";
-  if (["upcoming", "notopen", "comingsoon", "notyetopen"].includes(normalized)) return "报名未开始";
-  if (["imminent", "startingsoon", "abouttostart"].includes(normalized)) return "即将开始";
-  if (["closed", "close", "deadlinepassed", "soldout"].includes(normalized)) return "报名已截止";
-  if (["racing"].includes(normalized)) return "比赛中";
-  if (["ended", "finished"].includes(normalized)) return "已完赛";
-  if (["cancelled", "canceled"].includes(normalized)) return "已取消";
+  if (
+    [
+      "upcoming",
+      "notopen",
+      "comingsoon",
+      "notyetopen",
+      "报名未开始",
+      "待公布",
+      "未开放",
+      "待更新",
+    ].includes(normalized)
+  ) return "upcoming";
+  if (["imminent", "startingsoon", "abouttostart", "即将开始"].includes(normalized)) return "imminent";
+  if (["open", "registering", "registrationopen", "报名中"].includes(normalized)) return "open";
+  if (["closed", "close", "deadlinepassed", "soldout", "报名已截止", "已报满"].includes(normalized)) return "closed";
+  if (["racing", "比赛中"].includes(normalized)) return "racing";
+  if (["ended", "finished", "已完赛", "已结束"].includes(normalized)) return "ended";
+  if (["cancelled", "canceled", "已取消"].includes(normalized)) return "cancelled";
 
   return "";
 }
@@ -357,7 +369,7 @@ export default function AdminDataPage() {
     if (latestEdition) {
       setResolveYear(String(latestEdition.year ?? ""));
       setResolveRaceDate(latestEdition.raceDate ?? "");
-      setResolveStatus(normalizeRegistrationStatus(latestEdition.registrationStatus ?? ""));
+      setResolveStatus(normalizeEditionStatus(latestEdition.status ?? ""));
       setResolveRegUrl(latestEdition.registrationUrl ?? "");
       setResolvePublish((latestEdition.publishStatus ?? "published") === "published");
     }
@@ -369,7 +381,7 @@ export default function AdminDataPage() {
         setResolveRaceDate(ext.raceDate);
       }
       setResolveStatus(
-        normalizeRegistrationStatus(
+        normalizeEditionStatus(
           typeof ext.registrationStatus === "string" ? ext.registrationStatus : "",
         ),
       );
@@ -436,7 +448,7 @@ export default function AdminDataPage() {
     setManageEditionYear(String(edition?.year ?? targetYear ?? new Date().getFullYear()));
     setManageEditionRaceDate(edition?.raceDate ?? "");
     setManageEditionStatus(
-      normalizeRegistrationStatus(edition?.registrationStatus ?? ""),
+      normalizeEditionStatus(edition?.status ?? ""),
     );
     setManageEditionRegUrl(edition?.registrationUrl ?? "");
     setManageEditionPublish((edition?.publishStatus ?? "published") === "published");
@@ -664,7 +676,7 @@ export default function AdminDataPage() {
   const updateMarathonEditionMutation = useMutation({
     mutationFn: async () => {
       if (!manageMarathonId.trim()) throw new Error("请先选择赛事");
-      const normalizedStatus = normalizeRegistrationStatus(manageEditionStatus);
+      const normalizedStatus = normalizeEditionStatus(manageEditionStatus);
       const year = manageEditionYear.trim() ? Number(manageEditionYear) : undefined;
       if (!manageEditionRaceDate.trim() && !year) {
         throw new Error("请填写比赛日期或年份");
@@ -672,7 +684,7 @@ export default function AdminDataPage() {
       return updateAdminMarathonEdition(token, manageMarathonId, {
         ...(year ? { year } : {}),
         ...(manageEditionRaceDate.trim() ? { raceDate: manageEditionRaceDate.trim() } : {}),
-        ...(normalizedStatus ? { registrationStatus: normalizedStatus } : {}),
+        ...(normalizedStatus ? { status: normalizedStatus } : {}),
         ...(manageEditionRegUrl.trim() ? { registrationUrl: manageEditionRegUrl.trim() } : {}),
         publish: manageEditionPublish,
       });
@@ -815,7 +827,7 @@ export default function AdminDataPage() {
 
   const resolveRawMutation = useMutation({
     mutationFn: async (id: string) => {
-      const normalizedStatus = normalizeRegistrationStatus(resolveStatus);
+      const normalizedStatus = normalizeEditionStatus(resolveStatus);
       const incomingCanonical = resolveCanonicalName.trim();
       const currentCanonical = rawDetailQuery.data?.data?.marathon?.canonicalName ?? "";
       if (
@@ -838,7 +850,7 @@ export default function AdminDataPage() {
       return resolveAdminRawCrawl(token, id, {
         ...(resolveYear.trim() ? { year: Number(resolveYear) } : {}),
         ...(resolveRaceDate.trim() ? { raceDate: resolveRaceDate.trim() } : {}),
-        ...(normalizedStatus ? { registrationStatus: normalizedStatus } : {}),
+        ...(normalizedStatus ? { status: normalizedStatus } : {}),
         ...(resolveRegUrl.trim() ? { registrationUrl: resolveRegUrl.trim() } : {}),
         ...(resolveName.trim() ? { name: resolveName.trim() } : {}),
         ...(incomingCanonical ? { canonicalName: incomingCanonical } : {}),
@@ -1630,7 +1642,7 @@ export default function AdminDataPage() {
                           onChange={(e) => setManageEditionStatus(e.target.value)}
                         >
                           <option value="">报名状态（请选择）</option>
-                          {REGISTRATION_STATUS_OPTIONS.map((item) => (
+                          {EDITION_STATUS_OPTIONS.map((item) => (
                             <option key={item.value} value={item.value}>
                               {item.label}
                             </option>
@@ -2619,7 +2631,7 @@ export default function AdminDataPage() {
                       onChange={(e) => setResolveStatus(e.target.value)}
                     >
                       <option value="">报名状态（请选择）</option>
-                      {REGISTRATION_STATUS_OPTIONS.map((item) => (
+                      {EDITION_STATUS_OPTIONS.map((item) => (
                         <option key={item.value} value={item.value}>
                           {item.label}
                         </option>
