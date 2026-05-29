@@ -9,8 +9,6 @@ import {
 
 export interface StatusBadgeProps {
   status?: EditionStatus | string | null;
-  // Legacy Chinese-string status (fallback during migration).
-  legacyStatus?: string | null;
   raceDate?: string | Date | null;
   registrationStart?: string | Date | null;
   registrationEnd?: string | Date | null;
@@ -25,7 +23,6 @@ export interface StatusBadgeProps {
 // before migration.
 export function StatusBadge({
   status,
-  legacyStatus,
   raceDate,
   registrationStart,
   registrationEnd,
@@ -36,7 +33,6 @@ export function StatusBadge({
   const { t } = useTranslation();
   const resolved: EditionStatus = resolveEditionStatus({
     status: typeof status === "string" ? status : null,
-    legacyStatus,
     raceDate,
     registrationStart,
     registrationEnd,
