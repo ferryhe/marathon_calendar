@@ -12,7 +12,6 @@ export type FieldSourceInfo = {
 
 export type EditionIncomingFields = {
   raceDate?: string | null;
-  registrationStatus?: string | null;
   registrationUrl?: string | null;
   // Admin-controlled overwrite fields (no per-field priority merge).
   status?: string | null;
@@ -170,7 +169,6 @@ export async function upsertEditionWithMerge(params: {
     .select({
       id: marathonEditions.id,
       raceDate: marathonEditions.raceDate,
-      registrationStatus: marathonEditions.registrationStatus,
       registrationUrl: marathonEditions.registrationUrl,
       fieldSources: marathonEditions.fieldSources,
       // Rich fields
@@ -201,7 +199,6 @@ export async function upsertEditionWithMerge(params: {
       }
     };
     addFieldSource("raceDate", params.incoming.raceDate ?? null);
-    addFieldSource("registrationStatus", params.incoming.registrationStatus ?? null);
     addFieldSource("registrationUrl", params.incoming.registrationUrl ?? null);
     addFieldSource("highlights", params.incoming.highlights ?? null);
     addFieldSource("startLocation", params.incoming.startLocation ?? null);
@@ -223,7 +220,6 @@ export async function upsertEditionWithMerge(params: {
       marathonId: params.marathonId,
       year: params.year,
       raceDate: params.incoming.raceDate ?? null,
-      registrationStatus: params.incoming.registrationStatus ?? null,
       registrationUrl: params.incoming.registrationUrl ?? null,
       highlights: params.incoming.highlights ?? null,
       distanceOptions: params.incoming.distanceOptions ?? null,
@@ -261,7 +257,6 @@ export async function upsertEditionWithMerge(params: {
   // ── Core string fields ────────────────────────────────────────────────────
   const stringFieldPairs: Array<{ key: string; value: string | null; existing: string | null }> = [
     { key: "raceDate", value: params.incoming.raceDate ?? null, existing: row.raceDate ? String(row.raceDate) : null },
-    { key: "registrationStatus", value: params.incoming.registrationStatus ?? null, existing: row.registrationStatus },
     { key: "registrationUrl", value: params.incoming.registrationUrl ?? null, existing: row.registrationUrl },
     { key: "highlights", value: params.incoming.highlights ?? null, existing: row.highlights },
     { key: "startLocation", value: params.incoming.startLocation ?? null, existing: row.startLocation },
