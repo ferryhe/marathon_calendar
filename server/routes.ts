@@ -2414,6 +2414,7 @@ export async function registerRoutes(
           year: z.coerce.number().int().min(2000).max(2100).optional(),
           raceDate: z.string().trim().min(4).optional(),
           registrationUrl: z.string().trim().url().nullable().optional(),
+          status: z.enum(EDITION_STATUS_VALUES).nullable().optional(),
           note: z.string().trim().max(2000).optional(),
           publish: z.coerce.boolean().optional(),
           name: z.string().trim().min(1).max(200).optional(),
@@ -2427,6 +2428,7 @@ export async function registerRoutes(
           (p) =>
             Boolean(p.raceDate) ||
             p.registrationUrl !== undefined ||
+            p.status !== undefined ||
             p.name !== undefined ||
             p.canonicalName !== undefined ||
             p.city !== undefined ||
@@ -2453,7 +2455,8 @@ export async function registerRoutes(
 
       const hasEditionInput =
         Boolean(payload.raceDate) ||
-        payload.registrationUrl !== undefined;
+        payload.registrationUrl !== undefined ||
+        payload.status !== undefined;
 
       const year =
         payload.raceDate && payload.raceDate.length >= 4
@@ -2471,6 +2474,7 @@ export async function registerRoutes(
           year: year!,
         incoming: {
           ...(payload.raceDate ? { raceDate: payload.raceDate } : {}),
+          ...(payload.status !== undefined ? { status: payload.status } : {}),
           ...(payload.registrationUrl !== undefined ? { registrationUrl: payload.registrationUrl } : {}),
         },
           source: {

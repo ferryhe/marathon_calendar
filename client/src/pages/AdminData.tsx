@@ -76,8 +76,19 @@ function normalizeEditionStatus(input?: string | null): "" | EditionStatus {
 
   // Map common English/raw variants into canonical values.
   const normalized = raw.toLowerCase().replace(/[_\s-]+/g, "");
-  if (["upcoming", "notopen", "comingsoon", "notyetopen", "待公布", "未开放", "待更新"].includes(normalized)) return "upcoming";
-  if (["imminent", "startingsoon", "abouttostart"].includes(normalized)) return "imminent";
+  if (
+    [
+      "upcoming",
+      "notopen",
+      "comingsoon",
+      "notyetopen",
+      "报名未开始",
+      "待公布",
+      "未开放",
+      "待更新",
+    ].includes(normalized)
+  ) return "upcoming";
+  if (["imminent", "startingsoon", "abouttostart", "即将开始"].includes(normalized)) return "imminent";
   if (["open", "registering", "registrationopen", "报名中"].includes(normalized)) return "open";
   if (["closed", "close", "deadlinepassed", "soldout", "报名已截止", "已报满"].includes(normalized)) return "closed";
   if (["racing", "比赛中"].includes(normalized)) return "racing";
