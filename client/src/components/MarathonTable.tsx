@@ -19,13 +19,17 @@ import { isChinaCountry } from "@shared/utils";
 import { pickLocalizedCity, pickLocalizedName, useLocale } from "@/lib/locale";
 import { StatusBadge } from "./StatusBadge";
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Highlight helper component for search terms
 function HighlightText({ text, highlight }: { text: string; highlight: string }) {
   if (!highlight.trim()) {
     return <>{text}</>;
   }
   
-  const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
+  const parts = text.split(new RegExp(`(${escapeRegExp(highlight)})`, 'gi'));
   return (
     <>
       {parts.map((part, i) => 

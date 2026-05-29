@@ -220,6 +220,17 @@ type HtmlExtractRule = {
   group?: number;
 };
 
+function coerceHtmlExtractRule(rule: unknown): HtmlExtractRule | null {
+  if (!rule || typeof rule !== "object") return null;
+  if (typeof (rule as any).selector !== "string") return null;
+  return {
+    selector: (rule as any).selector,
+    attr: typeof (rule as any).attr === "string" ? (rule as any).attr : undefined,
+    regex: typeof (rule as any).regex === "string" ? (rule as any).regex : undefined,
+    group: typeof (rule as any).group === "number" ? (rule as any).group : undefined,
+  };
+}
+
 function readRule(
   config: Record<string, unknown> | null,
   key: string,
@@ -229,13 +240,15 @@ function readRule(
   if (!extract || typeof extract !== "object") return null;
   const rule = (extract as any)[key];
   if (!rule || typeof rule !== "object") return null;
-  if (typeof (rule as any).selector !== "string") return null;
-  return {
-    selector: (rule as any).selector,
-    attr: typeof (rule as any).attr === "string" ? (rule as any).attr : undefined,
-    regex: typeof (rule as any).regex === "string" ? (rule as any).regex : undefined,
-    group: typeof (rule as any).group === "number" ? (rule as any).group : undefined,
-  };
+  const singleRule = coerceHtmlExtractRule(rule);
+  if (singleRule) return singleRule;
+  const selectors = (rule as any).selectors;
+  if (!Array.isArray(selectors)) return null;
+  for (const selectorRule of selectors) {
+    const parsed = coerceHtmlExtractRule(selectorRule);
+    if (parsed) return parsed;
+  }
+  return null;
 }
 
 function applyRule($: ReturnType<typeof load>, rule: HtmlExtractRule): string | null {

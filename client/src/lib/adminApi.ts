@@ -435,7 +435,7 @@ export async function updateAdminMarathonEdition(
     raceDate?: string;
     registrationStatus?: string | null;
     registrationUrl?: string | null;
-    status?: "upcoming" | "open" | "closed" | "racing" | "ended" | "cancelled" | null;
+    status?: "upcoming" | "imminent" | "open" | "closed" | "racing" | "ended" | "cancelled" | null;
     isLottery?: boolean;
     publish?: boolean;
   },
