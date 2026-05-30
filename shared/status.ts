@@ -86,6 +86,7 @@ const DISPLAY_PLACEHOLDER_STATUSES = new Set([
 
 const UPCOMING_STATUS_VALUES = new Set([
   "upcoming",
+  "comingsoon",
   "notopen",
   "notyetopen",
   "报名未开始",
@@ -93,7 +94,6 @@ const UPCOMING_STATUS_VALUES = new Set([
 ]);
 
 const IMMINENT_STATUS_VALUES = new Set([
-  "comingsoon",
   "imminent",
   "startingsoon",
   "abouttostart",

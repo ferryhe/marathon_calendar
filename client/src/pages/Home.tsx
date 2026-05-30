@@ -510,11 +510,13 @@ export default function Home() {
                     <SelectContent>
                       <SelectItem value="all">{t("filters.allStatuses")}</SelectItem>
                       <SelectItem value="upcoming">{t("status.upcoming")}</SelectItem>
+                      <SelectItem value="imminent">{t("status.imminent")}</SelectItem>
                       <SelectItem value="open">{t("status.open")}</SelectItem>
                       <SelectItem value="closed">{t("status.closed")}</SelectItem>
                       <SelectItem value="racing">{t("status.racing")}</SelectItem>
                       <SelectItem value="ended">{t("status.ended")}</SelectItem>
                       <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
+                      <SelectItem value="tba">{t("status.tba")}</SelectItem>
                     </SelectContent>
                   </Select>
 
