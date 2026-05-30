@@ -3,12 +3,12 @@ import { cn } from "@/lib/utils";
 import {
   STATUS_COLOR_CLASSES,
   STATUS_I18N_KEY,
-  type EditionStatus,
+  type DisplayEditionStatus,
   resolveEditionStatus,
 } from "@shared/status";
 
 export interface StatusBadgeProps {
-  status?: EditionStatus | string | null;
+  status?: DisplayEditionStatus | string | null;
   raceDate?: string | Date | null;
   registrationStart?: string | Date | null;
   registrationEnd?: string | Date | null;
@@ -31,7 +31,7 @@ export function StatusBadge({
   size = "sm",
 }: StatusBadgeProps) {
   const { t } = useTranslation();
-  const resolved: EditionStatus = resolveEditionStatus({
+  const resolved: DisplayEditionStatus = resolveEditionStatus({
     status: typeof status === "string" ? status : null,
     raceDate,
     registrationStart,

@@ -81,6 +81,7 @@ const EDITION_STATUS_VALUES = [
   "racing",
   "ended",
   "cancelled",
+  "tba",
 ] as const;
 const EDITION_STATUS_SET = new Set<string>(EDITION_STATUS_VALUES);
 
@@ -1031,7 +1032,16 @@ export async function registerRoutes(
             message: `Unsupported status: ${params.status}`,
           });
         }
-        editionConditions.push(eq(marathonEditions.status, params.status));
+        if (params.status === "tba") {
+          editionConditions.push(sql`
+            ${marathonEditions.status} IS NULL
+            AND ${marathonEditions.raceDate} IS NULL
+            AND ${marathonEditions.registrationOpenDate} IS NULL
+            AND ${marathonEditions.registrationCloseDate} IS NULL
+          `);
+        } else {
+          editionConditions.push(eq(marathonEditions.status, params.status));
+        }
       }
 
       // road_tag 过滤（仅路跑时生效）
