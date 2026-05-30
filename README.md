@@ -1,293 +1,124 @@
-# 马拉松日历 Marathon Calendar
+# 🏃 马拉松日历 Marathon Calendar
 
-一个全面的马拉松赛事信息平台，提供Web版和微信小程序版本。
+全球马拉松赛事信息平台 — 覆盖中国及海外 50+ 国家、500+ 赛事，支持浏览、筛选、收藏、评论与数据自动同步。
 
-## 📖 项目文档
+A global marathon race information platform covering 50+ countries and 500+ events, with browsing, filtering, favorites, reviews, and automated data sync.
 
-完整的项目文档已经重新整理，按类型分类便于查找。
+---
 
-**[📚 查看完整文档总览](./docs/README.md)**
+## ✨ 功能特性 Features
 
-### 🎯 最新文档（推荐阅读）
+| 功能 Feature | 说明 Description |
+|---|---|
+| 🌍 全球赛事浏览 | 支持按地区（中国/海外）、国家、月份、状态、距离筛选 |
+| 🔍 智能搜索 | 赛事名称模糊搜索 |
+| 📊 赛事详情 | 历届信息、设项、起终点、奖牌、报名渠道等富数据 |
+| ⭐ 收藏与评论 | 用户收藏、评分、评论系统 |
+| 🔄 自动数据同步 | 定时爬取官方/第三方平台，AI 辅助提取兜底 |
+| 🛠 管理后台 | 数据源管理、原始数据审核、AI 规则生成 |
+| 🌙 暗色模式 | 跟随系统偏好自动切换 |
+| 🌐 国际化 | 中文 / English 双语界面 |
 
-1. **[开发日志-2026-05-02 第三方平台研究与数据修正](./docs/开发日志/开发日志-2026-05-02-第三方平台研究与数据修正.md)** ⭐ NEW
-   - 5 个第三方报名平台（最酷/马拉马拉/数字心动/爱燃烧/田协）调研结果
-   - 13 条 marathon_sources 绑定 + 10 条 registration_url 修正
-   - 数据库变更脚本与生产同步流程
+---
 
-2. **[数据库变更总览](./docs/数据库变更/README.md)** ⭐ NEW
-   - 数据迁移命名规范、幂等性要求、psql 同步生产流程
+## 🏗️ 技术栈 Tech Stack
 
-3. **[项目进度检查报告-2026-03-08](./docs/项目计划/项目进度检查报告-2026-03-08.md)** ⭐
-   - 阶段一进度（85%）、Branch 状态分析
+| 层级 Layer | 技术 Technology |
+|---|---|
+| **前端 Frontend** | React 19, Vite, TypeScript, Tailwind CSS, Radix UI (shadcn/ui), Wouter, TanStack Query, Framer Motion |
+| **后端 Backend** | Node.js, Express 5, TypeScript, Drizzle ORM, PostgreSQL, WebSocket |
+| **数据采集 Crawler** | Cheerio, JSON-LD parsing, regex extraction, OpenAI-compatible AI fallback |
+| **部署 Deploy** | Docker, Caddy (reverse proxy), Node.js production build |
 
-4. **[下一步开发计划-2026-03-08](./docs/项目计划/下一步开发计划-2026-03-08.md)** ⭐
-   - 3-6 月里程碑：数据质量、爬虫完善、性能安全
+---
 
-### 核心文档
+## 🚀 快速开始 Quick Start
 
-3. **[研究报告-马拉松数据源调研](./docs/研究报告/研究报告-马拉松数据源调研.md)**
-   - 如何收集马拉松赛事数据
-   - 官方网站、第三方平台、搜索引擎等数据源分析
-   - 推荐的数据采集策略
-
-4. **[研究报告-数据提取与处理方案](./docs/研究报告/研究报告-数据提取与处理方案.md)**
-   - 如何从网页中提取有用数据
-   - AI API的使用方案和成本分析
-   - 数据清洗和标准化流程
-
-5. **[项目计划-完整开发路线图](./docs/项目计划/项目计划-完整开发路线图.md)**
-   - Web网页版开发计划
-   - 微信小程序开发计划
-   - 腾讯云部署架构
-   - 成员管理和评论系统设计
-
-6. **[技术架构文档](./docs/项目计划/技术架构文档.md)**
-   - 系统架构设计
-   - 数据库设计
-   - API接口规范
-   - 安全和性能优化
-
-## 🚀 快速开始
-
-### 环境要求
+### 环境要求 Prerequisites
 
 - Node.js 20+
-- Docker（用于快速启动 PostgreSQL）
-- Redis（当前版本可选，预留给缓存模块）
+- PostgreSQL 16+
+- (可选) Docker
 
-### 首次安装（Windows）
-
-1. 安装 Node.js 20+ 与 Docker Desktop。
-2. 用 Docker 启动 PostgreSQL：
+### 安装步骤 Setup
 
 ```bash
-docker run --name marathon-pg ^
-  -e POSTGRES_USER=marathon ^
-  -e POSTGRES_PASSWORD=marathon ^
-  -e POSTGRES_DB=marathon_calendar ^
-  -p 5432:5432 -d postgres:16
-```
+# 1. 克隆仓库
+git clone https://github.com/ferryhe/marathon_calendar.git
+cd marathon_calendar
 
-3. 在项目根目录创建 `.env`：
-
-```env
-DATABASE_URL=postgresql://marathon:marathon@localhost:5432/marathon_calendar
-REDIS_URL=redis://localhost:6379
-SESSION_SECRET=replace-with-a-random-string
-AI_API_KEY=your-ai-api-key
-```
-
-说明：
-- 开发环境未设置 `SESSION_SECRET` 会使用默认值并打印警告；生产环境必须设置 `SESSION_SECRET`（否则服务将拒绝启动）。
-- `NODE_ENV=production` 时会话存储使用 PostgreSQL（`connect-pg-simple`），启动时会自动创建 `mc_sessions` 表。
-
-4. 安装依赖并初始化数据库：
-
-```bash
-npm install
-npm run db:ensure
-```
-
-5. 启动开发服务（前后端一体）：
-
-```bash
-npm run dev
-```
-
-访问 http://localhost:5000 。
-
-### 首次安装（Linux）
-
-1. 安装 Node.js 20+、Docker Engine（或 Docker Desktop for Linux）。
-2. 启动 PostgreSQL 容器：
-
-```bash
+# 2. 启动 PostgreSQL（Docker 方式）
 docker run --name marathon-pg \
   -e POSTGRES_USER=marathon \
   -e POSTGRES_PASSWORD=marathon \
   -e POSTGRES_DB=marathon_calendar \
   -p 5432:5432 -d postgres:16
-```
 
-3. 在项目根目录创建 `.env`：
+# 3. 配置环境变量
+cp .env.example .env
+# 编辑 .env 填入 DATABASE_URL、SESSION_SECRET 等
 
-```env
-DATABASE_URL=postgresql://marathon:marathon@localhost:5432/marathon_calendar
-REDIS_URL=redis://localhost:6379
-SESSION_SECRET=replace-with-a-random-string
-AI_API_KEY=your-ai-api-key
-```
-
-说明：
-- 开发环境未设置 `SESSION_SECRET` 会使用默认值并打印警告；生产环境必须设置 `SESSION_SECRET`（否则服务将拒绝启动）。
-- `NODE_ENV=production` 时会话存储使用 PostgreSQL（`connect-pg-simple`），启动时会自动创建 `mc_sessions` 表。
-
-4. 安装依赖并初始化数据库：
-
-```bash
+# 4. 安装依赖 & 初始化数据库
 npm install
 npm run db:ensure
-```
 
-5. 启动开发服务：
-
-```bash
+# 5. 启动开发服务
 npm run dev
+# 访问 http://localhost:5000
 ```
 
-访问 http://localhost:5000 。
-
-### Linux 生产环境启动
+### 生产部署 Production
 
 ```bash
 npm run build
 npm run start
 ```
 
-### 仅前端调试（可选）
+---
 
-```bash
-npm run dev:client
+## 📊 数据覆盖 Data Coverage
+
+| 区域 Region | 赛事数 Events | 数据源 Sources |
+|---|---|---|
+| 🇨🇳 中国大陆 | 378+ | 官方赛事网站、最酷、马拉马拉、百马汇、数字心动、跑IN中国、NowRun |
+| 🇭🇰🇲🇴🇹🇼 港澳台 | 38+ | Bravelog (台湾)、手工录入 (香港) |
+| 🌏 海外 | 160+ | Race Roster (168 赛事)、CHINARUN (海外)、World Marathon Majors 官方 |
+
+**赛事类型**: 全程马拉松、半程马拉松、越野跑
+
+**数据更新**: 爬虫定时自动同步，部分赛事支持 AI 兜底提取。
+
+---
+
+## 📁 项目结构 Project Structure
+
+```
+├── client/src/          # React 前端
+│   ├── pages/           # 页面组件 (Home, MarathonDetail, Profile, AdminData, About)
+│   ├── components/      # UI 组件 (MarathonTable, EventDetails, StatusBadge, Footer)
+│   ├── hooks/           # 自定义 hooks (useAuth, useMarathons)
+│   ├── i18n/            # 国际化 (zh.json, en.json)
+│   └── lib/             # 工具函数、API 客户端
+├── server/              # Express 后端
+│   ├── routes.ts        # 全部 API 路由
+│   ├── syncScheduler.ts # 爬虫调度引擎
+│   ├── aiExtractor.ts   # AI 提取兜底
+│   ├── editionMerge.ts  # 数据合并逻辑
+│   └── db.ts            # 数据库连接
+├── shared/              # 共享类型与 Schema
+├── script/              # 数据导入/维护脚本
+├── config/              # YAML 配置文件
+└── crawler/             # 爬虫模块
 ```
 
-## 📱 功能特性
+---
 
-**当前状态**: 阶段一开发中（约88%完成，数据采集与第三方平台覆盖已基本闭环）
-
-**最后更新**: 2026年5月
-
-### ✅ 已完成功能
-
-#### 用户系统
-- ✅ 用户注册/登录（express-session + scrypt 密码哈希）
-- ✅ 用户个人资料管理
-- ✅ 头像上传（支持腾讯云COS/本地存储）
-- ✅ 微信账号绑定接口（API就绪）
-
-#### 核心功能
-- ✅ 马拉松赛事列表展示
-- ✅ 多维度筛选（地区、时间、报名状态）
-- ✅ 关键词搜索
-- ✅ 赛事详情页（含历届信息）
-- ✅ 收藏功能
-- ✅ 评论与评分系统
-- ✅ 点赞和举报功能
-
-#### 管理后台
-- ✅ 数据源管理
-- ✅ 同步调度系统
-- ✅ 原始数据管理
-- ✅ AI辅助提取
-- ✅ 赛事CRUD管理
-- ✅ 数据统计面板
-
-### 🟡 进行中功能
-
-- 🟡 数据采集覆盖扩展与质量校验
-- 🟡 AI 兜底提取与规则模板生成优化
-- 🟡 管理后台UI优化
-
-### ⏳ 计划中功能
-
-- ⏳ 微信小程序版本
-- ⏳ 微信授权登录
-- ⏳ 订阅消息推送
-- ⏳ 智能推荐系统
-- ⏳ 赛事提醒功能
-- ⏳ 数据分析报告
-
-详细的项目状态和开发计划请查看：
-- [项目进度检查报告-2026-03-08](./docs/项目计划/项目进度检查报告-2026-03-08.md)
-- [下一步开发计划-2026-03-08](./docs/项目计划/下一步开发计划-2026-03-08.md)
-- [开发日志-2026-05-02 第三方平台研究与数据修正](./docs/开发日志/开发日志-2026-05-02-第三方平台研究与数据修正.md)
-- [项目计划-完整开发路线图](./docs/项目计划/项目计划-完整开发路线图.md)
-
-## 🏗️ 技术栈
-
-### 前端
-- React 19
-- Vite
-- Radix UI + Tailwind CSS
-- TanStack Query
-- Wouter (路由)
-
-### 后端
-- Node.js + Express
-- TypeScript
-- Drizzle ORM
-- PostgreSQL
-- Redis
-- express-session
-- scrypt 密码哈希
-
-### 数据采集
-- fetch + Cheerio (HTML 获取与解析)
-- 规则模板 / JSON-LD / 正则提取
-- OpenAI-compatible API (可选 AI 兜底提取与规则生成)
-
-### 云服务
-- 腾讯云
-
-## 📊 数据来源
-
-本应用采用三层数据源策略：
-
-1. **官方赛事网站**（`marathons.website_url`）— 权威信息源
-2. **第三方报名平台**（`marathon_editions.registration_url`）— 直达报名通道
-   - 最酷体育 zuicool（6 个赛事直链）
-   - 马拉马拉 mararun（6 个子域名）
-   - 数字心动 shuzixindong（仅宁波 1 个）
-3. **田协权威背书**（runchina）— 金/银/铜标赛事认证
-
-调研详情：
-- [研究报告-马拉松数据源调研](./docs/研究报告/研究报告-马拉松数据源调研.md) — 早期数据源分析
-- [研究报告-最酷zuicool爬取方案](./docs/研究报告/研究报告-最酷zuicool爬取方案.md)
-- [研究报告-马拉马拉mararun爬取方案](./docs/研究报告/研究报告-马拉马拉mararun爬取方案.md)
-- [研究报告-iranshao与shuzixindong状态评估](./docs/研究报告/研究报告-iranshao与shuzixindong状态评估.md)
-- [研究报告-runchina田协赛历方案](./docs/研究报告/研究报告-runchina田协赛历方案.md)
-
-## 📄 许可证
+## 📄 许可证 License
 
 MIT License
 
-## Crawler Module
+---
 
-### Overview
-The crawler module automates data collection from official race sites and third-party platforms. It fetches HTML, extracts candidate edition data with rules, JSON-LD, regex, and Cheerio parsing, then stores raw results for admin review before publishing.
-
-### Features
-- Scheduled and manual data fetching
-- Rule-based extraction with JSON-LD and regex fallback
-- Optional OpenAI-compatible AI fallback when rule-based extraction fails
-- Admin review flow integrated with the existing schemas
-
-### Schema Extensions
-The following extensions have been made to enhance data structure compatibility:
-
-- **New Fields**:
-  - `source_url`: URL of the data source.
-  - `last_crawled`: Timestamp of the last crawl operation.
-
-- **Updated Fields**:
-  - `data_format`: Changed to accept additional data formats (e.g., XML, JSON).
-
-## Tencent COS Avatar Config (Production)
-
-Avatar upload now supports dual mode:
-- COS mode: enabled when `COS_REGION` + `COS_SECRET_ID` + `COS_SECRET_KEY` are provided.
-- Local mode: fallback to `/uploads/avatars` when COS credentials are missing.
-
-Required env vars:
-- `COS_BUCKET` (already set to `marathon-calendar-1256398230` in `.env.example`)
-- `COS_REGION`
-- `COS_SECRET_ID`
-- `COS_SECRET_KEY`
-
-Optional env var:
-- `COS_PUBLIC_BASE_URL` (CDN domain, e.g. `https://cdn.your-domain.com`)
-
-Recommended Tencent Cloud setup:
-- COS bucket public-read for GET.
-- API key write permission limited to this bucket path.
-- Front CDN with cache headers.
+<p align="center">
+  <sub>Built with ❤️ for the running community | 为跑者社区而建</sub>
+</p>
