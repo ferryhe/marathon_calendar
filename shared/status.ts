@@ -212,7 +212,7 @@ export function computeEditionStatus(input: ComputeStatusInput): EditionStatus {
   }
 
   // Case 4+5: past close date → "报名已截止" or "即将开始"
-  if (regEndDay && today.getTime() > regEndDay.getTime()) {
+  if (regEndDay && today.getTime() >= regEndDay.getTime()) {
     const daysToRace = race
       ? Math.round((race.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
       : Infinity;
