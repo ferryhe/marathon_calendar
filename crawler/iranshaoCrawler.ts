@@ -1,12 +1,15 @@
 /**
  * 爱燃烧（iranshao）爬虫 - 真实数据抓取
- * 
+ *
  * 从爱燃烧网站抓取马拉松/跑步赛事数据
- * 用法：cd /opt/marathon_calendar && npx tsx crawler/iranshaoCrawler.ts
+ * 用法（从项目根目录运行，路径自动用相对定位）：
+ *   npx tsx crawler/iranshaoCrawler.ts
  */
 
 import { load } from "cheerio";
 import crypto from "crypto";
+import path from "path";
+import { dataDir } from './_paths';
 
 // ================== 配置 ==================
 
@@ -348,13 +351,11 @@ async function main() {
   
   // 保存到文件
   const fs = await import('fs');
-  const outputPath = '/opt/marathon_calendar/crawler/data/iranshao_events.json';
-  
-  // 确保目录存在
-  const dir = '/opt/marathon_calendar/crawler/data';
+  const dir = dataDir('iranshao');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  const outputPath = path.join(dir, 'iranshao_events.json');
   
   fs.writeFileSync(outputPath, JSON.stringify(events, null, 2), 'utf-8');
   console.log(`数据已保存到: ${outputPath}`);
@@ -363,8 +364,6 @@ async function main() {
 }
 
 // 允许直接运行
-if (require.main === module) {
-  main().catch(console.error);
-}
+main().catch(console.error);
 
 export { crawlIranshaoEvents, IranshaoEvent };

@@ -1,11 +1,14 @@
 /**
  * 42trip（42公里）跑步赛事爬虫
- * 
+ *
  * 抓取跑步赛事数据
- * 用法：cd /opt/marathon_calendar && npx tsx crawler/42tripCrawler.ts
+ * 用法（从项目根目录运行，路径自动用相对定位）：
+ *   npx tsx crawler/42tripCrawler.ts
  */
 
 import { load } from "cheerio";
+import path from "path";
+import { dataDir } from './_paths';
 
 // ================== 配置 ==================
 
@@ -275,12 +278,11 @@ async function main() {
   
   // 保存到文件
   const fs = await import('fs');
-  const outputPath = '/opt/marathon_calendar/crawler/data/42trip_events.json';
-  
-  const dir = '/opt/marathon_calendar/crawler/data';
+  const dir = dataDir('42trip');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  const outputPath = path.join(dir, '42trip_events.json');
   
   fs.writeFileSync(outputPath, JSON.stringify(events, null, 2), 'utf-8');
   console.log(`数据已保存到: ${outputPath}`);
@@ -288,8 +290,6 @@ async function main() {
   return events;
 }
 
-if (require.main === module) {
-  main().catch(console.error);
-}
+main().catch(console.error);
 
 export { crawl42tripEvents, RaceEvent };

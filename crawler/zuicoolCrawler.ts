@@ -1,8 +1,9 @@
 /**
  * 最酷体育（Zuicool）爬虫 - 真实数据抓取
- * 
+ *
  * 从最酷体育网站抓取马拉松赛事数据
- * 用法：cd /opt/marathon_calendar && npx tsx crawler/zuicoolCrawler.ts
+ * 用法（从项目根目录运行，路径自动用相对定位）：
+ *   npx tsx crawler/zuicoolCrawler.ts
  */
 
 import { load } from "cheerio";

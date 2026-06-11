@@ -4,8 +4,8 @@
  * 从 runsignup.com 抓取未来赛事数据（仅限未来赛事，过往赛事自动跳过）
  * 支持全马（26.2mi）和半马（13.1mi）
  *
- * 用法：
- *   cd /opt/marathon_calendar_fork && npx tsx crawler/runsignupCrawler.ts
+ * 用法（从项目根目录运行，路径自动用相对定位）：
+ *   npx tsx crawler/runsignupCrawler.ts
  *   npx tsx crawler/runsignupCrawler.ts --distance=13.1  # 半马
  *   npx tsx crawler/runsignupCrawler.ts --dry-run        # 测试模式
  *
@@ -19,6 +19,7 @@
 import { load } from 'cheerio';
 import * as fs from 'fs';
 import * as path from 'path';
+import { dataDir as makeDataDir } from './_paths';
 
 // ================== 配置 ==================
 
@@ -583,7 +584,7 @@ async function main() {
     CONFIG.dryRun = true;
   }
 
-  const dataDir = path.join('/opt/marathon_calendar_fork', 'data', 'runsignup');
+  const dataDir = makeDataDir('runsignup');
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
