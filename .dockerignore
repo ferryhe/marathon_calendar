@@ -1,0 +1,37 @@
+# Build context exclusions — keep the Docker build context small and prevent
+# secrets from accidentally being copied into the image.
+#
+# `dist/` is INTENTIONALLY NOT excluded: the host builds it before
+# `docker build`, and the Dockerfile needs it in the build context.
+
+# Dev / install artifacts (re-installed inside the image via `npm ci`)
+node_modules
+npm-debug.log
+yarn-error.log
+
+# VCS — never needed inside an image
+.git
+.git.backup-*
+
+# Secrets — should never enter the image
+.env
+.env.*
+!.env.example
+
+# Local server data (DB dumps, uploads, snapshot files)
+data/runsignup/races_*.jsonl
+uploads/
+
+# Editor / OS junk
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# This file itself
+Dockerfile
+.dockerignore
+
+# Test artifacts
+coverage/
+.nyc_output/
