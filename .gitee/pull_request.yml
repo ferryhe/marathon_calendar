@@ -1,0 +1,73 @@
+name: Build & Type-check
+
+# Triggers:
+# - Pull requests targeting main
+# - Direct pushes to main
+# This is the gate enforced by the repo's "PR must pass test" setting.
+"on":
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel in-progress runs when a new commit lands on the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    name: npm ci + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          # We only need source files; node_modules / dist are excluded by .gitignore.
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+        # Cached by setup-node; ~50s cold, ~10s warm.
+
+      - name: Build (vite + esbuild)
+        # Builds dist/ for both client and server. No DB required.
+        # Matches what DEPLOY.md §1 [2] does locally inside a throwaway container.
+        run: npm run build
+
+      - name: Type-check (best-effort)
+        # `tsc` is informational only — node_modules/drizzle-orm brings in
+        # some upstream type noise (gel/mysql) that isn't actionable from
+        # this repo. We don't fail the build on those, only on errors in
+        # our own code (excluded with --skipLibCheck and a grep for our paths).
+        run: |
+          if npx --no-install tsc --noEmit --skipLibCheck 2>&1 | tee /tmp/tsc.log; then
+            echo "tsc clean"
+          else
+            # Fail only if errors are in our source (server/, client/, shared/, script/)
+            if grep -E "^(server|client|shared|script)/" /tmp/tsc.log; then
+              echo "::error::Type errors in repo source — see log above"
+              exit 1
+            else
+              echo "tsc: only upstream noise (drizzle-orm et al.), passing"
+            fi
+          fi
+
+      - name: Upload build artifact
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
