@@ -567,6 +567,8 @@ export default function MarathonDetailPage() {
                             variant="secondary"
                             data-testid={`badge-channel-${i}`}
                           >
+                            {/* Channel alias map: lottery≡ballot, elite≡elite-entry, charity≡charity-entry
+                                (kept so old data rows render correctly without a DB migration) */}
                             {t(`channel.${ch}`, { defaultValue: ch })}
                           </Badge>
                         ))}
