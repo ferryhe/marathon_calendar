@@ -65,12 +65,35 @@
   "status": {
     "upcoming": "Upcoming",
     "imminent": "Imminent",
-    "open": "Open Now",
-    "closed": "Reg Closed",
+    "open": "Lottery Open",
+    "closed": "Lottery Closed",
     "racing": "Racing",
     "ended": "Ended",
     "cancelled": "Cancelled",
-    "tba": "TBA"
+    "tba": "TBA",
+    "hint": "List status reflects lottery / ballot only. Other entry methods (charity, tour operators, qualifier paths, etc.) are listed in the event detail page."
+  },
+  "channel": {
+    "lottery": "Lottery",
+    "ballot": "Ballot",
+    "general-entry": "General Entry",
+    "qualifier-entry": "Qualifier Entry",
+    "elite-entry": "Elite Entry",
+    "elite": "Elite Entry",
+    "run-as-one": "Run as One (Para-Athlete)",
+    "good-for-age": "Good-for-Age",
+    "championship": "Championship",
+    "club": "Club Entry",
+    "international": "International Entry",
+    "guaranteed-entry": "Guaranteed Entry",
+    "charity": "Charity",
+    "charity-entry": "Charity",
+    "charity-partner": "Charity Partner",
+    "charity-program": "Charity Program",
+    "tour-operator": "Tour Operator",
+    "international-tour-operator": "International Tour Operator",
+    "travel-package": "Travel Package",
+    "9+1-program": "9+1 Program"
   },
   "list": {
     "loadFailed": "Failed to load events",

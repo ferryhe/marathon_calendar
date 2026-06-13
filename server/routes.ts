@@ -104,8 +104,11 @@ const marathonQuerySchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
   // 默认只返回未来赛事；显式传 includePast=true 才返回历史。与前端 MarathonTable 默认过滤行为一致。
   includePast: z.coerce.boolean().default(false),
-  // region=Overseas 表示 country != China；region=WMM 限定为 7 大满贯赛事
+  // region=Overseas 表示 country != China；region=WMM 限定为 8 大满贯赛事
   region: z.enum(['China', 'Overseas', 'WMM']).optional(),
+  // 滚动时间窗：客户端可传 ISO 日期字符串限定 race_date <= untilDate。
+  // 不传则不限制（只看未来，由 includePast 控制）。
+  untilDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "untilDate must be YYYY-MM-DD").optional(),
 });
 
 const searchQuerySchema = z.object({
@@ -974,20 +977,22 @@ export async function registerRoutes(
       // race_kind 过滤：marathon / trail。默认 marathon。
       conditions.push(eq(marathons.raceKind, params.kind));
 
-      // region 优先于 country；Overseas = country != China；WMM = 7 大满贯赛事 (UUID 在 dev/prod 一致)
+      // region 优先于 country；Overseas = country != China；WMM = 8 大满贯赛事 (UUID 在 dev/prod 一致)
       if (params.region === 'China') {
         conditions.push(eq(marathons.country, 'China'));
       } else if (params.region === 'Overseas') {
         conditions.push(sql`${marathons.country} <> 'China'`);
       } else if (params.region === 'WMM') {
+        // 8 大满贯 (WMM 第 8 大开普敦于 2026-06-10 宣布加入，2027-05-23 起正式生效)
         const WMM_IDS = [
-          '45c4f0e6-dbd7-4904-a874-7a5be4b5dfc5', // 东京
-          '5f7ae5ab-bf47-46d2-bd73-ffcd829d0fec', // 伦敦
-          '315803d1-400d-411a-83fe-33e2dc822a5c', // 悉尼
-          'ad3e91c8-b48e-4fc3-9003-a8ff31be8c90', // 柏林
-          '4fbae442-11de-4e20-93e4-fd0fc5076d7d', // 波士顿
-          'be4e78a3-3da6-4530-8f00-44350c24308d', // 纽约
-          '15c99c8e-0be5-4059-b297-6e7a30a1f470', // 芝加哥
+          '41497d07-89fc-4f00-9b61-f11b2b67020a', // 东京
+          '89a5d69f-bf27-4817-aec3-9743e61ffe72', // 伦敦
+          'a00b88b3-423d-44cb-b2b0-730f064df701', // 悉尼
+          '7f9c0d0c-e093-46b0-873f-a5b397627bfd', // 柏林
+          '0ffe59de-a186-463b-ac68-18d2dff4d1c4', // 波士顿
+          '5092ff4b-2e2f-4865-840d-9a7a412deb9d', // 纽约
+          '5aa50e7b-2648-4318-8860-197804ea361e', // 芝加哥
+          '967d0cb5-aba2-4280-ab8a-cc2c374c56a6', // 开普敦
         ];
         conditions.push(inArray(marathons.id, WMM_IDS));
       }
@@ -1054,13 +1059,23 @@ export async function registerRoutes(
       }
 
       // 默认隐藏 race_date 已过的赛事（与前端过滤一致）；显式传 status='ended' / 'cancelled' 或 includePast=true 时不过滤
+      // WMM region 例外：8 大满贯家族持续显示全部 8 个（不按 race_date 隐藏）
       if (
         !params.includePast &&
+        params.region !== 'WMM' &&
         params.status !== "ended" &&
         params.status !== "cancelled"
       ) {
         editionConditions.push(
           sql`(${marathonEditions.raceDate} IS NULL OR ${marathonEditions.raceDate} >= CURRENT_DATE)`
+        );
+      }
+
+      // 滚动时间窗：untilDate 限定 race_date <= untilDate。
+      // 前端 WMM 区域传 today+365d 限定"未来 1 年"；其他区域不传，无影响。
+      if (params.untilDate) {
+        editionConditions.push(
+          sql`(${marathonEditions.raceDate} IS NULL OR ${marathonEditions.raceDate} <= ${params.untilDate}::date)`
         );
       }
 
@@ -1071,10 +1086,12 @@ export async function registerRoutes(
         .select()
         .from(marathonEditions)
         .where(editionWhereClause)
-        // Null raceDate means "TBD": keep them at the end so upcoming lists remain useful.
+        // nextEdition 选择：future race_date 按 ASC（最近未来在前），past 按 DESC（最近刚结束在前），null 排最后
         .orderBy(
-          sql`case when ${marathonEditions.raceDate} is null then 1 else 0 end`,
-          asc(marathonEditions.raceDate),
+          sql`${marathonEditions.raceDate} IS NULL`,
+          sql`${marathonEditions.raceDate} < CURRENT_DATE`,
+          sql`CASE WHEN ${marathonEditions.raceDate} >= CURRENT_DATE THEN ${marathonEditions.raceDate} END ASC`,
+          sql`CASE WHEN ${marathonEditions.raceDate} < CURRENT_DATE THEN ${marathonEditions.raceDate} END DESC`,
           desc(marathonEditions.year),
         );
 
@@ -1085,13 +1102,14 @@ export async function registerRoutes(
         editionsByMarathon.set(edition.marathonId, list);
       }
 
+      // WMM region 例外：8 大满贯家族持续显示全部 8 个（不要求必须有 future edition）
       const requiresEditionFilter =
         params.year !== undefined ||
         params.month !== undefined ||
         params.status !== undefined ||
         params.roadTag !== undefined ||
         params.trailTag !== undefined ||
-        !params.includePast;
+        (!params.includePast && params.region !== 'WMM');
 
       const enrichedRecords = baseMarathons
         .map((marathon) => {
@@ -1165,14 +1183,16 @@ export async function registerRoutes(
       } else if (params.region === "Overseas") {
         conditions.push(sql`${marathons.country} <> 'China'`);
       } else if (params.region === "WMM") {
+        // 8 大满贯 (WMM 第 8 大开普敦于 2026-06-10 宣布加入，2027-05-23 起正式生效)
         const WMM_IDS = [
-          "45c4f0e6-dbd7-4904-a874-7a5be4b5dfc5",
-          "5f7ae5ab-bf47-46d2-bd73-ffcd829d0fec",
-          "315803d1-400d-411a-83fe-33e2dc822a5c",
-          "ad3e91c8-b48e-4fc3-9003-a8ff31be8c90",
-          "4fbae442-11de-4e20-93e4-fd0fc5076d7d",
-          "be4e78a3-3da6-4530-8f00-44350c24308d",
-          "15c99c8e-0be5-4059-b297-6e7a30a1f470",
+          "41497d07-89fc-4f00-9b61-f11b2b67020a", // 东京
+          "89a5d69f-bf27-4817-aec3-9743e61ffe72", // 伦敦
+          "a00b88b3-423d-44cb-b2b0-730f064df701", // 悉尼
+          "7f9c0d0c-e093-46b0-873f-a5b397627bfd", // 柏林
+          "0ffe59de-a186-463b-ac68-18d2dff4d1c4", // 波士顿
+          "5092ff4b-2e2f-4865-840d-9a7a412deb9d", // 纽约
+          "5aa50e7b-2648-4318-8860-197804ea361e", // 芝加哥
+          "967d0cb5-aba2-4280-ab8a-cc2c374c56a6", // 开普敦
         ];
         conditions.push(inArray(marathons.id, WMM_IDS));
       }

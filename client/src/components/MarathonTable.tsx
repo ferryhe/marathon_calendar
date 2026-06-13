@@ -101,8 +101,20 @@ export function MarathonTable({
     search: searchQuery || undefined,
     limit: 100,
     page: currentPage,
-    year: filters.year,
-    month: filters.month,
+    // WMM region: don't pin to a specific year — let server pick the closest future
+    // race per marathon (e.g. Tokyo's 2027 edition even when current year is 2026).
+    year: region === "WMM" ? undefined : filters.year,
+    // WMM region: month filter doesn't make sense without year pinning — let the
+    // year filter drive the grouping.
+    month: region === "WMM" ? undefined : filters.month,
+    // WMM region: rolling 1-year window from today — beyond that, the marathon hides
+    // (e.g. when today's date crosses past 2027-05-23, Cape Town 2028 takes over).
+    untilDate:
+      region === "WMM"
+        ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .slice(0, 10)
+        : undefined,
     status: filters.status,
     country: filters.country,
     kind: filters.kind,
@@ -154,7 +166,8 @@ export function MarathonTable({
 
     // When the user explicitly filters by a terminal status (ended/cancelled),
     // we want past-date editions to render — otherwise the result list is empty.
-    const showPastEditions = filters.status === "ended" || filters.status === "cancelled";
+    // WMM region: 8 大满贯家族持续显示全部 8 个（包括已结束届）.
+    const showPastEditions = filters.status === "ended" || filters.status === "cancelled" || region === "WMM";
 
     const { dated, tbd } = data.data
       .filter((marathon) => {

@@ -15,5 +15,6 @@ USER node
 
 EXPOSE 5000
 
-# `npm start` runs `node dist/index.cjs` under NODE_ENV=production.
-CMD ["npm", "start"]
+# Use `node` directly to avoid needing `cross-env` (a devDep, omitted from this image).
+# NODE_ENV is set via `docker run -e` so we don't need cross-env's shim.
+CMD ["node", "dist/index.cjs"]

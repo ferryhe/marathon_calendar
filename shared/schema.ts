@@ -47,6 +47,7 @@ export const marathons = pgTable(
     cityEn: text("city_en"),
     country: text("country"),
     description: text("description"),
+    descriptionZh: text("description_zh"),
     websiteUrl: text("website_url"),
     // PR-1 (2026-05-02): rich fields harvested from NowRun
     certificationGrade: text("certification_grade"), // 'A' | 'B' | 'C' | null

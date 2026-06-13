@@ -1,0 +1,40 @@
+# Marathon Calendar - Docker Compose (App-only)
+#
+# PURPOSE: This file is a REDACTED TEMPLATE. Real credentials MUST come from
+#          the host's secret manager (e.g. ~/.docker-secrets/marathon.env)
+#          and be loaded via `docker-compose --env-file` or `env_file:` below.
+#          Do NOT hardcode production DATABASE_URL / passwords / bridge IPs here.
+#
+# USAGE:
+#   # 1. Stage secrets (one-time, on the host)
+#   install -m 600 /dev/null ~/.docker-secrets/marathon.env
+#   $EDITOR ~/.docker-secrets/marathon.env   # populate DATABASE_URL, REDIS_URL, SESSION_SECRET, ADMIN_API_TOKEN
+#
+#   # 2. Launch (reads secrets from the file)
+#   docker compose --env-file ~/.docker-secrets/marathon.env \
+#                  -f docker-compose.marathon.yml up -d --build
+#
+# On the production host, the marathon-postgres and marathon-redis containers
+# already exist with known bridge IPs. See DEPLOY.md §0 for which IPs to put
+# in DATABASE_URL / REDIS_URL inside the env file.
+
+services:
+  marathon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: marathon-app
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./uploads:/app/uploads
+    env_file:
+      - ${SECRETS_FILE:-/dev/null}     # override via SECRETS_FILE=...; falls back to /dev/null if unset
+    environment:
+      - PORT=5100
+      # DATABASE_URL / REDIS_URL / SESSION_SECRET / ADMIN_API_TOKEN come from
+      # the env_file referenced above. Never hardcode them here.
+    ports:
+      - "5100:5100"
+    restart: unless-stopped
+    network_mode: bridge

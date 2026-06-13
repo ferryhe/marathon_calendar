@@ -72,6 +72,10 @@ export interface MarathonDetail extends MarathonDTO {
     averageRating: number;
     count: number;
   };
+  // Bilingual description. `description` is the English version, `descriptionZh` is the Chinese.
+  // UI picks based on locale; both can be shown stacked for "中文对照" view.
+  description?: string | null;
+  descriptionZh?: string | null;
 }
 
 export interface ReviewDTO {

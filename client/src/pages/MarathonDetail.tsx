@@ -274,8 +274,29 @@ export default function MarathonDetailPage() {
               </CardHeader>
 
               <CardContent className="space-y-4">
-                {data.description ? (
-                  <p className="text-sm leading-relaxed text-foreground/90">{data.description}</p>
+                {data.descriptionZh || data.description ? (
+                  <div className="space-y-3">
+                    {/* Primary: locale-matched. Secondary (对照): the other language, in italic muted style. */}
+                    {(() => {
+                      const isZh = i18n.language?.startsWith("zh");
+                      const primary = isZh ? data.descriptionZh : data.description;
+                      const secondary = isZh ? data.description : data.descriptionZh;
+                      return (
+                        <>
+                          {primary && (
+                            <p className="text-sm leading-relaxed text-foreground/90" data-testid="text-description-primary">
+                              {primary}
+                            </p>
+                          )}
+                          {secondary && (
+                            <p className="text-sm leading-relaxed text-muted-foreground italic border-l-2 border-muted pl-3" data-testid="text-description-secondary">
+                              {secondary}
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">{t("detail.noIntroAlt")}</p>
                 )}
@@ -546,10 +567,13 @@ export default function MarathonDetailPage() {
                             variant="secondary"
                             data-testid={`badge-channel-${i}`}
                           >
-                            {ch}
+                            {t(`channel.${ch}`, { defaultValue: ch })}
                           </Badge>
                         ))}
                       </div>
+                      <p className="text-xs text-muted-foreground mt-2 italic">
+                        {t("status.hint")}
+                      </p>
                     </div>
                   )}
                   {data.officialWechatAccount && (

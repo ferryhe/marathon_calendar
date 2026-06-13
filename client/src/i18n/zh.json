@@ -65,12 +65,35 @@
   "status": {
     "upcoming": "报名未开始",
     "imminent": "即将开始",
-    "open": "报名中",
-    "closed": "报名已截止",
+    "open": "抽签报名中",
+    "closed": "抽签已截止",
     "racing": "比赛中",
     "ended": "已完赛",
     "cancelled": "已取消",
-    "tba": "待定"
+    "tba": "待定",
+    "hint": "列表状态仅指抽签/ballot。其他报名方式（慈善名额、旅行社、达标通道等）请进入赛事详情查看"
+  },
+  "channel": {
+    "lottery": "抽签",
+    "ballot": "抽签",
+    "general-entry": "大众报名",
+    "qualifier-entry": "达标通道",
+    "elite-entry": "精英通道",
+    "elite": "精英通道",
+    "run-as-one": "一起跑（残障）通道",
+    "good-for-age": "成绩达标通道",
+    "championship": "锦标赛通道",
+    "club": "俱乐部通道",
+    "international": "海外通道",
+    "guaranteed-entry": "保录名额",
+    "charity": "慈善名额",
+    "charity-entry": "慈善名额",
+    "charity-partner": "合作慈善名额",
+    "charity-program": "慈善项目",
+    "tour-operator": "旅行社名额",
+    "international-tour-operator": "国际旅行社名额",
+    "travel-package": "旅行套餐",
+    "9+1-program": "9+1 计划"
   },
   "list": {
     "loadFailed": "加载赛事数据失败",
