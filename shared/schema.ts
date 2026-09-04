@@ -55,6 +55,9 @@ export const marathons = pgTable(
     officialWechatAccount: text("official_wechat_account"),
     // Race kind: 'marathon' (road) | 'trail' (越野). Default 'marathon' for backward compat.
     raceKind: text("race_kind").default("marathon").notNull(),
+    // District (added 2026-09-04 by issue-to-merge): same city + different district = different race.
+    districtZh: text("district_zh"),
+    districtEn: text("district_en"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -101,7 +104,14 @@ export const marathonEditions = pgTable(
     roadTags: text("road_tags").array(),
     trailTag: text("trail_tag"),
     trailTags: text("trail_tags").array(),
-    distanceKm: doublePrecision("distance_km"),
+    distanceKm: doublePrecision("distance_km"), // legacy scalar; replaced by distance_km[] array below
+    // Cross-source normalized distance fields (added 2026-09-04 by issue-to-merge).
+    // raw_distance_kinds[i] corresponds to canonical_distance_kind[i] and distance_km[i].
+    rawDistanceKinds: text("raw_distance_kinds").array(),
+    canonicalDistanceKind: text("canonical_distance_kind").array(),
+    distanceKmArray: doublePrecision("distance_km").array(), // renamed from distanceKm scalar (migration needed)
+    distanceMilesArray: doublePrecision("distance_miles").array(),
+    canonicalStatus: text("canonical_status"),
     registrationChannels: text("registration_channels").array(),
     officialDocuments: jsonb("official_documents").$type<{
       registrationNotice?: string;
@@ -212,6 +222,40 @@ export const marathonSyncRuns = pgTable("marathon_sync_runs", {
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   errorMessage: text("error_message"),
 });
+
+// === Cross-source normalization layer (added 2026-09-04 by issue-to-merge Round 1) ===
+// Stores raw value → canonical value mappings for distance / status / city / country
+// across all data sources (zuicool/nowrun/runsignup/wmm/worldsmarathons).
+export const marathonI18n = pgTable(
+  "marathon_i18n",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    domain: varchar("domain").notNull(),         // 'distance' | 'status' | 'city' | 'country'
+    sourceValue: text("source_value").notNull(), // raw value as scraped (e.g. '半程', '10.0km')
+    canonicalValue: text("canonical_value").notNull(),
+    numericKm: doublePrecision("numeric_km"),    // NULL for non-distance domains
+    numericMiles: doublePrecision("numeric_miles"),
+    districtZh: text("district_zh"),             // city domain only
+    districtEn: text("district_en"),
+    locale: varchar("locale"),                   // 'en-US', 'zh-CN', 'iso-3166-1'
+    sourceId: varchar("source_id"),              // which source uses this raw value
+    confidence: doublePrecision("confidence").default(1.0).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    domainUnique: uniqueIndex("marathon_i18n_unique").on(
+      table.domain,
+      table.sourceValue,
+      table.sourceId,
+    ),
+  }),
+);
 
 export const rawCrawlData = pgTable("raw_crawl_data", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
