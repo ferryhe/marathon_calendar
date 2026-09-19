@@ -17,6 +17,8 @@ import {
   resolveRunsignupStartDate,
   resolveWorldsmarathonsStartDate,
   resolveZuicoolRaceDate,
+  // 导入器 import-runsignup.ts 调用的就是它；断言同一个符号才算"接线覆盖"
+  runsignupCalendarDay,
   type PageDateResult,
 } from "../shared/race-date.js";
 
@@ -741,6 +743,46 @@ console.log("\n## 13. real rows: sub-event wording must not be mistaken for a re
   );
 }
 
+
+// ---------------------------------------------------------------------------
+console.log("\n## 14. runsignup collection artifact: the local wall clock is taken verbatim");
+{
+  // Real values copied from data/runsignup/races_2026-05-12.jsonl. The importer
+  // used `new Date(raw)` and stored the resulting Date, so the instant was
+  // re-read in the server's timezone (UTC+8) and the row landed one day late.
+  // Scale (recomputed 2026-09-20): 702 of the artifact's 3492 records get a
+  // different calendar day under the old rule; the trigger is a local start time
+  // at/after `24 − (8 − UTC offset)` — 12:00 EDT, 10:00 MDT, 06:00 HST — so it is
+  // NOT limited to evening races (177 of the 702 start before noon).
+  // The asserted function is the one the importer calls (`runsignupCalendarDay`).
+  const artifact: Array<[string, string, string]> = [
+    ["2026-07-22T18:30:00-04:00", "2026-07-22", "Sundown Trail Race - July 22nd Edition (18:30 EDT)"],
+    ["2026-06-03T18:30:00-04:00", "2026-06-03", "Sundown Trail Race - June 3rd Edition"],
+    ["2026-05-28T18:00:00-04:00", "2026-05-28", "Queen City Trail Series - Copper Division"],
+    ["2026-05-21T18:00:00-04:00", "2026-05-21", "2026 Nomad Trail Race Series"],
+    ["2027-04-11T07:00:00-06:00", "2027-04-11", "Platte River Half (morning start, never shifted)"],
+    ["2026-05-21", "2026-05-21", "date-only value"],
+    ["2026-02-30T18:00:00-04:00", "", "impossible day must be rejected"],
+  ];
+  for (const [raw, want, label] of artifact) {
+    const got = runsignupCalendarDay(raw);
+    check(`14. ${label} → ${want || "null"}`, got === (want || null), `${raw} → ${got}`);
+  }
+
+  // The exported rule is what the importer calls, so these two cover the wiring
+  // (reverting import-runsignup.ts to `new Date(rep.date)` now breaks the suite —
+  // before this it stayed green because only `calendarDay` was exercised).
+  check("14. missing value → null", runsignupCalendarDay(null) === null && runsignupCalendarDay(undefined) === null);
+
+  // The trap in one line: reading that instant "in Shanghai" is exactly what the
+  // old code did by handing a Date to the driver.
+  check(
+    "14. a Z instant is only shifted when the caller asks for it (runsignup must not)",
+    calendarDay("2026-07-22T22:30:00Z", 0) === "2026-07-22" &&
+      calendarDay("2026-07-22T22:30:00Z", 480) === "2026-07-23",
+    `${calendarDay("2026-07-22T22:30:00Z", 0)} / ${calendarDay("2026-07-22T22:30:00Z", 480)}`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 console.log(`\n# ${passed} assertion(s) passed, ${failures.length} failed`);

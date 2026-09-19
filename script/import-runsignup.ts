@@ -4,6 +4,7 @@ import path from "path";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../server/db";
 import { marathonEditions, marathonSources, marathons, sources } from "@shared/schema";
+import { runsignupCalendarDay } from "../shared/race-date.js";
 
 const WANTED_KINDS = new Set(["marathon", "half-marathon", "ultra", "trail"]);
 
@@ -30,6 +31,33 @@ function eventKey(r: RaceRecord): string {
   const date = r.date ? r.date.split("T")[0] : "unknown";
   return `${r.url}|${date}`;
 }
+
+/**
+ * The collected artifact carries the race's **local wall clock**
+ * (`"2026-07-22T18:30:00-04:00"`), so the calendar day must be taken verbatim
+ * (`runsignupCalendarDay`, defined in shared/race-date.ts next to this source's
+ * other rules).
+ *
+ * Parsing it into a `Date` re-read the instant in the *server's* timezone: on a
+ * UTC+8 host `"2026-07-22T18:30:00-04:00"` (= 22:30Z) became 2026-07-23 06:30
+ * local and the row was stored a day late.
+ *
+ * Measured 2026-09-20 (recompute: `python3 /home/ubuntu/scripts/recount-runsignup-tz.py`):
+ * the old rule derived a different calendar day for **702 of the 3492 records**
+ * in `data/runsignup/races_2026-05-12.jsonl`; joined to `marathon_editions`
+ * that is the ~69 rows the audit recomputed independently (the pre-fix DB
+ * snapshot is no longer reproducible — the data fix ran on the same day). Of
+ * those, 53 were corrected (48 by page-verified script
+ * `backups/marathon-20260920-051320-runsignup-tz/`, 5 series rows by
+ * `backups/marathon-20260920-051416-runsignup-series/`) and the rest still need
+ * the multi-edition (series) matching step.
+ *
+ * The trigger is **not** "evening only": a record shifts whenever its local
+ * start time is at or after `24 − (8 − UTC offset)` — i.e. 12:00 for EDT
+ * (-04:00), 11:00 for CDT/EST, 10:00 for MDT, 06:00 for HST (-10:00). 177 of the
+ * 702 records start before noon.
+ */
+const raceCalendarDay = runsignupCalendarDay;
 
 function mapStatus(s: string | null): string | null {
   if (!s) return null;
@@ -141,7 +169,7 @@ async function main() {
     const state = rep.state || null;
     const locationSuffix = [city, state].filter(Boolean).join(", ");
     const baseDisplayName = locationSuffix ? `${rep.name} (${locationSuffix})` : rep.name;
-    const monthYear = rep.date ? new Date(rep.date).toISOString().slice(0, 7).replace("-", "/") : "";
+    const monthYear = rep.date ? (raceCalendarDay(rep.date) ?? "").slice(0, 7).replace("-", "/") : "";
     // NOTE: displayName collisions within a single import batch are resolved by appending month/year
     // Cross-batch or cross-import collisions are handled by ON CONFLICT DO NOTHING below
     const uniqueName = (baseDisplayName + (monthYear ? ` (${monthYear})` : "")).slice(0, 180);
@@ -191,8 +219,10 @@ async function main() {
     upsertedMarathons++;
 
     if (row) {
-      const raceDate = rep.date ? new Date(rep.date) : null;
-      const raceYear = raceDate ? raceDate.getFullYear() : null;
+      // Verbatim local calendar day (see raceCalendarDay): never via `new Date`,
+      // which shifted every evening-start US race one day later.
+      const raceDate = raceCalendarDay(rep.date);
+      const raceYear = raceDate ? Number(raceDate.slice(0, 4)) : null;
 
       const statuses = uniqueGroup.map((r) => mapStatus(r.registration_status)).filter(Boolean);
       let registrationStatus: string | null = null;
