@@ -17,6 +17,8 @@ import {
   resolveRunsignupStartDate,
   resolveWorldsmarathonsStartDate,
   resolveZuicoolRaceDate,
+  // 导入器 import-runsignup.ts 调用的就是它；断言同一个符号才算"接线覆盖"
+  runsignupCalendarDay,
   type PageDateResult,
 } from "../shared/race-date.js";
 
@@ -747,9 +749,12 @@ console.log("\n## 14. runsignup collection artifact: the local wall clock is tak
 {
   // Real values copied from data/runsignup/races_2026-05-12.jsonl. The importer
   // used `new Date(raw)` and stored the resulting Date, so the instant was
-  // re-read in the server's timezone (UTC+8) and every evening-start US race
-  // landed one day late — 56 / 644 rows measured 2026-09-20. The rule is now
-  // `calendarDay(raw, 0)`: an explicit offset (or none) is wall clock.
+  // re-read in the server's timezone (UTC+8) and the row landed one day late.
+  // Scale (recomputed 2026-09-20): 702 of the artifact's 3492 records get a
+  // different calendar day under the old rule; the trigger is a local start time
+  // at/after `24 − (8 − UTC offset)` — 12:00 EDT, 10:00 MDT, 06:00 HST — so it is
+  // NOT limited to evening races (177 of the 702 start before noon).
+  // The asserted function is the one the importer calls (`runsignupCalendarDay`).
   const artifact: Array<[string, string, string]> = [
     ["2026-07-22T18:30:00-04:00", "2026-07-22", "Sundown Trail Race - July 22nd Edition (18:30 EDT)"],
     ["2026-06-03T18:30:00-04:00", "2026-06-03", "Sundown Trail Race - June 3rd Edition"],
@@ -760,9 +765,14 @@ console.log("\n## 14. runsignup collection artifact: the local wall clock is tak
     ["2026-02-30T18:00:00-04:00", "", "impossible day must be rejected"],
   ];
   for (const [raw, want, label] of artifact) {
-    const got = calendarDay(raw, 0);
+    const got = runsignupCalendarDay(raw);
     check(`14. ${label} → ${want || "null"}`, got === (want || null), `${raw} → ${got}`);
   }
+
+  // The exported rule is what the importer calls, so these two cover the wiring
+  // (reverting import-runsignup.ts to `new Date(rep.date)` now breaks the suite —
+  // before this it stayed green because only `calendarDay` was exercised).
+  check("14. missing value → null", runsignupCalendarDay(null) === null && runsignupCalendarDay(undefined) === null);
 
   // The trap in one line: reading that instant "in Shanghai" is exactly what the
   // old code did by handing a Date to the driver.

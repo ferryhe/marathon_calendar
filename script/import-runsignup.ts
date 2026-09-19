@@ -4,7 +4,7 @@ import path from "path";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../server/db";
 import { marathonEditions, marathonSources, marathons, sources } from "@shared/schema";
-import { calendarDay } from "../shared/race-date.js";
+import { runsignupCalendarDay } from "../shared/race-date.js";
 
 const WANTED_KINDS = new Set(["marathon", "half-marathon", "ultra", "trail"]);
 
@@ -34,21 +34,30 @@ function eventKey(r: RaceRecord): string {
 
 /**
  * The collected artifact carries the race's **local wall clock**
- * (`"2026-07-22T18:30:00-04:00"`), so the calendar day must be taken verbatim.
+ * (`"2026-07-22T18:30:00-04:00"`), so the calendar day must be taken verbatim
+ * (`runsignupCalendarDay`, defined in shared/race-date.ts next to this source's
+ * other rules).
  *
- * Parsing it into a `Date` re-reads the instant in the *server's* timezone: with
- * a UTC+8 host, `2026-07-22T18:30:00-04:00` (= 22:30Z) becomes 2026-07-23
- * 06:30 local and the row is stored one day late. Measured 2026-09-20: 56 of
- * 644 runsignup rows, all evening-start US races, e.g. "Sundown Trail Race -
- * July 22nd Edition" stored as 2026-07-23 while its own name says July 22nd.
+ * Parsing it into a `Date` re-read the instant in the *server's* timezone: on a
+ * UTC+8 host `"2026-07-22T18:30:00-04:00"` (= 22:30Z) became 2026-07-23 06:30
+ * local and the row was stored a day late.
  *
- * `calendarDay(…, 0)` is the runsignup rule from the shared per-source adapter:
- * an explicit offset (or none) is wall clock and is used as-is; only a `Z`
- * timestamp would be shifted, and runsignup does not emit those for races.
+ * Measured 2026-09-20 (recompute: `python3 /home/ubuntu/scripts/recount-runsignup-tz.py`):
+ * the old rule derived a different calendar day for **702 of the 3492 records**
+ * in `data/runsignup/races_2026-05-12.jsonl`; joined to `marathon_editions`
+ * that is the ~69 rows the audit recomputed independently (the pre-fix DB
+ * snapshot is no longer reproducible — the data fix ran on the same day). Of
+ * those, 53 were corrected (48 by page-verified script
+ * `backups/marathon-20260920-051320-runsignup-tz/`, 5 series rows by
+ * `backups/marathon-20260920-051416-runsignup-series/`) and the rest still need
+ * the multi-edition (series) matching step.
+ *
+ * The trigger is **not** "evening only": a record shifts whenever its local
+ * start time is at or after `24 − (8 − UTC offset)` — i.e. 12:00 for EDT
+ * (-04:00), 11:00 for CDT/EST, 10:00 for MDT, 06:00 for HST (-10:00). 177 of the
+ * 702 records start before noon.
  */
-function raceCalendarDay(raw: string | null | undefined): string | null {
-  return calendarDay(raw ?? null, 0);
-}
+const raceCalendarDay = runsignupCalendarDay;
 
 function mapStatus(s: string | null): string | null {
   if (!s) return null;

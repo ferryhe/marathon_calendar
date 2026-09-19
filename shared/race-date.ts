@@ -977,6 +977,21 @@ export function resolveNowrunStartDate(html: string, opts: NowrunOpts = {}): Pag
 export interface RunsignupOpts extends TrackedEditionOpts {}
 
 /**
+ * runsignup **collection artifacts** carry the race's local wall clock as a
+ * string (`"2026-07-22T18:30:00-04:00"`), so the calendar day is taken
+ * verbatim: an explicit offset (or none) is wall clock, and only a `Z` instant
+ * would be shifted — runsignup does not emit those for races.
+ *
+ * Exported (rather than inlined in the importer) so `script/selftest-race-date.ts`
+ * asserts the very function `script/import-runsignup.ts` calls: otherwise the
+ * assertions only cover `calendarDay` and reverting the importer to
+ * `new Date(raw)` would keep the suite green.
+ */
+export function runsignupCalendarDay(raw: string | null | undefined): string | null {
+  return calendarDay(raw ?? null, 0);
+}
+
+/**
  * runsignup.com race page: 1–21 `startDate` values per page (series / sub-races /
  * UTC variants). The tracked edition is identified by `trackedName`/`eventUrl`;
  * pulling first/min produced "series race took a sibling's date" rows.

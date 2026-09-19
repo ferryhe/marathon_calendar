@@ -8,6 +8,11 @@
  *   npx tsx script/audit-source-dates.ts --source=runsignup [--sample=30]
  *   npx tsx script/audit-source-dates.ts --source=nowrun --sample=0     # 0 = 全部
  *   npx tsx script/audit-source-dates.ts --source=zuicool --out=/tmp/a.json
+ *   npx tsx script/audit-source-dates.ts --source=zuicool --canonical=zuicool-8
+ *
+ * 注意 `--sample=N` 取的是 **race_date 最新的 N 条**（有偏：抽不到翻届/历史群体）；
+ * 要全貌请用 `--sample=0`。`--source=` 只按**源名/源 id** 匹配，canonical 前缀请用
+ * `--canonical=`（否则 `--source=Marathon` 会同时命中 runsignup / worldsmarathons / 官网源）。
  *
  * 判档：
  *   OK              库里的日期就是源站该届次的日期
@@ -62,6 +67,8 @@ if (!SOURCE) {
   process.exit(1);
 }
 const SAMPLE = Number(arg("sample", "30")); // 0 = 全部
+/** 另开一个开关按 canonical 前缀取样，避免把别的源拉进来（--source=Marathon 曾混进 3 个源）。 */
+const CANONICAL = arg("canonical", "");
 const OUT = arg("out", "/tmp/source-audit.json")!;
 
 type Verdict =
@@ -101,10 +108,10 @@ async function load(): Promise<Row[]> {
        JOIN marathon_sources ms ON ms.marathon_id = m.id
        JOIN sources s ON s.id = ms.source_id
       WHERE ms.source_url IS NOT NULL
-        AND (s.name ILIKE $1 OR s.id ILIKE $1 OR m.canonical_name ILIKE $1)
+        AND (s.name ILIKE $1 OR s.id ILIKE $1 OR ($2 <> '' AND m.canonical_name ILIKE $2))
       ORDER BY e.race_date DESC NULLS LAST
       ${SAMPLE > 0 ? "LIMIT " + Math.trunc(SAMPLE) : ""}`,
-    [`%${SOURCE}%`],
+    [`%${SOURCE}%`, CANONICAL ? `%${CANONICAL}%` : ""],
   );
   return rows.map((r) => ({ ...r, kind: classifySourceKind(r.url) }));
 }
@@ -130,10 +137,14 @@ function classify(row: Row, res: PageDateResult | null, pageDays: string[]): Ver
   // 适配器（该源的权威规则）给出同一天 → 就是 OK；pageDays 只是诊断用的旁证。
   if (res.date === db) return "OK";
   if (pageDays.includes(db)) return "OK";
+  // Order matters: a page that has rolled over to the NEXT edition shows a
+  // different year, so checking YEAR_DIFF first swallowed every "rolled over"
+  // row and made the documented STALE_EDITION bucket unreachable (found in
+  // review round 3: YEAR_DIFF=56, of which 54 have a gap > 300 days).
+  const gapDays = (p: string) => Math.abs((Date.parse(db) - Date.parse(p)) / 86_400_000);
+  if (pageDays.some((p) => gapDays(p) > 300)) return "STALE_EDITION";
   if (res.year !== row.year) return "YEAR_DIFF";
-  const days = Math.round((Date.parse(db) - Date.parse(res.date)) / 86_400_000);
-  if (Math.abs(days) === 1) return "TZ_SHIFT";
-  if (pageDays.some((p) => Math.abs((Date.parse(db) - Date.parse(p)) / 86_400_000) > 300)) return "STALE_EDITION";
+  if (Math.abs((Date.parse(db) - Date.parse(res.date)) / 86_400_000) === 1) return "TZ_SHIFT";
   if (pageDays.length > 1) return "MULTI_NO_MATCH";
   return "DATE_DIFF";
 }
