@@ -15,15 +15,22 @@
  * `--canonical=`（否则 `--source=Marathon` 会同时命中 runsignup / worldsmarathons / 官网源）。
  *
  * 判档：
- *   OK              库里的日期就是源站该届次的日期
- *   TZ_SHIFT        页面本地日 = 库里日 ±1 天（典型时区换算错误，最要紧的一类）
- *   DATE_DIFF       同为一年，天数差得更多（改期 / 页面改日 / 届次选错）
- *   STALE_EDITION   页面已翻到下一届（相差 >300 天）—— 属采集新鲜度，不算提取错
- *   YEAR_DIFF       年份不一致
- *   MULTI_AMBIG     页面多场次，且按赛事名/URL 都定位不到这一届 —— 拒绝猜（原样报出）
- *   MULTI_NO_MATCH  页面多场次，按名定位到了这一届，但库里那天属于同页别的场次
- *   UNRESOLVABLE    适配器读不出年份（no_year / rescheduled_unparsed / …）
- *   FETCH_FAIL      抓不到页面
+ *   OK                    库里的日期就是源站该届次的日期
+ *   TZ_SHIFT              页面本地日 = 库里日 ±1 天（典型时区换算错误，最要紧的一类）
+ *   DATE_DIFF             同为一年，天数差得更多（改期 / 页面改日 / 届次选错）
+ *   STALE_EDITION         页面已翻届（相差 >300 天）且**新届还没入库** —— 采集还没跟上，不算提取错
+ *   OLD_EDITION_RETAINED  页面已翻届，且**新届已经建好入库** —— 旧届留历史，不是错（2026-09-20 加；
+ *                         实测 n=700 里 53 条原 STALE_EDITION + 2 条原 YEAR_DIFF 归入此档）
+ *   YEAR_DIFF             年份不一致
+ *   MULTI_AMBIG           页面多场次，且按赛事名/URL 都定位不到这一届 —— 拒绝猜（原样报出）
+ *   DB_DAY_IS_SIBLING     按名定位到了这一届，但**库里那天属于同页别的场次**（旧名 MULTI_NO_MATCH
+ *                         易被读成"名字匹配不上"，与含义相反，2026-09-20 改名）
+ *   UNRESOLVABLE          适配器读不出年份（no_year / rescheduled_unparsed / …）
+ *   FETCH_FAIL            抓不到页面
+ *
+ * 报表口径：`# 需处理的 N 条` 只列**需要跟进**的档；`OLD_EDITION_RETAINED`（信息档，文档写明
+ * "不是错"）单列一行、不进需处理清单 —— 否则 55 条正常态噪音会把真告警淹掉。逐条明细永远在
+ * `--out` 的 JSON 里，不因报表口径而丢。
  *
  * 只读：只 SELECT + 抓页面，绝不写库。
  */
@@ -73,8 +80,14 @@ const CANONICAL = arg("canonical", "");
 const OUT = arg("out", "/tmp/source-audit.json")!;
 
 type Verdict =
-  | "OK" | "TZ_SHIFT" | "DATE_DIFF" | "STALE_EDITION" | "YEAR_DIFF"
-  | "MULTI_AMBIG" | "MULTI_NO_MATCH" | "UNRESOLVABLE" | "FETCH_FAIL";
+  | "OK" | "TZ_SHIFT" | "DATE_DIFF" | "STALE_EDITION" | "OLD_EDITION_RETAINED" | "YEAR_DIFF"
+  | "MULTI_AMBIG" | "DB_DAY_IS_SIBLING" | "UNRESOLVABLE" | "FETCH_FAIL";
+
+/**
+ * 信息档：不需要人工跟进，报表里单列、**不进**「需处理」清单（口径见文件头）。
+ * 放在模块级并标注 `Verdict[]`，这样往里加档名时若拼错，tsc 会直接报 TS2820，而不是静默生效。
+ */
+const INFO_ONLY: Verdict[] = ["OLD_EDITION_RETAINED"];
 
 interface Row {
   id: string;
@@ -85,6 +98,8 @@ interface Row {
   status: string;
   publish_status: string | null;
   url: string;
+  /** 同 marathon 下已入库的、年份更大的 published 届次（翻届后旧届不再告警用）。 */
+  newer_published_year: number | null;
   kind: RaceSourceKind;
 }
 
@@ -103,7 +118,11 @@ const pool = new Pool({
 async function load(): Promise<Row[]> {
   const { rows } = await pool.query(
     `SELECT e.id, m.canonical_name, m.name AS race_name, e.year, e.race_date::text AS db_date,
-            e.status, e.publish_status, ms.source_url AS url
+            e.status, e.publish_status, ms.source_url AS url,
+            (SELECT MIN(e2.year) FROM marathon_editions e2
+              WHERE e2.marathon_id = e.marathon_id
+                AND e2.publish_status = 'published'
+                AND e2.year > e.year) AS newer_published_year
        FROM marathon_editions e
        JOIN marathons m ON m.id = e.marathon_id
        JOIN marathon_sources ms ON ms.marathon_id = m.id
@@ -142,9 +161,17 @@ function classify(row: Row, res: PageDateResult | null, pageDays: string[]): Ver
   if (pageDays.includes(db)) {
     // 按赛事名定位到的是另一天 ⇒ 库里这天属于同页别的场次（2026-09-20 的错法：
     // 系列页把每场赛事的日期都写上，旧的"日期在页面上就算 OK"永远抓不到）。
-    if (res.matchedBy === "name") return "MULTI_NO_MATCH";
+    // 名字务必直白：旧名 MULTI_NO_MATCH 会被读成"名字匹配不上"，与含义相反。
+    if (res.matchedBy === "name") return "DB_DAY_IS_SIBLING";
     return "OK";
   }
+  // 页面已翻届，且新届**已经建好入库**（status/publish 都上页面了）→ 旧届留历史，
+  // 拿旧届去比新届页面必然不符，这不是错。实测：n=700 里 55 条归入此档
+  // （53 条原 STALE_EDITION：页面已翻到下一届且新届已入库；2 条原 YEAR_DIFF：
+  //  Diablo Trail Run 2026-09-06 → 页面 2027-05-23 差 259 天、Hall of Fame Half 差 244 天）。
+  // 放在 STALE/YEAR_DIFF 之前，否则这些行会永远挂在告警里；而「页面已翻届但新届还没建」
+  // 的行仍会落到下面的 STALE_EDITION —— 那才是真正需要跟进的采集新鲜度。
+  if (row.newer_published_year && res.year && res.year > row.year) return "OLD_EDITION_RETAINED";
   // Order matters: a page that has rolled over to the NEXT edition shows a
   // different year, so checking YEAR_DIFF first swallowed every "rolled over"
   // row and made the documented STALE_EDITION bucket unreachable (found in
@@ -153,7 +180,7 @@ function classify(row: Row, res: PageDateResult | null, pageDays: string[]): Ver
   if (pageDays.some((p) => gapDays(p) > 300)) return "STALE_EDITION";
   if (res.year !== row.year) return "YEAR_DIFF";
   if (Math.abs((Date.parse(db) - Date.parse(res.date)) / 86_400_000) === 1) return "TZ_SHIFT";
-  if (pageDays.length > 1) return "MULTI_NO_MATCH";
+  if (pageDays.length > 1) return "DB_DAY_IS_SIBLING";
   return "DATE_DIFF";
 }
 
@@ -204,18 +231,28 @@ async function main() {
 
   writeFileSync(OUT, JSON.stringify(results, null, 1));
 
-  const order: Verdict[] = ["OK", "TZ_SHIFT", "DATE_DIFF", "STALE_EDITION", "YEAR_DIFF", "MULTI_AMBIG", "MULTI_NO_MATCH", "UNRESOLVABLE", "FETCH_FAIL"];
+  const order: Verdict[] = ["OK", "TZ_SHIFT", "DATE_DIFF", "STALE_EDITION", "OLD_EDITION_RETAINED", "YEAR_DIFF", "MULTI_AMBIG", "DB_DAY_IS_SIBLING", "UNRESOLVABLE", "FETCH_FAIL"];
   console.log(`\n# 分档（n=${results.length}）`);
   for (const v of order) {
     const n = results.filter((r) => r.verdict === v).length;
     if (n) console.log(`  ${v.padEnd(15)} ${String(n).padStart(4)}  (${((n / results.length) * 100).toFixed(1)}%)`);
   }
-  const bad = results.filter((r) => r.verdict !== "OK");
+  // 「需处理」= 真需要跟进的档。信息档（INFO_ONLY，见文件头）不混进来 ——
+  // 55 条正常态噪音会把 15 条真告警淹掉。
+  const bad = results.filter((r) => r.verdict !== "OK" && !INFO_ONLY.includes(r.verdict));
+  const infoOnly = results.filter((r) => INFO_ONLY.includes(r.verdict));
   console.log(`\n# 需处理的 ${bad.length} 条（前 25）`);
   for (const r of bad.slice(0, 25)) {
     console.log(
       `  [${r.verdict}] kind=${r.kind} db=${r.db_date ?? "null"}(y${r.year}) → page=${r.resolved?.date ?? "-"} ` +
         `days=[${r.pageDays.slice(0, 4).join(",")}] '${r.race_name.slice(0, 30)}'\n      ${r.url}\n      ev=${(r.evidence ?? r.note ?? "").slice(0, 96)}`,
+    );
+  }
+  if (infoOnly.length) {
+    // 档名从 INFO_ONLY 现取，别硬编码 —— 将来加档时文案不会自相矛盾。
+    console.log(
+      `\n# 信息档 ${infoOnly.length} 条（不必处理）：${INFO_ONLY.join(" / ")} —— 页面已翻届且新届已入库，\n` +
+        `#   旧届留历史属正常态；逐条明细见 ${OUT}`,
     );
   }
   console.log(`\n# 明细已存 ${OUT}`);

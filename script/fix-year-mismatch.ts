@@ -57,6 +57,7 @@ import {
   type PageDateResult,
   type RaceSourceKind,
 } from "../shared/race-date.js";
+import { addAuditNoteSql } from "../shared/provenance.js";
 
 const APPLY = process.argv.includes("--apply");
 const DRY = !APPLY; // 默认 dry-run（"--dry-run" 也接受，语义相同）
@@ -337,9 +338,13 @@ async function apply(client: PoolClient, d: Decision): Promise<void> {
     await client.query(
       `UPDATE marathon_editions
          SET publish_status='archived', updated_at=NOW(),
-             highlights = COALESCE(highlights,'') ||
-               E'\n[year-mismatch ' || to_char(NOW() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') ||
-               ': ' || COALESCE($2, 'stale') || ']'
+             ${addAuditNoteSql({
+               noteExpr:
+                 `'[year-mismatch ' || to_char(NOW() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') || ` +
+                 `': ' || COALESCE($2, 'stale') || ']'`,
+               whyExpr: "'year-mismatch archive'",
+               atExpr: "to_char(NOW() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')",
+             })}
        WHERE id=$1`,
       [d.row.id],
     );
