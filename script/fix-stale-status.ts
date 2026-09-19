@@ -20,10 +20,14 @@
  *   npx tsx script/fix-stale-status.ts --only=id  # 单条测试
  *
  * 输出：打印每个源/状态组合的 count + review 列表 + stats
+ *
+ * 留痕写哪里（2026-09-20 起）：`field_sources.auditNote*`，**不再写 `highlights`** ——
+ * 后者在详情页（`MarathonDetail.tsx`）直接渲染给用户看。见 `shared/provenance.ts`。
  */
 
 import "dotenv/config";
 import { Pool, type PoolClient } from "pg";
+import { addAuditNoteSql } from "../shared/provenance.js";
 
 const APPLY = process.argv.includes("--apply");
 const ONLY_IDS = (() => {
@@ -131,10 +135,13 @@ async function main() {
             await client.query(
               `UPDATE marathon_editions
                SET status='ended', updated_at=NOW(),
-                   highlights = COALESCE(highlights,'') ||
-                     E'\n[stale-status ' ||
-                     to_char(NOW() AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD') ||
-                     ': date-arithmetic flip ' || $2 || '→ended (race_date < today)]'
+                   ${addAuditNoteSql({
+                     noteExpr:
+                       `'[stale-status ' || to_char(NOW() AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD') || ` +
+                       `': date-arithmetic flip ' || $2 || '→ended (race_date < today)]'`,
+                     whyExpr: "'stale-status flip'",
+                     atExpr: "to_char(NOW() AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD')",
+                   })}
                WHERE id=$1`,
               [r.id, r.status],
             );

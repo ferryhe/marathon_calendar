@@ -15,15 +15,17 @@
  * `--canonical=`（否则 `--source=Marathon` 会同时命中 runsignup / worldsmarathons / 官网源）。
  *
  * 判档：
- *   OK              库里的日期就是源站该届次的日期
- *   TZ_SHIFT        页面本地日 = 库里日 ±1 天（典型时区换算错误，最要紧的一类）
- *   DATE_DIFF       同为一年，天数差得更多（改期 / 页面改日 / 届次选错）
- *   STALE_EDITION   页面已翻到下一届（相差 >300 天）—— 属采集新鲜度，不算提取错
- *   YEAR_DIFF       年份不一致
- *   MULTI_AMBIG     页面多场次，且按赛事名/URL 都定位不到这一届 —— 拒绝猜（原样报出）
- *   MULTI_NO_MATCH  页面多场次，按名定位到了这一届，但库里那天属于同页别的场次
- *   UNRESOLVABLE    适配器读不出年份（no_year / rescheduled_unparsed / …）
- *   FETCH_FAIL      抓不到页面
+ *   OK                    库里的日期就是源站该届次的日期
+ *   TZ_SHIFT              页面本地日 = 库里日 ±1 天（典型时区换算错误，最要紧的一类）
+ *   DATE_DIFF             同为一年，天数差得更多（改期 / 页面改日 / 届次选错）
+ *   STALE_EDITION         页面已翻到下一届（相差 >300 天）—— 属采集新鲜度，不算提取错
+ *   OLD_EDITION_RETAINED  页面已翻届，且**新届已经建好入库**—— 旧届留历史，不是错（2026-09-20 加）
+ *   YEAR_DIFF             年份不一致
+ *   MULTI_AMBIG           页面多场次，且按赛事名/URL 都定位不到这一届 —— 拒绝猜（原样报出）
+ *   DB_DAY_IS_SIBLING     按名定位到了这一届，但**库里那天属于同页别的场次**（旧名 MULTI_NO_MATCH
+ *                         易被读成"名字匹配不上"，与含义相反，2026-09-20 改名）
+ *   UNRESOLVABLE          适配器读不出年份（no_year / rescheduled_unparsed / …）
+ *   FETCH_FAIL            抓不到页面
  *
  * 只读：只 SELECT + 抓页面，绝不写库。
  */
@@ -73,8 +75,8 @@ const CANONICAL = arg("canonical", "");
 const OUT = arg("out", "/tmp/source-audit.json")!;
 
 type Verdict =
-  | "OK" | "TZ_SHIFT" | "DATE_DIFF" | "STALE_EDITION" | "YEAR_DIFF"
-  | "MULTI_AMBIG" | "MULTI_NO_MATCH" | "UNRESOLVABLE" | "FETCH_FAIL";
+  | "OK" | "TZ_SHIFT" | "DATE_DIFF" | "STALE_EDITION" | "OLD_EDITION_RETAINED" | "YEAR_DIFF"
+  | "MULTI_AMBIG" | "DB_DAY_IS_SIBLING" | "UNRESOLVABLE" | "FETCH_FAIL";
 
 interface Row {
   id: string;
@@ -85,6 +87,8 @@ interface Row {
   status: string;
   publish_status: string | null;
   url: string;
+  /** 同 marathon 下已入库的、年份更大的 published 届次（翻届后旧届不再告警用）。 */
+  newer_published_year: number | null;
   kind: RaceSourceKind;
 }
 
@@ -103,7 +107,11 @@ const pool = new Pool({
 async function load(): Promise<Row[]> {
   const { rows } = await pool.query(
     `SELECT e.id, m.canonical_name, m.name AS race_name, e.year, e.race_date::text AS db_date,
-            e.status, e.publish_status, ms.source_url AS url
+            e.status, e.publish_status, ms.source_url AS url,
+            (SELECT MIN(e2.year) FROM marathon_editions e2
+              WHERE e2.marathon_id = e.marathon_id
+                AND e2.publish_status = 'published'
+                AND e2.year > e.year) AS newer_published_year
        FROM marathon_editions e
        JOIN marathons m ON m.id = e.marathon_id
        JOIN marathon_sources ms ON ms.marathon_id = m.id
@@ -142,9 +150,15 @@ function classify(row: Row, res: PageDateResult | null, pageDays: string[]): Ver
   if (pageDays.includes(db)) {
     // 按赛事名定位到的是另一天 ⇒ 库里这天属于同页别的场次（2026-09-20 的错法：
     // 系列页把每场赛事的日期都写上，旧的"日期在页面上就算 OK"永远抓不到）。
-    if (res.matchedBy === "name") return "MULTI_NO_MATCH";
+    // 名字务必直白：旧名 MULTI_NO_MATCH 会被读成"名字匹配不上"，与含义相反。
+    if (res.matchedBy === "name") return "DB_DAY_IS_SIBLING";
     return "OK";
   }
+  // 页面已翻届，且新届**已经建好入库**（status/publish 都上页面了）→ 旧届留历史，
+  // 拿旧届去比新届页面必然不符，这不是错。实测：Diablo Trail Run（2026-09-06 → 页面
+  // 2027-05-23，差 259 天 < 300）、Hall of Fame Half（2026-08-23 → 2027-04-24）。
+  // 放在 STALE/YEAR_DIFF 之前，否则这两条会永远挂在告警里。
+  if (row.newer_published_year && res.year && res.year > row.year) return "OLD_EDITION_RETAINED";
   // Order matters: a page that has rolled over to the NEXT edition shows a
   // different year, so checking YEAR_DIFF first swallowed every "rolled over"
   // row and made the documented STALE_EDITION bucket unreachable (found in
@@ -153,7 +167,7 @@ function classify(row: Row, res: PageDateResult | null, pageDays: string[]): Ver
   if (pageDays.some((p) => gapDays(p) > 300)) return "STALE_EDITION";
   if (res.year !== row.year) return "YEAR_DIFF";
   if (Math.abs((Date.parse(db) - Date.parse(res.date)) / 86_400_000) === 1) return "TZ_SHIFT";
-  if (pageDays.length > 1) return "MULTI_NO_MATCH";
+  if (pageDays.length > 1) return "DB_DAY_IS_SIBLING";
   return "DATE_DIFF";
 }
 
@@ -204,7 +218,7 @@ async function main() {
 
   writeFileSync(OUT, JSON.stringify(results, null, 1));
 
-  const order: Verdict[] = ["OK", "TZ_SHIFT", "DATE_DIFF", "STALE_EDITION", "YEAR_DIFF", "MULTI_AMBIG", "MULTI_NO_MATCH", "UNRESOLVABLE", "FETCH_FAIL"];
+  const order: Verdict[] = ["OK", "TZ_SHIFT", "DATE_DIFF", "STALE_EDITION", "OLD_EDITION_RETAINED", "YEAR_DIFF", "MULTI_AMBIG", "DB_DAY_IS_SIBLING", "UNRESOLVABLE", "FETCH_FAIL"];
   console.log(`\n# 分档（n=${results.length}）`);
   for (const v of order) {
     const n = results.filter((r) => r.verdict === v).length;
