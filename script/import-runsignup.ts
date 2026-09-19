@@ -4,6 +4,7 @@ import path from "path";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../server/db";
 import { marathonEditions, marathonSources, marathons, sources } from "@shared/schema";
+import { calendarDay } from "../shared/race-date.js";
 
 const WANTED_KINDS = new Set(["marathon", "half-marathon", "ultra", "trail"]);
 
@@ -29,6 +30,24 @@ type RaceRecord = {
 function eventKey(r: RaceRecord): string {
   const date = r.date ? r.date.split("T")[0] : "unknown";
   return `${r.url}|${date}`;
+}
+
+/**
+ * The collected artifact carries the race's **local wall clock**
+ * (`"2026-07-22T18:30:00-04:00"`), so the calendar day must be taken verbatim.
+ *
+ * Parsing it into a `Date` re-reads the instant in the *server's* timezone: with
+ * a UTC+8 host, `2026-07-22T18:30:00-04:00` (= 22:30Z) becomes 2026-07-23
+ * 06:30 local and the row is stored one day late. Measured 2026-09-20: 56 of
+ * 644 runsignup rows, all evening-start US races, e.g. "Sundown Trail Race -
+ * July 22nd Edition" stored as 2026-07-23 while its own name says July 22nd.
+ *
+ * `calendarDay(…, 0)` is the runsignup rule from the shared per-source adapter:
+ * an explicit offset (or none) is wall clock and is used as-is; only a `Z`
+ * timestamp would be shifted, and runsignup does not emit those for races.
+ */
+function raceCalendarDay(raw: string | null | undefined): string | null {
+  return calendarDay(raw ?? null, 0);
 }
 
 function mapStatus(s: string | null): string | null {
@@ -141,7 +160,7 @@ async function main() {
     const state = rep.state || null;
     const locationSuffix = [city, state].filter(Boolean).join(", ");
     const baseDisplayName = locationSuffix ? `${rep.name} (${locationSuffix})` : rep.name;
-    const monthYear = rep.date ? new Date(rep.date).toISOString().slice(0, 7).replace("-", "/") : "";
+    const monthYear = rep.date ? (raceCalendarDay(rep.date) ?? "").slice(0, 7).replace("-", "/") : "";
     // NOTE: displayName collisions within a single import batch are resolved by appending month/year
     // Cross-batch or cross-import collisions are handled by ON CONFLICT DO NOTHING below
     const uniqueName = (baseDisplayName + (monthYear ? ` (${monthYear})` : "")).slice(0, 180);
@@ -191,8 +210,10 @@ async function main() {
     upsertedMarathons++;
 
     if (row) {
-      const raceDate = rep.date ? new Date(rep.date) : null;
-      const raceYear = raceDate ? raceDate.getFullYear() : null;
+      // Verbatim local calendar day (see raceCalendarDay): never via `new Date`,
+      // which shifted every evening-start US race one day later.
+      const raceDate = raceCalendarDay(rep.date);
+      const raceYear = raceDate ? Number(raceDate.slice(0, 4)) : null;
 
       const statuses = uniqueGroup.map((r) => mapStatus(r.registration_status)).filter(Boolean);
       let registrationStatus: string | null = null;
