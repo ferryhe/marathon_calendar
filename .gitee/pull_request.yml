@@ -77,8 +77,16 @@ jobs:
         run: |
           set +e
           npx --no-install tsc --noEmit -p tsconfig.scripts.json > /tmp/tsc-scripts.log 2>&1
+          tsc_exit=$?
           n=$(grep -c "error TS" /tmp/tsc-scripts.log)
-          echo "script/ type errors: $n (baseline $SCRIPT_ERROR_BASELINE)"
+          echo "script/ type errors: $n (baseline $SCRIPT_ERROR_BASELINE), tsc exit=$tsc_exit"
+          # tsc could not even run (missing package, broken invocation): counting
+          # zero errors would report a false "no regression".
+          if [ "$tsc_exit" -ne 0 ] && [ "$n" -eq 0 ]; then
+            echo "::error::tsc did not run (exit=$tsc_exit) yet reported no errors"
+            cat /tmp/tsc-scripts.log
+            exit 1
+          fi
           if [ "$n" -gt "$SCRIPT_ERROR_BASELINE" ]; then
             echo "::error::script/ type errors grew from $SCRIPT_ERROR_BASELINE to $n"
             cat /tmp/tsc-scripts.log

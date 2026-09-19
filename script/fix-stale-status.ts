@@ -120,6 +120,7 @@ async function main() {
     if (APPLY) {
       console.log(`\n# applying...`);
       await client.query("BEGIN");
+      let applied = 0;
       try {
         for (const r of rows) {
           // Real timestamp — the previous revision stamped a hard-coded
@@ -131,19 +132,21 @@ async function main() {
               `UPDATE marathon_editions
                SET status='ended', updated_at=NOW(),
                    highlights = COALESCE(highlights,'') ||
-                     E'\n[stale-status ' || to_char(NOW(),'YYYY-MM-DD') || ': date-arithmetic flip ' ||
-                     $2 || '→ended (race_date < today)]'
+                     E'\n[stale-status ' ||
+                     to_char(NOW() AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD') ||
+                     ': date-arithmetic flip ' || $2 || '→ended (race_date < today)]'
                WHERE id=$1`,
               [r.id, r.status],
             );
             await client.query("RELEASE SAVEPOINT row_sp");
+            applied++;
           } catch (e) {
             await client.query("ROLLBACK TO SAVEPOINT row_sp");
             console.error(`  ! ${r.id}: ${(e as Error).message}`);
           }
         }
         await client.query("COMMIT");
-        console.log(`# committed (${rows.length} rows)`);
+        console.log(`# committed ${applied} row(s)${applied === rows.length ? "" : `, ${rows.length - applied} failed`}`);
       } catch (e) {
         await client.query("ROLLBACK");
         console.error(`# ROLLBACK: ${(e as Error).message}`);

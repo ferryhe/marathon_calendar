@@ -337,8 +337,9 @@ async function apply(client: PoolClient, d: Decision): Promise<void> {
     await client.query(
       `UPDATE marathon_editions
          SET publish_status='archived', updated_at=NOW(),
-             highlights = COALESCE(highlights,'') || E'\n[year-mismatch ' ||
-               to_char(NOW(), 'YYYY-MM-DD') || ': ' || COALESCE($2, 'stale') || ']'
+             highlights = COALESCE(highlights,'') ||
+               E'\n[year-mismatch ' || to_char(NOW() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') ||
+               ': ' || COALESCE($2, 'stale') || ']'
        WHERE id=$1`,
       [d.row.id],
     );
@@ -458,6 +459,13 @@ async function main() {
       await client.query("COMMIT");
       console.log(`# committed ${changed} row(s)${failedRows.length ? `, ${failedRows.length} failed` : ""}`);
       for (const f of failedRows) console.error(`  ! ${f}`);
+      // Cron callers only see the exit code: "nothing applied and something
+      // failed" must not look like success (round-2 review — the old all-or-
+      // nothing version exited 1 here). Partial failure stays 0 but is loud.
+      if (changed === 0 && failedRows.length > 0) {
+        console.error("# FAILED: no row was applied and at least one row errored");
+        process.exit(1);
+      }
     }
 
     // ---- required three-bucket report ----

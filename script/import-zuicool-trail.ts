@@ -325,7 +325,18 @@ async function upsertEvent(
     [canonical],
   );
 
-  if (SKIP_EXISTING && existing.rows[0]) return "skipped";
+  // `--skip-existing` must mean "this event already has an EDITION", not "a
+  // marathons row exists": a marathon row without an edition is a half-import
+  // (page had no year when it was first seen) and has to be retried, otherwise
+  // the gap is permanent (round-2 review, reproduced in a sandbox). The bulk
+  // pre-filter does the same join; this is the per-event gate.
+  if (SKIP_EXISTING && existing.rows[0]) {
+    const hasEdition = await pool.query<{ one: number }>(
+      "SELECT 1 AS one FROM marathon_editions WHERE marathon_id=$1 LIMIT 1",
+      [existing.rows[0].id],
+    );
+    if (hasEdition.rows[0]) return "skipped";
+  }
 
   // Also bail if a marathon with the same display name already exists under a
   // different canonical_name (e.g. nowrun-*) — that's a road-marathon row we
