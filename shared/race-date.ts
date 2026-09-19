@@ -782,18 +782,29 @@ function containerRefKeys(events: JsonLdEvent[]): Set<string> {
 }
 
 /**
- * DB-side race names are decorated: `Bob Marshall Marathon (West Yellowstone,
- * MT) (2026/07)`. Page event names are not. Without stripping, `want` never
- * equals a page name and the name branch is dead on the real call path (the
- * audit/`fix-year-mismatch` pass `marathon.name`), so the page-level URL match
- * decides — which is how a series container's start date got written.
+ * DB-side race names carry trailing decorations: `Bob Marshall Marathon (West
+ * Yellowstone, MT) (2026/07)`. Page event names carry them too, just not always
+ * the same ones (`Half Marathon (Sunday, Nov 1, 2026)`). Without stripping,
+ * `want` never equals a page name and the name branch is dead on the real call
+ * path (the audit/`fix-year-mismatch` pass `marathon.name`), so the page-level
+ * URL match decides — which is how a series container's start date got written.
+ *
+ * Only *trailing* groups that look like a place/edition marker (they contain a
+ * comma or a digit) are removed. `(Solo)`, `(ish)`, `(ONLY for those needing
+ * 6-7 hours …)` are part of the race's identity: stripping them made
+ * `Single Ultra Aquabike (Solo)` unmatchable (measured 2026-09-20).
  */
 export function stripTrackedDecorations(name: string): string {
-  const stripped = name
-    .replace(/[（(][^()（）]*[)）]/g, " ") // 城市 / 届次标记等括号组
-    .replace(/\s+/g, " ")
-    .trim();
-  return stripped || name;
+  let s = name.trim();
+  for (;;) {
+    const m = s.match(/^(.*?)\s*[（(]([^()（）]*)[)）]\s*$/);
+    if (!m) break;
+    const head = (m[1] ?? "").trim();
+    const inner = m[2] ?? "";
+    if (!head || !/[,0-9]/.test(inner)) break;
+    s = head;
+  }
+  return s || name;
 }
 
 function pickJsonLdEvent(
@@ -810,20 +821,32 @@ function pickJsonLdEvent(
   //    the page (whose container node carries the series' first day).
   if (opts.trackedName) {
     const want = normalizeName(stripTrackedDecorations(opts.trackedName));
+    const named = withDate.filter((e) => Boolean(e.name));
     let matches: JsonLdEvent[] = [];
     if (want) {
-      matches = withDate.filter((e) => e.name && normalizeName(e.name) === want);
-      if (matches.length === 0) {
-        matches = withDate.filter((e) => e.name && isTrackedNameMatch(want, normalizeName(e.name)));
-      }
+      const raw = (e: JsonLdEvent) => normalizeName(e.name as string);
+      const stripped = (e: JsonLdEvent) => normalizeName(stripTrackedDecorations(e.name as string));
+      // exact first (tracked side stripped), then the symmetric pass where the
+      // page's own "(city, year)" decoration is stripped as well, then the
+      // marker-tolerant comparison in both shapes.
+      matches = named.filter((e) => raw(e) === want);
+      if (matches.length === 0) matches = named.filter((e) => stripped(e) === want);
+      if (matches.length === 0) matches = named.filter((e) => isTrackedNameMatch(want, raw(e)));
+      if (matches.length === 0) matches = named.filter((e) => isTrackedNameMatch(want, stripped(e)));
     }
     if (matches.length > 0) {
+      // A container can share the tracked name (measured: the Rocket City page's
+      // series node *is* "Rocket City Marathon" on day 1, the real race is the
+      // same-named leaf on day 2). Prefer the leaf that carries the same name.
+      const containerKeys = containerRefKeys(events);
+      const leaves = matches.filter((e) => !looksLikeSeriesContainer(e, containerKeys, tzOffsetMinutes));
+      const pool = leaves.length > 0 ? leaves : matches;
       // Contract: matched editions that disagree on the day are refused — taking
       // matches[0] would be exactly the "first/min" behaviour this module bans.
-      if (distinctDays(matches, tzOffsetMinutes).length > 1) {
+      if (distinctDays(pool, tzOffsetMinutes).length > 1) {
         return { event: null, reason: "ambiguous_multi_edition" };
       }
-      return { event: matches[0], reason: "ok", matchedBy: "name" };
+      return { event: pool[0], reason: "ok", matchedBy: "name" };
     }
   }
 

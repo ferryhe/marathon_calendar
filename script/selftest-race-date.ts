@@ -920,6 +920,112 @@ console.log("\n## 15. runsignup series pages: the container's first day is not t
   console.log(`  → Dexter HALF MARATHON ${show(dexterHalf)}`);
   check("15. HALF MARATHON → 2027-06-06 (not the Saturday 5K day)", dexterHalf.date === "2027-06-06", show(dexterHalf));
 
+  // --- symmetric decoration + container/leaf sharing a name (2026-09-20) ------
+  const BG_URL = "https://runsignup.com/Race/KY/BowlingGreen/bg262";
+  const bg = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "bgKIDS (Saturday, October 31st - 4pm)",
+    startDate: "2026-10-31",
+    url: BG_URL,
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Half Marathon (Sunday, Nov 1, 2026)",
+    startDate: "2026-11-01",
+    url: BG_URL,
+  })}</body></html>`;
+  const bgHalf = resolveRunsignupStartDate(bg, {
+    trackedName: "Half Marathon (Bowling Green, KY) (2026/11)",
+    eventUrl: BG_URL,
+  });
+  console.log(`  → 页面名同样带装饰 ${show(bgHalf)}`);
+  check("15. page-side decoration is stripped too → 2026-11-01", bgHalf.date === "2026-11-01", show(bgHalf));
+
+  const UT_URL2 = "https://runsignup.com/Race/VA/Huddleston/UltraTriathlon";
+  const ut = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Smith Mountain Lake Ultra Triathlon",
+    startDate: "2026-09-11",
+    url: UT_URL2,
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Double Ultra Aquabike (Solo)",
+    startDate: "2026-09-11",
+    superEvent: { "@type": "SportsEvent", name: "Smith Mountain Lake Ultra Triathlon", url: UT_URL2 },
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Single Ultra Aquabike (Solo)",
+    startDate: "2026-09-12",
+    superEvent: { "@type": "SportsEvent", name: "Smith Mountain Lake Ultra Triathlon", url: UT_URL2 },
+  })}</body></html>`;
+  const solo = resolveRunsignupStartDate(ut, {
+    trackedName: "Single Ultra Aquabike (Solo) (Huddleston, VA) (2026/09)",
+    eventUrl: UT_URL2,
+  });
+  console.log(`  → Single Ultra Aquabike (Solo) ${show(solo)}`);
+  check("15. a qualifying suffix like (Solo) is NOT stripped → 2026-09-12", solo.date === "2026-09-12", show(solo));
+
+  const RC_URL2 = "https://runsignup.com/Race/AL/Huntsville/RocketCity";
+  const rc = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Rocket City Marathon", // container carries the tracked name, day 1
+    startDate: "2026-12-12",
+    url: RC_URL2,
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Rocket City Marathon", // …the real race is this same-named leaf
+    startDate: "2026-12-13",
+    superEvent: { "@type": "SportsEvent", name: "Rocket City Marathon", url: RC_URL2 },
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Rocket City 5K",
+    startDate: "2026-12-12",
+    superEvent: { "@type": "SportsEvent", name: "Rocket City Marathon", url: RC_URL2 },
+  })}</body></html>`;
+  const rcM = resolveRunsignupStartDate(rc, {
+    trackedName: "Rocket City Marathon (Huntsville, AL) (2026/12)",
+    eventUrl: RC_URL2,
+  });
+  console.log(`  → Rocket City Marathon (container shares the name) ${show(rcM)}`);
+  check("15. same-named container loses to the leaf → 2026-12-13", rcM.date === "2026-12-13", show(rcM));
+
+  const early = resolveRunsignupStartDate(rc, {
+    trackedName:
+      "Early Start Marathon (ONLY for those needing 6-7 hours to complete the marathon) (Huntsville, AL) (2026/12)",
+    eventUrl: RC_URL2,
+  });
+  check("15. unknown tracked name on that page still refuses", early.date === null, show(early));
+
+  const early2 = resolveRunsignupStartDate(
+    `<html><body>${ld({
+      "@context": "http://schema.org",
+      "@type": "SportsEvent",
+      name: "Rocket City Marathon",
+      startDate: "2026-12-12",
+      url: RC_URL2,
+    })}${ld({
+      "@context": "http://schema.org",
+      "@type": "SportsEvent",
+      name: "Early Start Marathon (ONLY for those needing 6-7 hours to complete the marathon)",
+      startDate: "2026-12-13",
+      superEvent: { "@type": "SportsEvent", name: "Rocket City Marathon", url: RC_URL2 },
+    })}</body></html>`,
+    {
+      trackedName:
+        "Early Start Marathon (ONLY for those needing 6-7 hours to complete the marathon) (Huntsville, AL) (2026/12)",
+      eventUrl: RC_URL2,
+    },
+  );
+  console.log(`  → Early Start Marathon ${show(early2)}`);
+  check("15. long qualifying suffix + trailing decoration → 2026-12-13", early2.date === "2026-12-13", show(early2));
+
   // No regression: a one-day page still resolves through the URL.
   const singleDay = `<html><body>${ld({
     "@context": "http://schema.org",
