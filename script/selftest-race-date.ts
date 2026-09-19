@@ -423,17 +423,53 @@ console.log("\n## 12. review round 1 counter-examples: anchors, ambiguity, sibli
     zuicoolPage({ title: "某马拉松", desc: "某某马拉松将于2026年9月1日开始报名，11月8日举办。" }),
   );
   console.log(`  → 将于…开始报名 ${show(reg1)}`);
-  check("12a. 将于…开始报名 must not be read as the race date", reg1.date !== "2026-09-01", show(reg1));
+  check(
+    "12a. 报名启用日不当作比赛日（无年份可依 → 明确拒答，而非猜一个）",
+    reg1.date === null && reg1.reason === "no_year",
+    show(reg1),
+  );
+  // Same sentence with the page field present — the shape 120/120 live rows have.
+  const reg1b = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "某马拉松",
+      desc: "某某马拉松将于2026年9月1日开始报名，11月8日举办。",
+      startDatetimeLoc: "2026.11.08",
+    }),
+  );
+  console.log(`  → 将于…开始报名 + 页面字段 ${show(reg1b)}`);
+  check("12a'. 有页面字段时必须取真正的比赛日 2026-11-08", reg1b.date === "2026-11-08", show(reg1b));
 
   const reg2 = resolveZuicoolRaceDate(
     zuicoolPage({ title: "某越野赛", desc: "某某越野赛定于2026年9月1日9:30开启报名。" }),
   );
-  check("12b. 定于…开启报名 must not be read as the race date", reg2.date !== "2026-09-01", show(reg2));
+  check(
+    "12b. 定于…开启报名不当作比赛日（无年份可依 → 明确拒答）",
+    reg2.date === null && reg2.reason === "no_year",
+    show(reg2),
+  );
 
   const pickup = resolveZuicoolRaceDate(
     zuicoolPage({ title: "某赛", desc: "某某赛领物定于2026年11月6日，比赛11月8日举行。" }),
   );
-  check("12c. 领物定于… must not be read as the race date", pickup.date !== "2026-11-06", show(pickup));
+  check(
+    "12c. 领物定于…不当作比赛日（无年份可依 → 明确拒答）",
+    pickup.date === null && pickup.reason === "no_year",
+    show(pickup),
+  );
+  // With the page field: the *race* day 11月8日 must win over the pick-up day.
+  const pickupField = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "某赛",
+      desc: "某某赛领物定于2026年11月6日，比赛11月8日举行。",
+      startDatetimeLoc: "2026.11.08",
+    }),
+  );
+  console.log(`  → 领物 + 页面字段 ${show(pickupField)}`);
+  check(
+    "12c'. 有页面字段时取比赛日 2026-11-08 而不是领物日 11月6日",
+    pickupField.date === "2026-11-08",
+    show(pickupField),
+  );
 
   // …but the anchored form stays trusted when it really is the race.
   const ok = resolveZuicoolRaceDate(
@@ -583,6 +619,9 @@ console.log("\n## 13. real rows: sub-event wording must not be mistaken for a re
     }),
   );
   check("13c. 发枪时间将调整为… keeps the race day", gunTimeEdit.date === "2026-04-26", show(gunTimeEdit));
+  // …and it must be the ordinary path, not "a reschedule clause that happened to
+  // point at the same day" (the previous fixture passed by coincidence).
+  check("13c'. 发枪时间句不得被当成改期（reason = ok）", gunTimeEdit.reason === "ok", show(gunTimeEdit));
 
   const postponedNoDate = resolveZuicoolRaceDate(
     zuicoolPage({
@@ -607,7 +646,101 @@ console.log("\n## 13. real rows: sub-event wording must not be mistaken for a re
   );
   check("13e. 延期主办，另行通知 must not keep the cancelled day", postponedElsewhere.date !== "2026-05-17", show(postponedElsewhere));
   check("13e. reason = rescheduled_unparsed", postponedElsewhere.reason === "rescheduled_unparsed", show(postponedElsewhere));
+
+  // --- 13f–13g: fixtures that ACTUALLY exercise the sub-event guard ------------
+  // (13a/13b only contained "调整为70公里"/"调整为8:30" — no date at all, so the
+  //  guard was never reached and a broken guard would still pass. Round-2 review.)
+  const groupWithDate = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "2026中岳嵩山越野赛",
+      desc:
+        "***调整提醒：因近期持续降雨影响赛道，组别调整为11月20日举行，相关改退方案详见组委会公告。" +
+        "2026中岳嵩山越野赛定于10月31日-11月1日举行，先报先得，额满即止！",
+      startDatetimeLoc: "2026.10.31",
+    }),
+  );
+  console.log(`  → 组别调整为11月20日举行 ${show(groupWithDate)}`);
+  check(
+    "13f. 组别调整为<日期> 不得顶掉比赛日（守卫必须真的生效）",
+    groupWithDate.date === "2026-10-31",
+    show(groupWithDate),
+  );
+
+  const gunOtherDay = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "2026中国山地越野公开赛（秦皇岛抚宁站）",
+      desc:
+        "***起跑时间调整提示：15公里体验组、5公里亲子休闲组，发枪时间将调整为 2026年4月25日上午9:00。" +
+        "2026中国山地越野公开赛（秦皇岛抚宁站）定于4月26日举办。",
+      startDatetimeLoc: "2026.04.26",
+    }),
+  );
+  console.log(`  → 发枪时间将调整为前一天 ${show(gunOtherDay)}`);
+  check(
+    "13g. 发枪日≠比赛日时必须取比赛日（助词不得击穿守卫）",
+    gunOtherDay.date === "2026-04-26" && gunOtherDay.reason === "ok",
+    show(gunOtherDay),
+  );
+
+  // --- 13h–13k: regressions reproduced in review round 2 ----------------------
+  const raceTimeResched = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "某赛",
+      desc: "原定于11月9日举办，后因故比赛时间延期至11月23日举行。",
+      startDatetimeLoc: "2026.11.23",
+    }),
+  );
+  console.log(`  → 比赛时间延期至11月23日 ${show(raceTimeResched)}`);
+  check(
+    "13h. 「比赛时间延期至…」是比赛改期（不得被子事件守卫误杀）",
+    raceTimeResched.date === "2026-11-23" && raceTimeResched.reason === "rescheduled",
+    show(raceTimeResched),
+  );
+
+  const laterParagraph = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "环四姑娘山超级越野跑",
+      desc:
+        "“云端约会”2026凯乐石第十一届环四姑娘山超级越野跑定于11月4日-11月7日举办，设快乐牛仔35、梦想东壁100等组别；" +
+        "报到截止时间2026年11月6日20:00，出发时间2026年11月7日07:30。7日19:30，颁奖仪式调整为11月18日举行。",
+      startDatetimeLoc: "2026.11.04",
+    }),
+  );
+  console.log(`  → 后段颁奖仪式调整为11月18日 ${show(laterParagraph)}`);
+  check(
+    "13i. 后段句子的「调整为<日期>」不得顶掉首句比赛日",
+    laterParagraph.date === "2026-11-04",
+    show(laterParagraph),
+  );
+
+  const historyResched = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "某赛",
+      desc: "本赛事2020年因故延期举行，现定于2026年12月6日举办，报名另行通知。",
+      startDatetimeLoc: "2026.12.06",
+    }),
+  );
+  console.log(`  → 历史延期 + 现定于2026年12月6日 ${show(historyResched)}`);
+  check(
+    "13j. 正文已写明新日期时不得拒答（读得出来就不是猜测）",
+    historyResched.date === "2026-12-06",
+    show(historyResched),
+  );
+
+  const launchCeremony = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "某赛",
+      desc: "某某赛定于2026年9月1日举行报名启动仪式，具体比赛日期待定。",
+    }),
+  );
+  console.log(`  → 定于2026年9月1日举行报名启动仪式 ${show(launchCeremony)}`);
+  check(
+    "13k. 「举行报名启动仪式」不是比赛日（被锚点否决后不得从普通回退复活）",
+    launchCeremony.date !== "2026-09-01",
+    show(launchCeremony),
+  );
 }
+
 
 // ---------------------------------------------------------------------------
 console.log(`\n# ${passed} assertion(s) passed, ${failures.length} failed`);

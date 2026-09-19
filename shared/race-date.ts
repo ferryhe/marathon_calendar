@@ -304,11 +304,17 @@ const RESCHEDULE_MENTION = /(延期|改期|推迟|顺延|延后|调整为|改为
 
 /**
  * Wording that turns the same keywords into something else:
- *   "组别调整为70公里", "起跑时间从7:30调整为8:30", "报名延期至…".
+ *   "组别调整为11月20日举行", "发枪时间将调整为2026年4月25日", "报名延期至…".
  * Checked against the 12 characters preceding the keyword.
+ *
+ * Two traps this had to avoid (round-2 review, both reproduced):
+ *   - a `$`-anchored noun ("…时间$") missed "发枪时间**将**调整为…" (助词 broke it)
+ *     and, worse, vetoed the legitimate "比赛**时间**延期至…" — so 时间 is not a
+ *     noun here and up to 5 characters may sit between noun and keyword.
+ *   - 比赛/赛事/时间 alone describe the race itself and must NOT veto.
  */
 const RESCHEDULE_SUB_EVENT_BEFORE =
-  /(报名|缴费|退费|早鸟|优惠|折扣|截止|报到|领物|领取|发枪|起跑|关门|里程|距离|组别|项目|费用|价格|名额|方式|积分|时间)$/;
+  /(发枪|起跑|出发|报到|领物|领取|关门|抽签|摇号|颁奖|仪式|报名|缴费|退费|截止|组别|里程|距离|费用|价格|名额|积分|项目|方式)[^。，；;！？\n]{0,5}$/;
 
 /** Verbs that show the clause really is about the race being postponed. */
 const RESCHEDULE_RACE_TAIL = /(举行|举办|主办|开赛|开跑|进行|另行|择期|待定|通知|公告|下月|下半年)/;
@@ -346,6 +352,45 @@ function firstRaceRescheduleMention(text: string): number | null {
   return null;
 }
 
+/**
+ * Month/day keys (`M-D`) that appear only inside *sub-event* clauses, so the
+ * ordinary date fallbacks must not pick them up. Two sources:
+ *   (a) anchored clauses that a sub-event noun owns — "领物定于11月6日" /
+ *       "定于2026年9月1日举行报名启动仪式";
+ *   (b) reschedule-shaped clauses that are really sub-event edits —
+ *       "发枪时间将调整为2026年4月25日" (real row zuicool-92156).
+ * Without this, the date is vetoed in one path and silently re-accepted by the
+ * next (round-2 review: 12c'/13g were reproduced failing).
+ */
+function subEventMonthDayKeys(text: string): Set<string> {
+  const keys = new Set<string>();
+  const note = (month: number | string, day: number | string) => {
+    keys.add(`${+month}-${+day}`);
+  };
+  const anchoredPatterns: Array<[RegExp, number, number]> = [
+    [RE_ANCHORED_FULL, 2, 3],
+    [RE_ANCHORED_MONTH_DAY, 1, 2],
+  ];
+  for (const [src, mi, di] of anchoredPatterns) {
+    const re = new RegExp(src.source, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) {
+      if (!anchoredLooksNonRace(text, m.index, m.index + m[0].length)) continue;
+      note(m[mi], m[di]);
+    }
+  }
+  for (const pattern of RESCHEDULE_PATTERNS) {
+    const re = new RegExp(pattern.source, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) {
+      const before = text.slice(Math.max(0, m.index - 12), m.index);
+      if (!RESCHEDULE_SUB_EVENT_BEFORE.test(before)) continue;
+      note(m[2], m[3]);
+    }
+  }
+  return keys;
+}
+
 function evidenceAround(text: string, index: number, length: number): string {
   return text.slice(Math.max(0, index - 12), Math.min(text.length, index + length + 12)).trim();
 }
@@ -354,10 +399,19 @@ function findFullYearDate(text: string): DateMatch | null {
   // Anchored `定于/将于/拟于 YYYY年M月D日` first — but a vetoed anchored clause
   // (registration / packet pickup / check-in) must not win, and we keep scanning
   // for the next candidate rather than trusting the first hit.
+  //
+  // A vetoed anchored date is remembered: the plain fallback below would
+  // otherwise re-accept the very same date ("定于2026年9月1日举行报名启动仪式"
+  // — round-2 review, reproduced).
+  const subEventDays = subEventMonthDayKeys(text);
+  const vetoed = new Set<string>();
   const anchoredRe = new RegExp(RE_ANCHORED_FULL.source, "g");
   let a: RegExpExecArray | null;
   while ((a = anchoredRe.exec(text))) {
-    if (anchoredLooksNonRace(text, a.index, a.index + a[0].length)) continue;
+    if (anchoredLooksNonRace(text, a.index, a.index + a[0].length)) {
+      vetoed.add(`${+a[1]}-${+a[2]}-${+a[3]}`);
+      continue;
+    }
     return {
       year: +a[1],
       month: +a[2],
@@ -371,6 +425,8 @@ function findFullYearDate(text: string): DateMatch | null {
   const re = new RegExp(RE_PLAIN_FULL.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
+    if (vetoed.has(`${+m[1]}-${+m[2]}-${+m[3]}`)) continue;
+    if (subEventDays.has(`${+m[2]}-${+m[3]}`)) continue;
     if (looksNonRaceContext(text, m.index, m.index + m[0].length)) continue;
     return {
       year: +m[1],
@@ -383,10 +439,18 @@ function findFullYearDate(text: string): DateMatch | null {
 }
 
 function findMonthDay(text: string, anchoredOnly: boolean): DateMatch | null {
+  // Same vetoed-key discipline as findFullYearDate: a month/day vetoed inside an
+  // anchored clause must not be re-accepted by the plain fallback (real shape
+  // "领物定于11月6日，比赛11月8日举行" — the pick-up day must lose to 11月8日).
+  const subEventDays = subEventMonthDayKeys(text);
+  const vetoed = new Set<string>();
   const anchoredRe = new RegExp(RE_ANCHORED_MONTH_DAY.source, "g");
   let a: RegExpExecArray | null;
   while ((a = anchoredRe.exec(text))) {
-    if (anchoredLooksNonRace(text, a.index, a.index + a[0].length)) continue;
+    if (anchoredLooksNonRace(text, a.index, a.index + a[0].length)) {
+      vetoed.add(`${+a[1]}-${+a[2]}`);
+      continue;
+    }
     return {
       month: +a[1],
       day: +a[2],
@@ -397,6 +461,8 @@ function findMonthDay(text: string, anchoredOnly: boolean): DateMatch | null {
   const re = new RegExp(RE_PLAIN_MONTH_DAY.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
+    if (vetoed.has(`${+m[1]}-${+m[2]}`)) continue;
+    if (subEventDays.has(`${+m[1]}-${+m[2]}`)) continue;
     if (looksNonRaceContext(text, m.index, m.index + m[0].length)) continue;
     return {
       month: +m[1],
@@ -412,17 +478,29 @@ interface RescheduleMatch extends DateMatch {
 }
 
 export function findReschedule(text: string): RescheduleMatch | null {
-  for (const pattern of RESCHEDULE_PATTERNS) {
-    const hit = scanReschedule(text, pattern);
+  // The `调整为|改为|更改为` shape is ambiguous — a later paragraph can carry
+  // "颁奖仪式调整为11月18日举行" and would otherwise override the lead sentence's
+  // race day (round-2 review, reproduced). It is therefore trusted inside the
+  // first sentence only, exactly like the weak month/day matches. The
+  // unambiguous 延期/改期/推迟/顺延/延后 wording is still scanned everywhere.
+  const firstSentence = firstSentenceEnd(text);
+  for (let i = 0; i < RESCHEDULE_PATTERNS.length; i++) {
+    const limit = i === 1 ? firstSentence : Number.POSITIVE_INFINITY;
+    const hit = scanReschedule(text, RESCHEDULE_PATTERNS[i], limit);
     if (hit) return hit;
   }
   return null;
 }
 
-function scanReschedule(text: string, pattern: RegExp): RescheduleMatch | null {
+function scanReschedule(
+  text: string,
+  pattern: RegExp,
+  maxIndex: number = Number.POSITIVE_INFINITY,
+): RescheduleMatch | null {
   const re = new RegExp(pattern.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
+    if (m.index >= maxIndex) return null;
     const before = text.slice(Math.max(0, m.index - 12), m.index);
     // "报名延期至…" / "缴费截止推迟到…" are registration windows, and
     // "起跑时间从7:30调整为8:30" / "组别调整为70公里" are sub-event edits — none of
@@ -765,6 +843,29 @@ export function resolveZuicoolRaceDate(html: string): PageDateResult {
   // date instead of reporting the cancelled one ("…因故延期。" / "延期至下月举行").
   const reschedMention = firstRaceRescheduleMention(desc);
   if (reschedMention !== null && reschedMention < firstSentenceEnd(desc)) {
+    // …unless the copy states the NEW date explicitly *after* the mention
+    // ("因故延期举行，现定于2026年12月6日举办"): reading that is not guessing.
+    // A date stated before the mention is the cancelled one and stays refused.
+    const scan = new RegExp(RE_PLAIN_FULL.source, "g");
+    let cand: RegExpExecArray | null;
+    while ((cand = scan.exec(desc))) {
+      if (cand.index <= reschedMention) continue;
+      // "…延期公告：原定于2026年5月17日主办…" — a date introduced by 原定于 is the
+      // CANCELLED one, not a newly announced date (round-2 review, reproduced).
+      if (/(原定|原计划|本应|本该|原拟)[于在]?$/.test(desc.slice(Math.max(0, cand.index - 6), cand.index)))
+        continue;
+      if (looksNonRaceContext(desc, cand.index, cand.index + cand[0].length)) continue;
+      const iso = isoDate(+cand[1], +cand[2], +cand[3]);
+      if (!iso) continue;
+      return {
+        year: +cand[1],
+        date: iso,
+        source: "desc_year",
+        evidence: evidenceAround(desc, cand.index, cand[0].length),
+        reason: "rescheduled",
+        multiDay,
+      };
+    }
     return {
       year: null,
       date: null,
