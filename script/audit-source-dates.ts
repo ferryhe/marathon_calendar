@@ -18,8 +18,9 @@
  *   OK                    库里的日期就是源站该届次的日期
  *   TZ_SHIFT              页面本地日 = 库里日 ±1 天（典型时区换算错误，最要紧的一类）
  *   DATE_DIFF             同为一年，天数差得更多（改期 / 页面改日 / 届次选错）
- *   STALE_EDITION         页面已翻到下一届（相差 >300 天）—— 属采集新鲜度，不算提取错
- *   OLD_EDITION_RETAINED  页面已翻届，且**新届已经建好入库**—— 旧届留历史，不是错（2026-09-20 加）
+ *   STALE_EDITION         页面已翻届（相差 >300 天）且**新届还没入库** —— 采集还没跟上，不算提取错
+ *   OLD_EDITION_RETAINED  页面已翻届，且**新届已经建好入库** —— 旧届留历史，不是错（2026-09-20 加；
+ *                         实测 n=700 里 53 条原 STALE_EDITION + 2 条原 YEAR_DIFF 归入此档）
  *   YEAR_DIFF             年份不一致
  *   MULTI_AMBIG           页面多场次，且按赛事名/URL 都定位不到这一届 —— 拒绝猜（原样报出）
  *   DB_DAY_IS_SIBLING     按名定位到了这一届，但**库里那天属于同页别的场次**（旧名 MULTI_NO_MATCH
@@ -155,9 +156,11 @@ function classify(row: Row, res: PageDateResult | null, pageDays: string[]): Ver
     return "OK";
   }
   // 页面已翻届，且新届**已经建好入库**（status/publish 都上页面了）→ 旧届留历史，
-  // 拿旧届去比新届页面必然不符，这不是错。实测：Diablo Trail Run（2026-09-06 → 页面
-  // 2027-05-23，差 259 天 < 300）、Hall of Fame Half（2026-08-23 → 2027-04-24）。
-  // 放在 STALE/YEAR_DIFF 之前，否则这两条会永远挂在告警里。
+  // 拿旧届去比新届页面必然不符，这不是错。实测：n=700 里 55 条归入此档
+  // （53 条原 STALE_EDITION：页面已翻到下一届且新届已入库；2 条原 YEAR_DIFF：
+  //  Diablo Trail Run 2026-09-06 → 页面 2027-05-23 差 259 天、Hall of Fame Half 差 244 天）。
+  // 放在 STALE/YEAR_DIFF 之前，否则这些行会永远挂在告警里；而「页面已翻届但新届还没建」
+  // 的行仍会落到下面的 STALE_EDITION —— 那才是真正需要跟进的采集新鲜度。
   if (row.newer_published_year && res.year && res.year > row.year) return "OLD_EDITION_RETAINED";
   // Order matters: a page that has rolled over to the NEXT edition shows a
   // different year, so checking YEAR_DIFF first swallowed every "rolled over"
