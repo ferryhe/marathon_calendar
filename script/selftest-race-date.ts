@@ -313,7 +313,7 @@ console.log("\n## 9. worldsmarathons / wmm-official: nothing parseable → TBA (
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n## 11. zuicool: weak (unanchored) year matches must not win — real dry-run regressions");
+console.log("\n## 10. zuicool: weak (unanchored) year matches must not win — real dry-run regressions");
 {
   // zuicool-37212: history mention "从2020年5月24日首次开展" is not this edition.
   const r1 = resolveZuicoolRaceDate(
@@ -324,7 +324,7 @@ console.log("\n## 11. zuicool: weak (unanchored) year matches must not win — r
     }),
   );
   console.log(`  → zuicool-37212 ${show(r1)}`);
-  check("11a. history year (2020) ignored → 2026-05-31", r1.date === "2026-05-31", show(r1));
+  check("10a. history year (2020) ignored → 2026-05-31", r1.date === "2026-05-31", show(r1));
 
   // zuicool-52970: age bounds inside parentheses are not the race date.
   const r2 = resolveZuicoolRaceDate(
@@ -335,7 +335,7 @@ console.log("\n## 11. zuicool: weak (unanchored) year matches must not win — r
     }),
   );
   console.log(`  → zuicool-52970 ${show(r2)}`);
-  check("11b. birth-date range (2010年…) ignored → 2026-04-26", r2.date === "2026-04-26", show(r2));
+  check("10b. birth-date range (2010年…) ignored → 2026-04-26", r2.date === "2026-04-26", show(r2));
 
   // 峨眉山: "2025年12月19日9:30开启报名" is the registration window.
   const r3 = resolveZuicoolRaceDate(
@@ -346,7 +346,7 @@ console.log("\n## 11. zuicool: weak (unanchored) year matches must not win — r
     }),
   );
   console.log(`  → TN100 ${show(r3)}`);
-  check("11c. registration-opening year ignored → 2026-04-18", r3.date === "2026-04-18", show(r3));
+  check("10c. registration-opening year ignored → 2026-04-18", r3.date === "2026-04-18", show(r3));
 
   // zuicool-88139: birth-date bounds in the group detail paragraphs.
   const r4 = resolveZuicoolRaceDate(
@@ -357,7 +357,7 @@ console.log("\n## 11. zuicool: weak (unanchored) year matches must not win — r
     }),
   );
   console.log(`  → zuicool-88139 ${show(r4)}`);
-  check("11d. group birth bounds ignored → 2025-10-18", r4.date === "2025-10-18", show(r4));
+  check("10d. group birth bounds ignored → 2025-10-18", r4.date === "2025-10-18", show(r4));
 
   // 11e. Still accepts the legitimate unanchored forms (no 定于).
   const r5 = resolveZuicoolRaceDate(
@@ -367,7 +367,7 @@ console.log("\n## 11. zuicool: weak (unanchored) year matches must not win — r
       startDatetimeLoc: "2026.12.06",
     }),
   );
-  check("11e. year-first race sentence still parsed as desc_year", r5.date === "2026-12-06" && r5.source === "desc_year", show(r5));
+  check("10e. year-first race sentence still parsed as desc_year", r5.date === "2026-12-06" && r5.source === "desc_year", show(r5));
 
   // zuicool-38342: age bands in the group breakdown ("2017年4月26日-2018年4月26日出生").
   const r6 = resolveZuicoolRaceDate(
@@ -378,7 +378,7 @@ console.log("\n## 11. zuicool: weak (unanchored) year matches must not win — r
     }),
   );
   console.log(`  → zuicool-38342 ${show(r6)}`);
-  check("11f. age-band years (2017年…) ignored → 2026-04-26", r6.date === "2026-04-26", show(r6));
+  check("10f. age-band years (2017年…) ignored → 2026-04-26", r6.date === "2026-04-26", show(r6));
 
   // zuicool-48442: sub-event timestamps in the later paragraphs
   // ("报到截止时间2026年11月6日20:00") must not beat the lead sentence's first day.
@@ -390,18 +390,18 @@ console.log("\n## 11. zuicool: weak (unanchored) year matches must not win — r
     }),
   );
   console.log(`  → zuicool-48442 ${show(r7)}`);
-  check("11g. check-in/start/cut-off times ignored → 2026-11-04", r7.date === "2026-11-04", show(r7));
+  check("10g. check-in/start/cut-off times ignored → 2026-11-04", r7.date === "2026-11-04", show(r7));
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n## 12. zuicool page field extraction / guards");
+console.log("\n## 11. zuicool page field extraction / guards");
 {
   const meta = extractZuicoolStartDatetime(
     zuicoolPage({ title: "x", desc: "y", startDatetimeLoc: "2026.01.02" }),
   );
-  check("12. start_datetime-loc parses YYYY.MM.DD", meta?.full === "2026-01-02", JSON.stringify(meta));
+  check("11. start_datetime-loc parses YYYY.MM.DD", meta?.full === "2026-01-02", JSON.stringify(meta));
   check(
-    "12b. missing field → null",
+    "11b. missing field → null",
     extractZuicoolStartDatetime(zuicoolPage({ title: "x", desc: "定于10月1日" })) === null,
   );
   const html = zuicoolPage({
@@ -409,8 +409,204 @@ console.log("\n## 12. zuicool page field extraction / guards");
     desc: "本赛事信息待更新，请关注后续公告。",
   });
   const r = resolveZuicoolRaceDate(html);
-  check("12c. no date anywhere → no_year", r.date === null && r.reason === "no_year", show(r));
-  check("12d. impossible day rejected", calendarDay("2025-02-30", 0) === null);
+  check("11c. no date anywhere → no_year", r.date === null && r.reason === "no_year", show(r));
+  check("11d. impossible day rejected", calendarDay("2025-02-30", 0) === null);
+}
+
+// ---------------------------------------------------------------------------
+console.log("\n## 12. review round 1 counter-examples: anchors, ambiguity, siblings, wording");
+{
+  // --- 12a–12c: an anchored `定于/将于` clause is NOT automatically the race ---
+  // Regression class: the guards used to apply only to the unanchored form, so
+  // "定于2026年9月1日9:30开启报名" was stored as the race date.
+  const reg1 = resolveZuicoolRaceDate(
+    zuicoolPage({ title: "某马拉松", desc: "某某马拉松将于2026年9月1日开始报名，11月8日举办。" }),
+  );
+  console.log(`  → 将于…开始报名 ${show(reg1)}`);
+  check("12a. 将于…开始报名 must not be read as the race date", reg1.date !== "2026-09-01", show(reg1));
+
+  const reg2 = resolveZuicoolRaceDate(
+    zuicoolPage({ title: "某越野赛", desc: "某某越野赛定于2026年9月1日9:30开启报名。" }),
+  );
+  check("12b. 定于…开启报名 must not be read as the race date", reg2.date !== "2026-09-01", show(reg2));
+
+  const pickup = resolveZuicoolRaceDate(
+    zuicoolPage({ title: "某赛", desc: "某某赛领物定于2026年11月6日，比赛11月8日举行。" }),
+  );
+  check("12c. 领物定于… must not be read as the race date", pickup.date !== "2026-11-06", show(pickup));
+
+  // …but the anchored form stays trusted when it really is the race.
+  const ok = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "某越野赛",
+      desc: "某越野赛定于10月18日10:00-16:00举办，即日起-9月18日开放报名！",
+      startDatetimeLoc: "2026.10.18",
+    }),
+  );
+  console.log(`  → 定于…举办（后接开放报名）${show(ok)}`);
+  check("12d. legit 定于…举办 is still accepted", ok.date === "2026-10-18", show(ok));
+
+  // --- 12e: every reschedule wording the sources use --------------------------
+  const wordings: Array<[string, string]> = [
+    ["延期", "原定于11月9日举办，现延期至11月23日举行"],
+    ["改期", "原定于11月9日举办，现改期至11月23日举行"],
+    ["推迟", "原定于11月9日举办，现推迟到11月23日举行"],
+    ["顺延", "原定于11月9日举办，现顺延至11月23日举行"],
+    ["延后", "原定于11月9日举办，现延后至11月23日举行"],
+    ["调整为", "原定于11月9日举办，现调整为11月23日举行"],
+    ["改为", "原定于11月9日举办，现改为11月23日举行"],
+    ["更改为", "原定于11月9日举办，现更改为11月23日举行"],
+  ];
+  for (const [kw, desc] of wordings) {
+    const r = resolveZuicoolRaceDate(zuicoolPage({ title: "某赛", desc, startDatetimeLoc: "2026.11.23" }));
+    console.log(`  → ${kw} ${show(r)}`);
+    check(`12e. 「${kw}」takes the new date 2026-11-23`, r.date === "2026-11-23", show(r));
+    check(`12e. 「${kw}」reason = rescheduled`, r.reason === "rescheduled", show(r));
+  }
+
+  // --- 12f: a reschedule whose new date cannot be read ------------------------
+  const unparsed = resolveZuicoolRaceDate(
+    zuicoolPage({ title: "某赛", desc: "原定于11月9日举办，因故延期。", startDatetimeLoc: "2026.11.09" }),
+  );
+  console.log(`  → 延期但无新日期 ${show(unparsed)}`);
+  check("12f. never falls back to the cancelled date", unparsed.date !== "2026-11-09", show(unparsed));
+  check("12f. reason = rescheduled_unparsed", unparsed.reason === "rescheduled_unparsed", show(unparsed));
+
+  // --- 12g: a registration deadline is not a reschedule -----------------------
+  const regDeadline = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "某赛",
+      desc: "第81期定于5月31日7:00开跑；报名延期至10月10日23:59。",
+      startDatetimeLoc: "2026.05.31",
+    }),
+  );
+  check("12g. 报名延期至… leaves the race date alone", regDeadline.date === "2026-05-31", show(regDeadline));
+
+  // --- 12h/12i: a race verb after the date beats a later 报名 mention --------
+  const verb = resolveZuicoolRaceDate(
+    zuicoolPage({ title: "某赛", desc: "某某马拉松2026年12月6日在上海开跑，报名截止11月20日。" }),
+  );
+  console.log(`  → 开跑+报名截止 ${show(verb)}`);
+  check("12h. race day kept when a deadline follows in the same window", verb.date === "2026-12-06", show(verb));
+
+  const staleField = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "某赛",
+      desc: "某某赛2026年12月6日举办，报名截止12月1日。",
+      startDatetimeLoc: "2025.12.20", // stale page field must not silently win
+    }),
+  );
+  check("12i. explicit copy year beats a stale page field", staleField.date === "2026-12-06", show(staleField));
+
+  // --- 12j: impossible date in the copy is reported, not silently patched -----
+  const impossible = resolveZuicoolRaceDate(
+    zuicoolPage({ title: "某赛", desc: "某某赛定于2026年2月30日举办。", startDatetimeLoc: "2027.03.15" }),
+  );
+  console.log(`  → 2月30日 ${show(impossible)}`);
+  check("12j. impossible day is not replaced by the page field", impossible.date !== "2027-03-15", show(impossible));
+  check("12j. reason = unparsable_date", impossible.reason === "unparsable_date", show(impossible));
+
+  // --- 12k: series siblings (5K / Relay) are different races ------------------
+  const ld = (name: string, startDate: string, url = "https://runsignup.com/Race/Sibling") =>
+    `<script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Event",
+      name,
+      startDate,
+      url,
+    })}</script>`;
+  const sibling5k = resolveRunsignupStartDate(
+    `<html><body>${ld("Boston Marathon 5K", "2026-04-18")}${ld("Boston Marathon 2026", "2026-04-20")}</body></html>`,
+    { trackedName: "Boston Marathon" },
+  );
+  console.log(`  → 5K sibling ${show(sibling5k)}`);
+  check("12k. 5K sibling is not the tracked edition", sibling5k.date === "2026-04-20", show(sibling5k));
+
+  const siblingRelay = resolveRunsignupStartDate(
+    `<html><body>${ld("Big Sur Marathon Relay", "2026-04-25")}${ld("Big Sur Marathon 2026", "2026-04-26")}</body></html>`,
+    { trackedName: "Big Sur Marathon" },
+  );
+  check("12k. Relay sibling is not the tracked edition", siblingRelay.date === "2026-04-26", show(siblingRelay));
+
+  // --- 12l: matched editions that disagree must be refused --------------------
+  const ambiguous = resolveRunsignupStartDate(
+    `<html><body>${ld("Boston Marathon 2026", "2026-04-20")}${ld("Boston Marathon 2026", "2026-05-03")}</body></html>`,
+    { trackedName: "Boston Marathon" },
+  );
+  console.log(`  → 同名不同日 ${show(ambiguous)}  evidence="${ambiguous.evidence}"`);
+  check("12l. disagreeing editions → date: null", ambiguous.date === null, show(ambiguous));
+  check("12l. reason = ambiguous_multi_edition", ambiguous.reason === "ambiguous_multi_edition", show(ambiguous));
+
+  // --- 12m: calendarDay accepts a lowercase `z` and shifts once ---------------
+  check("12m. lowercase z is shifted into CST", calendarDay("2025-12-31T23:30:00.000z", 480) === "2026-01-01");
+  check("12m. explicit +08:00 is not shifted twice", calendarDay("2026-01-01T07:00:00+08:00", 480) === "2026-01-01");
+}
+
+// ---------------------------------------------------------------------------
+console.log("\n## 13. real rows: sub-event wording must not be mistaken for a reschedule");
+{
+  // These five descriptions are copied from the live DB (2026-09-20). The first
+  // three contain the reschedule vocabulary while describing something else
+  // (group distance / start time), and the last two really are postponements
+  // announced without a new date — those must NOT keep the cancelled day.
+  const groupEdit = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "2026中岳嵩山越野赛",
+      desc:
+        "***调整提醒：因近期持续降雨影响赛道，原100公里组别调整为70公里。相关改退方案详见组委会调整公告说明。" +
+        "2026中岳嵩山越野赛定于10月31日-11月1日在河南·登封·嵩山景区少林新游客中心开赛；先报先得，额满即止！",
+      startDatetimeLoc: "2026.10.31",
+    }),
+  );
+  console.log(`  → zuicool-10497 ${show(groupEdit)}`);
+  check("13a. 组别调整为70公里 is not a date change", groupEdit.date === "2026-10-31", show(groupEdit));
+
+  const startTimeEdit = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "2026思凯乐瓢虫越野训练赛（夏季）模式口站",
+      desc:
+        "***提示：起跑时间从上午7:30调整为8:30。6月14日早上7:10-8:10在起点凭身份证领取参赛物资。" +
+        "2026思凯乐瓢虫越野训练赛（夏季）模式口站定于6月14日（周日）上午8:30在北京石景山区模式口公园小广场开跑。",
+      startDatetimeLoc: "2026.06.14",
+    }),
+  );
+  console.log(`  → zuicool-70821 ${show(startTimeEdit)}`);
+  check("13b. 起跑时间调整为8:30 is not a date change", startTimeEdit.date === "2026-06-14", show(startTimeEdit));
+
+  const gunTimeEdit = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "2026中国山地越野公开赛（秦皇岛抚宁站）",
+      desc:
+        "***起跑时间调整提示：2026中国山地越野公开赛（秦皇岛抚宁站）暨冰塘峪长城越野赛 15公里体验组，" +
+        "发枪时间将调整为 2026年4月26日上午9:00",
+      startDatetimeLoc: "2026.04.26",
+    }),
+  );
+  check("13c. 发枪时间将调整为… keeps the race day", gunTimeEdit.date === "2026-04-26", show(gunTimeEdit));
+
+  const postponedNoDate = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "太平洋保险·2026仙岛湖·天空之城越野赛",
+      desc:
+        "***因赛事整体安排调整，经组委会审慎研究与综合评估，原定于4月19日举办的太平洋保险·2026第二届仙岛湖天空之城越野赛，将延期举行",
+      startDatetimeLoc: "2026.04.19",
+    }),
+  );
+  console.log(`  → zuicool-84534 ${show(postponedNoDate)}`);
+  check("13d. postponed-without-a-date must not keep the cancelled day", postponedNoDate.date !== "2026-04-19", show(postponedNoDate));
+  check("13d. reason = rescheduled_unparsed", postponedNoDate.reason === "rescheduled_unparsed", show(postponedNoDate));
+
+  const postponedElsewhere = resolveZuicoolRaceDate(
+    zuicoolPage({
+      title: "2026户外特工“山顶见”环大湾区山径系列赛肇庆站",
+      desc:
+        "***组委会5月11日发布延期公告：原定于2026年5月17日主办户外特工“山顶见”环大湾区山径系列赛肇庆站，" +
+        "因持续降雨影响，经组委会审慎研究决定：赛事延期主办，具体主办时间另行通知！",
+      startDatetimeLoc: "2026.05.17",
+    }),
+  );
+  check("13e. 延期主办，另行通知 must not keep the cancelled day", postponedElsewhere.date !== "2026-05-17", show(postponedElsewhere));
+  check("13e. reason = rescheduled_unparsed", postponedElsewhere.reason === "rescheduled_unparsed", show(postponedElsewhere));
 }
 
 // ---------------------------------------------------------------------------
