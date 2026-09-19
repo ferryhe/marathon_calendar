@@ -16,8 +16,16 @@
 ## 约定
 
 - **只读**：抓页面 + 解析，打印 JSON；**绝不写库**。落库由单独的数据批次做（备份 + 旧值守卫 + 回滚演练）。
-- 每个程序输出：`chosen`（挑中的届次与日期）+ `allCandidates`（所有日期候选 + 挑中它的原句）+ `pages`（抓取状态）。
-  **候选一律全量打印**，因为官网正文里常混着抽签窗口、报名期等其他日期，必须人工能一眼复核。
+- 每个程序输出：
+  - `chosen`：挑中的届次与日期（含 `raceLike` 判定与证据原句）
+  - `allCandidates`：页面正文里**所有**日期候选 + 所在句子（全量，不丢）
+  - `droppedCandidates`：**没被采用**的候选 + 没采用的原因（不是目标届 / 句子不含赛事语义或含 expo·ballot 等词）
+  - `pages`：每个页面的 status / bytes / textChars / **error**（抓取失败原因不再被吞）
+  - `notes`：告警（没解析到、目标届有多个候选、挑了非下一届…）
+- **退出码**：`0` = 正常；`2` = 没解析到比赛日（含抓取失败）—— 批量/定时跑不会静默"成功"。
+- **选择规则**：只认"带赛事语义"的句子（含 marathon/race/run，且不含 expo/ballot/registration/running show 等）；
+  目标届默认"当前年+1"（没有则取最大年份）；同届多个候选时取**最近的未来日期**，并给出告警。
+  两天赛优先于单日（但同样必须先过赛事语义）。
 - 多日赛/两天赛：输出 `date`（**首日**）+ `dateEnd`（**末日**）。
   库里对应 `marathon_editions.race_date` / `race_end_date`
   （见 `script/db-ensure-race-end-date.ts`，schema 在 `shared/schema.ts` 的 `raceEndDate`）。

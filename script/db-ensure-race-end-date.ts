@@ -26,7 +26,7 @@ async function main() {
   if ((before.rowCount ?? 0) > 0) {
     console.log("race_end_date 已存在，跳过（幂等）");
   } else {
-    await pool.query(`alter table marathon_editions add column race_end_date date`);
+    await pool.query(`alter table marathon_editions add column if not exists race_end_date date`);
     console.log("已新增列 marathon_editions.race_end_date (date, nullable)");
   }
   const after = await pool.query(
