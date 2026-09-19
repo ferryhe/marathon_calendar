@@ -785,6 +785,271 @@ console.log("\n## 14. runsignup collection artifact: the local wall clock is tak
 }
 
 // ---------------------------------------------------------------------------
+console.log("\n## 15. runsignup series pages: the container's first day is not the edition's day");
+{
+  // Measured 2026-09-20 (audit of that day's batch): on a page whose JSON-LD
+  // carries a series container *and* per-event nodes, the URL match used to pick
+  // the container (it carries the page URL, startDate = the series' first day),
+  // so every race pointing at the page got the series' first day. The DB-side
+  // names passed by callers are decorated ("X (City, ST) (2026/07)"), which is
+  // why the name branch never fired. Fixtures below mirror the real pages.
+  const ld = (o: Record<string, unknown>) =>
+    `<script type="application/ld+json">${JSON.stringify(o)}</script>`;
+
+  const MT_URL = "https://runsignup.com/Race/MT/WestYellowstone/MontanaTrailSeries";
+  const mtSub = (name: string, startDate: string) =>
+    ld({
+      "@context": "http://schema.org",
+      "@type": "SportsEvent",
+      name,
+      startDate,
+      superEvent: {
+        "@type": "SportsEvent",
+        additionalType: "Product",
+        name: "Montana Trail Series",
+        url: MT_URL,
+        startDate: "2027-06-25T22:00:00-06:00",
+        endDate: "2027-09-25T21:59:59-06:00",
+      },
+    });
+  const montana = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    additionalType: "Product",
+    name: "Montana Trail Series", // the container: page URL + 3-month window
+    startDate: "2027-06-26T09:00:00-06:00",
+    endDate: "2027-09-25T17:00:59-06:00",
+    url: MT_URL,
+  })}${mtSub("The Yellowstone Marathon", "2027-06-26T09:00:00-06:00")}${mtSub(
+    "The Yellowstone 1/2 Marathon",
+    "2027-06-26T09:00:00-06:00",
+  )}${mtSub("Bob Marshall Marathon", "2027-07-17T09:00:00-06:00")}${mtSub(
+    "The Yelllowstone 1/2 Marathon",
+    "2027-07-31T09:00:00-06:00",
+  )}${mtSub("The Yellowstone Marathon", "2027-07-31T09:00:00-06:00")}${mtSub(
+    "The Divide Marathon",
+    "2027-09-25T09:00:00-06:00",
+  )}</body></html>`;
+
+  const bob = resolveRunsignupStartDate(montana, {
+    trackedName: "Bob Marshall Marathon (West Yellowstone, MT) (2026/07)",
+    eventUrl: MT_URL,
+  });
+  console.log(`  → Bob Marshall ${show(bob)} evidence="${bob.evidence}"`);
+  check("15. decorated DB name still matches the page's own event", bob.matchedBy === "name", show(bob));
+  check("15. Bob Marshall Marathon → 2027-07-17 (its own event)", bob.date === "2027-07-17", show(bob));
+  check("15. NOT the series' first day 2027-06-26", bob.date !== "2027-06-26", show(bob));
+
+  const y12 = resolveRunsignupStartDate(montana, {
+    trackedName: "The Yelllowstone 1/2 Marathon (West Yellowstone, MT) (2026/08)",
+    eventUrl: MT_URL,
+  });
+  console.log(`  → Yelllowstone 1/2 ${show(y12)}`);
+  check("15. typo'd name matches its own entry → 2027-07-31", y12.date === "2027-07-31", show(y12));
+
+  const ambiguous = resolveRunsignupStartDate(montana, {
+    trackedName: "The Yellowstone Marathon (West Yellowstone, MT) (2026/07)",
+    eventUrl: MT_URL,
+  });
+  console.log(`  → Yellowstone Marathon (two same-name entries) ${show(ambiguous)}`);
+  check("15. same name on two days → refuse, don't pick one", ambiguous.date === null, show(ambiguous));
+  check("15. reason = ambiguous_multi_edition", ambiguous.reason === "ambiguous_multi_edition", show(ambiguous));
+
+  // The regression the whole section exists for: URL alone must never yield the
+  // container's first day on a page that describes several days.
+  const byUrlOnly = resolveRunsignupStartDate(montana, { eventUrl: MT_URL });
+  console.log(`  → url only ${show(byUrlOnly)}`);
+  check("15. url-only on a multi-day page → refuse (was the series' first day)", byUrlOnly.date === null, show(byUrlOnly));
+
+  const RR_URL = "https://runsignup.com/Race/PA/BeaverFalls/RabidRaccoon100";
+  const rrSub = (name: string, startDate: string) =>
+    ld({
+      "@context": "http://schema.org",
+      "@type": "SportsEvent",
+      name,
+      startDate,
+      superEvent: { "@type": "SportsEvent", name: "Rabid Raccoon 100", url: RR_URL, startDate: "2027-06-04T07:00:00-04:00" },
+    });
+  const raccoon = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Rabid Raccoon 100",
+    startDate: "2027-06-04T07:00:00-04:00",
+    url: RR_URL,
+  })}${rrSub("Rabid Raccoon Half Marathon", "2027-06-05T07:00:00-04:00")}${rrSub(
+    "Rabid Raccoon MIDNIGHT Half Marathon",
+    "2027-06-06T07:00:00-04:00",
+  )}${rrSub("Rabid Raccoon 100 Mile", "2027-06-05T04:00:00-04:00")}</body></html>`;
+
+  const half = resolveRunsignupStartDate(raccoon, {
+    trackedName: "Rabid Raccoon Half Marathon (Beaver Falls, PA) (2026/05)",
+    eventUrl: RR_URL,
+  });
+  const midnight = resolveRunsignupStartDate(raccoon, {
+    trackedName: "Rabid Raccoon MIDNIGHT Half Marathon (Beaver Falls, PA) (2026/05)",
+    eventUrl: RR_URL,
+  });
+  console.log(`  → Rabid Raccoon Half ${show(half)} / MIDNIGHT ${show(midnight)}`);
+  check("15. Rabid Raccoon Half Marathon → 2027-06-05", half.date === "2027-06-05", show(half));
+  check("15. Rabid Raccoon MIDNIGHT Half → 2027-06-06", midnight.date === "2027-06-06", show(midnight));
+  check("15. neither is the 100-mile start day (2027-06-04)", half.date !== "2027-06-04" && midnight.date !== "2027-06-04");
+
+  const DX_URL = "https://runsignup.com/Race/MI/Dexter/DXA2";
+  const dxSub = (name: string, startDate: string) =>
+    ld({
+      "@context": "http://schema.org",
+      "@type": "SportsEvent",
+      name,
+      startDate,
+      superEvent: { "@type": "SportsEvent", name: "DEXTER-ANN ARBOR RUN", url: DX_URL, startDate: "2027-06-05T10:00:00-04:00" },
+    });
+  const dexter = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "DEXTER-ANN ARBOR RUN",
+    startDate: "2027-06-05T10:00:00-04:00",
+    url: DX_URL,
+  })}${dxSub("HALF MARATHON", "2027-06-06T08:30:00-04:00")}${dxSub(
+    "5K",
+    "2027-06-06T08:30:00-04:00",
+  )}${dxSub("KIDS RUN", "2027-06-05T10:00:00-04:00")}</body></html>`;
+  const dexterHalf = resolveRunsignupStartDate(dexter, {
+    trackedName: "HALF MARATHON (Dexter, MI) (2026/05)",
+    eventUrl: DX_URL,
+  });
+  console.log(`  → Dexter HALF MARATHON ${show(dexterHalf)}`);
+  check("15. HALF MARATHON → 2027-06-06 (not the Saturday 5K day)", dexterHalf.date === "2027-06-06", show(dexterHalf));
+
+  // --- symmetric decoration + container/leaf sharing a name (2026-09-20) ------
+  const BG_URL = "https://runsignup.com/Race/KY/BowlingGreen/bg262";
+  const bg = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "bgKIDS (Saturday, October 31st - 4pm)",
+    startDate: "2026-10-31",
+    url: BG_URL,
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Half Marathon (Sunday, Nov 1, 2026)",
+    startDate: "2026-11-01",
+    url: BG_URL,
+  })}</body></html>`;
+  const bgHalf = resolveRunsignupStartDate(bg, {
+    trackedName: "Half Marathon (Bowling Green, KY) (2026/11)",
+    eventUrl: BG_URL,
+  });
+  console.log(`  → 页面名同样带装饰 ${show(bgHalf)}`);
+  check("15. page-side decoration is stripped too → 2026-11-01", bgHalf.date === "2026-11-01", show(bgHalf));
+
+  const UT_URL2 = "https://runsignup.com/Race/VA/Huddleston/UltraTriathlon";
+  const ut = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Smith Mountain Lake Ultra Triathlon",
+    startDate: "2026-09-11",
+    url: UT_URL2,
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Double Ultra Aquabike (Solo)",
+    startDate: "2026-09-11",
+    superEvent: { "@type": "SportsEvent", name: "Smith Mountain Lake Ultra Triathlon", url: UT_URL2 },
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Single Ultra Aquabike (Solo)",
+    startDate: "2026-09-12",
+    superEvent: { "@type": "SportsEvent", name: "Smith Mountain Lake Ultra Triathlon", url: UT_URL2 },
+  })}</body></html>`;
+  const solo = resolveRunsignupStartDate(ut, {
+    trackedName: "Single Ultra Aquabike (Solo) (Huddleston, VA) (2026/09)",
+    eventUrl: UT_URL2,
+  });
+  console.log(`  → Single Ultra Aquabike (Solo) ${show(solo)}`);
+  check("15. a qualifying suffix like (Solo) is NOT stripped → 2026-09-12", solo.date === "2026-09-12", show(solo));
+
+  const RC_URL2 = "https://runsignup.com/Race/AL/Huntsville/RocketCity";
+  const rc = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Rocket City Marathon", // container carries the tracked name, day 1
+    startDate: "2026-12-12",
+    url: RC_URL2,
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Rocket City Marathon", // …the real race is this same-named leaf
+    startDate: "2026-12-13",
+    superEvent: { "@type": "SportsEvent", name: "Rocket City Marathon", url: RC_URL2 },
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Rocket City 5K",
+    startDate: "2026-12-12",
+    superEvent: { "@type": "SportsEvent", name: "Rocket City Marathon", url: RC_URL2 },
+  })}</body></html>`;
+  const rcM = resolveRunsignupStartDate(rc, {
+    trackedName: "Rocket City Marathon (Huntsville, AL) (2026/12)",
+    eventUrl: RC_URL2,
+  });
+  console.log(`  → Rocket City Marathon (container shares the name) ${show(rcM)}`);
+  check("15. same-named container loses to the leaf → 2026-12-13", rcM.date === "2026-12-13", show(rcM));
+
+  const early = resolveRunsignupStartDate(rc, {
+    trackedName:
+      "Early Start Marathon (ONLY for those needing 6-7 hours to complete the marathon) (Huntsville, AL) (2026/12)",
+    eventUrl: RC_URL2,
+  });
+  check("15. unknown tracked name on that page still refuses", early.date === null, show(early));
+
+  const early2 = resolveRunsignupStartDate(
+    `<html><body>${ld({
+      "@context": "http://schema.org",
+      "@type": "SportsEvent",
+      name: "Rocket City Marathon",
+      startDate: "2026-12-12",
+      url: RC_URL2,
+    })}${ld({
+      "@context": "http://schema.org",
+      "@type": "SportsEvent",
+      name: "Early Start Marathon (ONLY for those needing 6-7 hours to complete the marathon)",
+      startDate: "2026-12-13",
+      superEvent: { "@type": "SportsEvent", name: "Rocket City Marathon", url: RC_URL2 },
+    })}</body></html>`,
+    {
+      trackedName:
+        "Early Start Marathon (ONLY for those needing 6-7 hours to complete the marathon) (Huntsville, AL) (2026/12)",
+      eventUrl: RC_URL2,
+    },
+  );
+  console.log(`  → Early Start Marathon ${show(early2)}`);
+  check("15. long qualifying suffix + trailing decoration → 2026-12-13", early2.date === "2026-12-13", show(early2));
+
+  // No regression: a one-day page still resolves through the URL.
+  const singleDay = `<html><body>${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    name: "Redmond Harvest Half Marathon",
+    startDate: "2027-09-06T08:00:00-07:00",
+    url: "https://runsignup.com/Race/WA/Redmond/RedmondHarvestHalfMarathon",
+  })}${ld({
+    "@context": "http://schema.org",
+    "@type": "SportsEvent",
+    additionalType: "Product",
+    name: "Redmond Harvest Half Marathon", // container, same single day
+    startDate: "2027-09-06T08:00:00-07:00",
+    endDate: "2027-09-06T12:00:00-07:00",
+    url: "https://runsignup.com/Race/WA/Redmond/RedmondHarvestHalfMarathon",
+  })}</body></html>`;
+  const oneDay = resolveRunsignupStartDate(singleDay, {
+    trackedName: "Redmond Harvest Half Marathon (Redmond, WA) (2026/09)",
+    eventUrl: "https://runsignup.com/Race/WA/Redmond/RedmondHarvestHalfMarathon",
+  });
+  check("15. single-day page still resolves via url", oneDay.date === "2027-09-06", show(oneDay));
+}
+
+// ---------------------------------------------------------------------------
 console.log(`\n# ${passed} assertion(s) passed, ${failures.length} failed`);
 if (failures.length) {
   console.log("# failures:");

@@ -20,7 +20,8 @@
  *   DATE_DIFF       同为一年，天数差得更多（改期 / 页面改日 / 届次选错）
  *   STALE_EDITION   页面已翻到下一届（相差 >300 天）—— 属采集新鲜度，不算提取错
  *   YEAR_DIFF       年份不一致
- *   MULTI_NO_MATCH  页面多届次且没有任何一个等于库里的日期
+ *   MULTI_AMBIG     页面多场次，且按赛事名/URL 都定位不到这一届 —— 拒绝猜（原样报出）
+ *   MULTI_NO_MATCH  页面多场次，按名定位到了这一届，但库里那天属于同页别的场次
  *   UNRESOLVABLE    适配器读不出年份（no_year / rescheduled_unparsed / …）
  *   FETCH_FAIL      抓不到页面
  *
@@ -73,7 +74,7 @@ const OUT = arg("out", "/tmp/source-audit.json")!;
 
 type Verdict =
   | "OK" | "TZ_SHIFT" | "DATE_DIFF" | "STALE_EDITION" | "YEAR_DIFF"
-  | "MULTI_NO_MATCH" | "UNRESOLVABLE" | "FETCH_FAIL";
+  | "MULTI_AMBIG" | "MULTI_NO_MATCH" | "UNRESOLVABLE" | "FETCH_FAIL";
 
 interface Row {
   id: string;
@@ -131,12 +132,19 @@ async function fetchHtml(url: string) {
 }
 
 function classify(row: Row, res: PageDateResult | null, pageDays: string[]): Verdict {
+  // 页面多场次、适配器按名/URL 都定位不到这一届 → 原样报出（别拿"页面出现过"放过它）
+  if (res?.reason === "ambiguous_multi_edition") return "MULTI_AMBIG";
   if (!res || !res.date || !res.year) return "UNRESOLVABLE";
   const db = row.db_date;
   if (!db) return "DATE_DIFF";
   // 适配器（该源的权威规则）给出同一天 → 就是 OK；pageDays 只是诊断用的旁证。
   if (res.date === db) return "OK";
-  if (pageDays.includes(db)) return "OK";
+  if (pageDays.includes(db)) {
+    // 按赛事名定位到的是另一天 ⇒ 库里这天属于同页别的场次（2026-09-20 的错法：
+    // 系列页把每场赛事的日期都写上，旧的"日期在页面上就算 OK"永远抓不到）。
+    if (res.matchedBy === "name") return "MULTI_NO_MATCH";
+    return "OK";
+  }
   // Order matters: a page that has rolled over to the NEXT edition shows a
   // different year, so checking YEAR_DIFF first swallowed every "rolled over"
   // row and made the documented STALE_EDITION bucket unreachable (found in
@@ -196,7 +204,7 @@ async function main() {
 
   writeFileSync(OUT, JSON.stringify(results, null, 1));
 
-  const order: Verdict[] = ["OK", "TZ_SHIFT", "DATE_DIFF", "STALE_EDITION", "YEAR_DIFF", "MULTI_NO_MATCH", "UNRESOLVABLE", "FETCH_FAIL"];
+  const order: Verdict[] = ["OK", "TZ_SHIFT", "DATE_DIFF", "STALE_EDITION", "YEAR_DIFF", "MULTI_AMBIG", "MULTI_NO_MATCH", "UNRESOLVABLE", "FETCH_FAIL"];
   console.log(`\n# 分档（n=${results.length}）`);
   for (const v of order) {
     const n = results.filter((r) => r.verdict === v).length;
