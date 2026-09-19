@@ -83,6 +83,12 @@ type Verdict =
   | "OK" | "TZ_SHIFT" | "DATE_DIFF" | "STALE_EDITION" | "OLD_EDITION_RETAINED" | "YEAR_DIFF"
   | "MULTI_AMBIG" | "DB_DAY_IS_SIBLING" | "UNRESOLVABLE" | "FETCH_FAIL";
 
+/**
+ * 信息档：不需要人工跟进，报表里单列、**不进**「需处理」清单（口径见文件头）。
+ * 放在模块级并标注 `Verdict[]`，这样往里加档名时若拼错，tsc 会直接报 TS2820，而不是静默生效。
+ */
+const INFO_ONLY: Verdict[] = ["OLD_EDITION_RETAINED"];
+
 interface Row {
   id: string;
   canonical_name: string | null;
@@ -231,9 +237,8 @@ async function main() {
     const n = results.filter((r) => r.verdict === v).length;
     if (n) console.log(`  ${v.padEnd(15)} ${String(n).padStart(4)}  (${((n / results.length) * 100).toFixed(1)}%)`);
   }
-  // 「需处理」= 真需要跟进的档。OLD_EDITION_RETAINED 是信息档（页面已翻届 + 新届已入库，
-  // 旧届留历史属正常态，见文件头），不要混进来 —— 55 条正常态噪音会把 15 条真告警淹掉。
-  const INFO_ONLY: Verdict[] = ["OLD_EDITION_RETAINED"];
+  // 「需处理」= 真需要跟进的档。信息档（INFO_ONLY，见文件头）不混进来 ——
+  // 55 条正常态噪音会把 15 条真告警淹掉。
   const bad = results.filter((r) => r.verdict !== "OK" && !INFO_ONLY.includes(r.verdict));
   const infoOnly = results.filter((r) => INFO_ONLY.includes(r.verdict));
   console.log(`\n# 需处理的 ${bad.length} 条（前 25）`);
@@ -244,8 +249,9 @@ async function main() {
     );
   }
   if (infoOnly.length) {
+    // 档名从 INFO_ONLY 现取，别硬编码 —— 将来加档时文案不会自相矛盾。
     console.log(
-      `\n# 信息档 ${infoOnly.length} 条（不必处理）：OLD_EDITION_RETAINED —— 页面已翻届且新届已入库，\n` +
+      `\n# 信息档 ${infoOnly.length} 条（不必处理）：${INFO_ONLY.join(" / ")} —— 页面已翻届且新届已入库，\n` +
         `#   旧届留历史属正常态；逐条明细见 ${OUT}`,
     );
   }
