@@ -19,6 +19,15 @@
  *   4. A runsignup detail page carries 1–21 `startDate` values (series races,
  *      multi-round events, UTC variants) — first/min is not "the tracked
  *      edition".
+ *   5. On such a page the **series container** node (`superEvent`: it carries the
+ *      page URL and a startDate = the series' first day) won the URL match, so
+ *      every race pointing at that page got the series' first day. Measured
+ *      2026-09-20: 5 of 9 multi-day rows were wrong this way (Bob Marshall
+ *      Marathon → 06-26 instead of 07-17, Rabid Raccoon Half → 06-04 instead of
+ *      06-05/MIDNIGHT 06-06, Dexter Half → 06-05 instead of 06-06). Two
+ *      independent defects: (a) the URL match ran *before* the name match, and
+ *      (b) DB-side names are decorated ("X (City, ST) (2026/07)") so the name
+ *      match could never fire on the real call path.
  *
  * Contract of this module (single source of truth for every importer *and* the
  * weekly checker):
@@ -84,6 +93,13 @@ export interface PageDateResult {
   reason?: RaceDateReason;
   /** True when the copy describes a multi-day window (date = first day). */
   multiDay?: boolean;
+  /**
+   * How the tracked edition was identified. Callers that compare the resolved
+   * day against a stored day must not treat "the day appears somewhere on the
+   * page" as agreement when the match came from a name: the stored day then
+   * belongs to a *sibling* on the same page (that is the 2026-09-20 defect).
+   */
+  matchedBy?: "name" | "url" | "single";
 }
 
 export type RaceSourceKind =
@@ -586,6 +602,19 @@ export interface JsonLdEvent {
   endDate?: string;
   url?: string;
   types: string[];
+  /**
+   * True when this node is a *container* (it carries `subEvent`/`events`/…):
+   * a series/superEvent node. Its own `startDate` is the first day of the whole
+   * series, so it must not be used as the tracked edition's date.
+   */
+  hasSubEvents?: boolean;
+  /**
+   * Normalized key (`normalizeUrlKey(url)` else `normalizeName(name)`) of the
+   * `superEvent` this node belongs to. Sub-events point at their series node
+   * even when the series node lives in a separate script block, which is how a
+   * series container is recognized without guessing at thresholds.
+   */
+  parentRef?: string;
 }
 
 /**
@@ -593,6 +622,17 @@ export interface JsonLdEvent {
  * without a `startDate` (needed so "how many editions does this page describe"
  * stays honest). Handles arrays, `@graph`, nested `subEvent`/`itemListElement`.
  */
+const CHILD_EVENT_KEYS = ["subEvent", "subEvents", "itemListElement", "item", "event", "events"] as const;
+
+/** A node carrying child events describes a *series*, not one edition. */
+function hasChildEvents(obj: Record<string, unknown>): boolean {
+  for (const key of CHILD_EVENT_KEYS) {
+    const v = obj[key];
+    if (Array.isArray(v) ? v.length > 0 : Boolean(v && typeof v === "object")) return true;
+  }
+  return false;
+}
+
 export function collectJsonLdEvents(html: string): JsonLdEvent[] {
   const out: JsonLdEvent[] = [];
   const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
@@ -627,6 +667,13 @@ export function collectJsonLdEvents(html: string): JsonLdEvent[] {
     const types = (Array.isArray(t) ? t : t ? [t] : []).filter(
       (x): x is string => typeof x === "string",
     );
+    const sup = obj["superEvent"];
+    let parentRef: string | undefined;
+    if (sup && typeof sup === "object" && !Array.isArray(sup)) {
+      const s = sup as Record<string, unknown>;
+      if (typeof s.url === "string" && s.url) parentRef = normalizeUrlKey(s.url);
+      else if (typeof s.name === "string" && s.name) parentRef = normalizeName(s.name);
+    }
     if (types.some((x) => /event/i.test(x))) {
       out.push({
         name: typeof obj.name === "string" ? obj.name : undefined,
@@ -634,9 +681,11 @@ export function collectJsonLdEvents(html: string): JsonLdEvent[] {
         endDate: typeof obj.endDate === "string" ? obj.endDate : undefined,
         url: typeof obj.url === "string" ? obj.url : undefined,
         types,
+        hasSubEvents: hasChildEvents(obj),
+        parentRef,
       });
     }
-    for (const key of ["@graph", "subEvent", "subEvents", "itemListElement", "item", "event", "events"]) {
+    for (const key of CHILD_EVENT_KEYS) {
       if (key in obj) walk(obj[key]);
     }
   }
@@ -701,30 +750,66 @@ function distinctDays(events: JsonLdEvent[], tzOffsetMinutes: number): string[] 
   return [...set].sort();
 }
 
+/**
+ * Is this node a *series container* rather than one edition?
+ *
+ * Three independent signals, because runsignup uses all three shapes:
+ *   - the node nests child events (`subEvent`/`events`);
+ *   - sub-events point back at it via `superEvent` (the container itself usually
+ *     sits in a separate script block without any `subEvent` key);
+ *   - its `startDate`→`endDate` window spans more than a week (measured: Montana
+ *     Trail Series = 2027-06-26 → 2027-09-25), which no single race weekend does.
+ */
+function looksLikeSeriesContainer(
+  e: JsonLdEvent,
+  containerKeys: Set<string>,
+  tzOffsetMinutes: number,
+): boolean {
+  if (e.hasSubEvents) return true;
+  if (e.url && containerKeys.has(normalizeUrlKey(e.url))) return true;
+  if (e.name && containerKeys.has(normalizeName(e.name))) return true;
+  const a = calendarDay(e.startDate, tzOffsetMinutes);
+  const b = calendarDay(e.endDate, tzOffsetMinutes);
+  if (!a || !b) return false;
+  return (Date.parse(b) - Date.parse(a)) / 86_400_000 > 7;
+}
+
+/** Keys that some other node on this page names as its `superEvent`. */
+function containerRefKeys(events: JsonLdEvent[]): Set<string> {
+  const keys = new Set<string>();
+  for (const e of events) if (e.parentRef) keys.add(e.parentRef);
+  return keys;
+}
+
+/**
+ * DB-side race names are decorated: `Bob Marshall Marathon (West Yellowstone,
+ * MT) (2026/07)`. Page event names are not. Without stripping, `want` never
+ * equals a page name and the name branch is dead on the real call path (the
+ * audit/`fix-year-mismatch` pass `marathon.name`), so the page-level URL match
+ * decides — which is how a series container's start date got written.
+ */
+export function stripTrackedDecorations(name: string): string {
+  const stripped = name
+    .replace(/[（(][^()（）]*[)）]/g, " ") // 城市 / 届次标记等括号组
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped || name;
+}
+
 function pickJsonLdEvent(
   events: JsonLdEvent[],
   opts: TrackedEditionOpts,
   tzOffsetMinutes = 0,
-): { event: JsonLdEvent; reason: RaceDateReason } | { event: null; reason: RaceDateReason } {
+):
+  | { event: JsonLdEvent; reason: RaceDateReason; matchedBy: "name" | "url" | "single" }
+  | { event: null; reason: RaceDateReason } {
   const withDate = events.filter((e) => Boolean(e.startDate));
   if (withDate.length === 0) return { event: null, reason: "no_parseable_start_date" };
 
-  // 1) explicit URL match wins — it identifies the edition, not just the name.
-  if (opts.eventUrl) {
-    const want = normalizeUrlKey(opts.eventUrl);
-    const byUrl = withDate.filter((e) => e.url && normalizeUrlKey(e.url) === want);
-    if (byUrl.length >= 1) {
-      // Same URL, disagreeing days → refuse rather than take document order.
-      if (distinctDays(byUrl, tzOffsetMinutes).length > 1) {
-        return { event: null, reason: "ambiguous_multi_edition" };
-      }
-      return { event: byUrl[0], reason: "ok" };
-    }
-  }
-
-  // 2) name match: exact normalized first, then "same race + edition markers only".
+  // 1) name match first — it identifies *this edition*, the URL only identifies
+  //    the page (whose container node carries the series' first day).
   if (opts.trackedName) {
-    const want = normalizeName(opts.trackedName);
+    const want = normalizeName(stripTrackedDecorations(opts.trackedName));
     let matches: JsonLdEvent[] = [];
     if (want) {
       matches = withDate.filter((e) => e.name && normalizeName(e.name) === want);
@@ -732,16 +817,37 @@ function pickJsonLdEvent(
         matches = withDate.filter((e) => e.name && isTrackedNameMatch(want, normalizeName(e.name)));
       }
     }
-    if (matches.length === 0) return { event: null, reason: "no_tracked_match" };
-    // Contract: matched editions that disagree on the day are refused — taking
-    // matches[0] would be exactly the "first/min" behaviour this module bans.
-    if (distinctDays(matches, tzOffsetMinutes).length > 1) {
-      return { event: null, reason: "ambiguous_multi_edition" };
+    if (matches.length > 0) {
+      // Contract: matched editions that disagree on the day are refused — taking
+      // matches[0] would be exactly the "first/min" behaviour this module bans.
+      if (distinctDays(matches, tzOffsetMinutes).length > 1) {
+        return { event: null, reason: "ambiguous_multi_edition" };
+      }
+      return { event: matches[0], reason: "ok", matchedBy: "name" };
     }
-    return { event: matches[0], reason: "ok" };
   }
 
-  if (withDate.length === 1) return { event: withDate[0], reason: "ok" };
+  // 2) URL match — prefer leaf events; a container's own startDate is the
+  //    series' first day, not the tracked edition's.
+  if (opts.eventUrl) {
+    const want = normalizeUrlKey(opts.eventUrl);
+    const byUrl = withDate.filter((e) => e.url && normalizeUrlKey(e.url) === want);
+    if (byUrl.length >= 1) {
+      const containerKeys = containerRefKeys(events);
+      const leaves = byUrl.filter((e) => !looksLikeSeriesContainer(e, containerKeys, tzOffsetMinutes));
+      // Same URL, disagreeing days → refuse rather than take document order.
+      const pool = leaves.length > 0 ? leaves : byUrl;
+      if (distinctDays(pool, tzOffsetMinutes).length > 1) {
+        return { event: null, reason: "ambiguous_multi_edition" };
+      }
+      if (leaves.length === 0 && distinctDays(withDate, tzOffsetMinutes).length > 1) {
+        return { event: null, reason: "ambiguous_multi_edition" };
+      }
+      return { event: pool[0], reason: "ok", matchedBy: "url" };
+    }
+  }
+
+  if (withDate.length === 1) return { event: withDate[0], reason: "ok", matchedBy: "single" };
   return { event: null, reason: "no_tracked_match" };
 }
 
@@ -791,6 +897,7 @@ function resolveFromJsonLd(
     source: "jsonld",
     evidence: `startDate=${event.startDate}${event.name ? ` name=${event.name}` : ""}`,
     reason: "ok",
+    matchedBy: picked.matchedBy,
   };
 }
 
