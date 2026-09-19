@@ -22,6 +22,7 @@
  */
 import "dotenv/config";
 import { Pool } from "pg";
+import { metaContent, resolveZuicoolRaceDate } from "../shared/race-date.js";
 
 const DRY = process.argv.includes("--dry");
 const SKIP_EXISTING = process.argv.includes("--skip-existing");
@@ -57,8 +58,10 @@ interface ParsedEvent {
   zuicoolId: string;
   url: string;
   name: string;
-  raceDate: string | null;          // YYYY-MM-DD
-  year: number;
+  raceDate: string | null;          // YYYY-MM-DD (null when unresolvable)
+  year: number | null;              // null when the page states no year — never guessed
+  dateSource: string;               // adapter provenance, for logs
+  dateReason: string;               // adapter reason, for logs
   province: string | null;
   city: string | null;
   district: string | null;
@@ -76,69 +79,16 @@ async function fetchText(url: string): Promise<string> {
   return await res.text();
 }
 
-function metaContent(html: string, name: string): string | null {
-  // Match `<meta name="X" content="...">` OR `<meta property="X" ...>`. Content
-  // can be on either side of the attribute order; capture everything until the
-  // closing quote — descriptions span many lines (DOTALL via [\s\S]).
-  const re = new RegExp(
-    `<meta[^>]+(?:name|property)=["']${name.replace(/[.*+?^${}()|[\\]/g, "\\$&")}["'][^>]*content=["']([\\s\\S]*?)["'][^>]*/?>`,
-    "i",
-  );
-  const m = html.match(re);
-  if (m) return decodeEntities(m[1]).trim();
-  // Try reverse order: content first.
-  const re2 = new RegExp(
-    `<meta[^>]+content=["']([\\s\\S]*?)["'][^>]*(?:name|property)=["']${name}["']`,
-    "i",
-  );
-  const m2 = html.match(re2);
-  return m2 ? decodeEntities(m2[1]).trim() : null;
-}
-
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ");
-}
-
-/** Best-effort date parse from og:description.
- *  Patterns observed:
- *    "...定于2026年9月26日上午6:00..."
- *    "...定于9月26日上午6:00..."  (year missing — fall back to title or 当前/次年)
- *    "...将于12月6日..."           (verb variant)
+/** Best-effort date parse for a single race, delegated to the shared per-source
+ *  adapter (see shared/race-date.ts).
+ *
+ *  History: this file used to carry an inline `parseRaceDate(desc, title)` whose
+ *  no-year branch fell back to `new Date().getFullYear()` (+ a ">60 days in the
+ *  past → +1 year" heuristic). Measured effect: 98 of 998 zuicool rows stored a
+ *  wrong year (e.g. `天上阿里・极境征途—冈仁波齐52`真 2025-10-01 被记成 2026-10-01).
+ *  The adapter never guesses: no year resolvable → `{ year: null, date: null }`
+ *  and the caller skips the edition row.
  */
-function parseRaceDate(desc: string, title: string): { date: string | null; year: number } {
-  const fullYear = desc.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-  if (fullYear) {
-    const [, y, m, d] = fullYear;
-    return { date: iso(+y, +m, +d), year: +y };
-  }
-  const monthDay = desc.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-  // Year heuristic: leading 4-digit in title (e.g. "2026..."), otherwise use
-  // current calendar year and bump to next year if the parsed date is already
-  // > 60 days in the past.
-  const titleYear = title.match(/^\s*(20\d\d)/)?.[1];
-  let year = titleYear ? +titleYear : new Date().getFullYear();
-  if (!monthDay) return { date: null, year };
-  const month = +monthDay[1];
-  const day = +monthDay[2];
-  if (!titleYear) {
-    const candidate = new Date(year, month - 1, day);
-    const now = new Date();
-    if (candidate.getTime() < now.getTime() - 60 * 86400000) year += 1;
-  }
-  return { date: iso(year, month, day), year };
-}
-
-function iso(y: number, m: number, d: number): string {
-  const mm = String(m).padStart(2, "0");
-  const dd = String(d).padStart(2, "0");
-  return `${y}-${mm}-${dd}`;
-}
 
 /** Parse distance categories from the structured paragraphs in og:description.
  *  zuicool's organizer-authored lead paragraph follows the convention:
@@ -260,17 +210,27 @@ async function parseEvent(zuicoolId: string): Promise<ParsedEvent | null> {
     console.warn(`  ! missing meta for ${zuicoolId}`);
     return null;
   }
-  const { date, year } = parseRaceDate(description, name);
+  const resolved = resolveZuicoolRaceDate(html);
   const loc = parseLocation(keywords);
   const distances = parseDistances(description);
   const start = parseStartLocation(description);
   const highlights = description.split(/[\n。]/).slice(0, 1).join("").trim() || null;
+  if (resolved.year == null) {
+    // No year stated anywhere on the page (copy without a year + no
+    // start_datetime-loc). Skip the edition write rather than invent a year —
+    // this is exactly the branch that used to fabricate "current year" rows.
+    console.warn(
+      `  ! ${zuicoolId} '${name.trim()}' — no year resolvable (reason=${resolved.reason ?? "?"}, evidence="${resolved.evidence ?? ""}"); edition will be skipped`,
+    );
+  }
   return {
     zuicoolId,
     url,
     name: name.trim(),
-    raceDate: date,
-    year,
+    raceDate: resolved.date,
+    year: resolved.year,
+    dateSource: resolved.source,
+    dateReason: resolved.reason ?? "ok",
     province: loc.province,
     city: loc.city,
     district: loc.district,
@@ -352,7 +312,10 @@ async function ensureSourceId(): Promise<string> {
   return inserted.rows[0].id;
 }
 
-async function upsertEvent(ev: ParsedEvent, sourceId: string): Promise<"inserted" | "updated" | "skipped"> {
+async function upsertEvent(
+  ev: ParsedEvent,
+  sourceId: string,
+): Promise<"inserted" | "updated" | "skipped" | "no_date"> {
   const canonical = `zuicool-${ev.zuicoolId}`;
   // Match by canonical_name ONLY. Matching by display name would collide with
   // unrelated road-marathon rows that happen to share a name and silently
@@ -362,7 +325,18 @@ async function upsertEvent(ev: ParsedEvent, sourceId: string): Promise<"inserted
     [canonical],
   );
 
-  if (SKIP_EXISTING && existing.rows[0]) return "skipped";
+  // `--skip-existing` must mean "this event already has an EDITION", not "a
+  // marathons row exists": a marathon row without an edition is a half-import
+  // (page had no year when it was first seen) and has to be retried, otherwise
+  // the gap is permanent (round-2 review, reproduced in a sandbox). The bulk
+  // pre-filter does the same join; this is the per-event gate.
+  if (SKIP_EXISTING && existing.rows[0]) {
+    const hasEdition = await pool.query<{ one: number }>(
+      "SELECT 1 AS one FROM marathon_editions WHERE marathon_id=$1 LIMIT 1",
+      [existing.rows[0].id],
+    );
+    if (hasEdition.rows[0]) return "skipped";
+  }
 
   // Also bail if a marathon with the same display name already exists under a
   // different canonical_name (e.g. nowrun-*) — that's a road-marathon row we
@@ -376,6 +350,18 @@ async function upsertEvent(ev: ParsedEvent, sourceId: string): Promise<"inserted
       `  ! skip name-clash zuicool-${ev.zuicoolId} → existing ${nameClash.rows[0].canonical_name} ('${ev.name}')`,
     );
     return "skipped";
+  }
+
+  // A year is REQUIRED before anything is written. The old code fell back to
+  // "current year" when extraction failed — that is how 98 zuicool rows landed on
+  // the wrong calendar year. The check must happen *before* the `marathons` write:
+  // a marathon row without any edition is a half-import, and `--skip-existing`
+  // (which keys off imported events) would then never retry it (review P1).
+  if (ev.year == null || !ev.raceDate) {
+    console.warn(
+      `  ! no_date zuicool-${ev.zuicoolId} '${ev.name}' — no resolvable year (source=${ev.dateSource}, reason=${ev.dateReason}); nothing written`,
+    );
+    return "no_date";
   }
 
   // Compose city display: "Hangzhou (Lin'an)" style — keep Chinese for now.
@@ -424,9 +410,8 @@ async function upsertEvent(ev: ParsedEvent, sourceId: string): Promise<"inserted
 
   if (DRY || marathonId === "dry-run") return action;
 
-  // Edition upsert (unique on marathon_id + year). Use parsed year (defaults to
-  // current year when extraction failed) so we always produce a row the UI can
-  // surface; race_date may legitimately be NULL.
+  // Edition upsert (unique on marathon_id + year). `ev.year` is guaranteed
+  // non-null here (checked before the marathon write).
   const status = computeStatus(ev.raceDate);
   await pool.query(
     `INSERT INTO marathon_editions
@@ -439,7 +424,12 @@ async function upsertEvent(ev: ParsedEvent, sourceId: string): Promise<"inserted
         distance_options = EXCLUDED.distance_options,
         start_location = COALESCE(EXCLUDED.start_location, marathon_editions.start_location),
         highlights = COALESCE(EXCLUDED.highlights, marathon_editions.highlights),
-        publish_status = 'published',
+        -- A deliberate archival must survive a re-import: flip only rows that
+        -- are not archived (review P4 — "archived, then silently published again").
+        publish_status = CASE
+          WHEN marathon_editions.publish_status = 'archived' THEN 'archived'
+          ELSE 'published'
+        END,
         last_synced_at = now(),
         updated_at = now()`,
     [
@@ -481,14 +471,20 @@ async function main() {
   // already exist so we never even fetch their detail pages.
   let already: Set<string> | null = null;
   if (SKIP_EXISTING && !DRY) {
+    // Only events that actually produced an *edition* count as imported: a
+    // marathon row without an edition is a half-import (page had no year) and
+    // must be retried on the next run (review P1).
     const r = await pool.query<{ canonical_name: string }>(
-      `SELECT canonical_name FROM marathons WHERE canonical_name LIKE 'zuicool-%'`,
+      `SELECT m.canonical_name
+         FROM marathons m
+         JOIN marathon_editions e ON e.marathon_id = m.id
+        WHERE m.canonical_name LIKE 'zuicool-%'`,
     );
     already = new Set(r.rows.map((x) => x.canonical_name.replace(/^zuicool-/, "")));
     console.log(`Skipping ${already.size} already-imported zuicool events`);
   }
 
-  const stats = { inserted: 0, updated: 0, skipped: 0, failed: 0 };
+  const stats = { inserted: 0, updated: 0, skipped: 0, no_date: 0, failed: 0 };
   // Concurrency pool — fetch up to N detail pages in parallel. zuicool tolerates
   // 5 parallel connections without throttling.
   const CONCURRENCY = 5;
@@ -527,6 +523,15 @@ async function main() {
 
   console.log("\n=== Summary ===");
   console.log(stats);
+  // Data gaps must be greppable, not buried in an object dump (review P1c).
+  if (stats.no_date > 0 || stats.failed > 0) {
+    console.log(
+      `\n⚠️  DATA GAPS: no_date=${stats.no_date} failed=${stats.failed} — ` +
+        `these events were not written/updated. Grep 'no_date' above for the ids; ` +
+        `a non-zero count means the calendar is missing rows until a later run can read a year.`,
+    );
+  }
+  console.log(`NO_DATE_EVENTS=${stats.no_date} FETCH_FAILURES=${stats.failed}`);
   await pool.end();
 }
 
