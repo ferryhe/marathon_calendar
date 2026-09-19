@@ -63,6 +63,29 @@ jobs:
             fi
           fi
 
+      - name: Type-check scripts (ratchet)
+        # The root tsconfig only includes client/ + shared/ + server/, so every
+        # file under script/ was never type-checked (review P6). tsconfig.scripts.json
+        # includes script/ alone; tsc pulls in the shared modules it imports.
+        #
+        # script/ currently carries SCRIPT_ERROR_BASELINE pre-existing errors in
+        # files this PR does not touch (import-runsignup, wmm helpers, …). This is a
+        # ratchet: the count may go DOWN but never up, so new work cannot add errors
+        # to script/ while the backlog is paid off incrementally.
+        env:
+          SCRIPT_ERROR_BASELINE: '35'
+        run: |
+          set +e
+          npx --no-install tsc --noEmit -p tsconfig.scripts.json > /tmp/tsc-scripts.log 2>&1
+          n=$(grep -c "error TS" /tmp/tsc-scripts.log)
+          echo "script/ type errors: $n (baseline $SCRIPT_ERROR_BASELINE)"
+          if [ "$n" -gt "$SCRIPT_ERROR_BASELINE" ]; then
+            echo "::error::script/ type errors grew from $SCRIPT_ERROR_BASELINE to $n"
+            cat /tmp/tsc-scripts.log
+            exit 1
+          fi
+          echo "no regression in script/"
+
       - name: Upload build artifact
         if: success()
         uses: actions/upload-artifact@v3
