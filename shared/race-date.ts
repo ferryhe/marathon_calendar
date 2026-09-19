@@ -31,12 +31,22 @@
  *     `start_datetime-loc`, other sites' JSON-LD `startDate`) > body copy with
  *     month/day but no year (year then *must* come from the authoritative
  *     field) > `date: null, reason: 'no_year'`.
+ *     **Exception — reschedules**: for a `延期/改期/推迟…至 X` clause the year of
+ *     the clause wins, then the page field, then an explicit year stated
+ *     elsewhere in the copy. Rationale: after a reschedule the page field is
+ *     usually the *updated* date, while an explicit year in the copy may still
+ *     describe the cancelled edition.
  *   - **Multi-day events store the first day** (project convention). zuicool's
  *     `start_datetime-loc` is authoritative for the *year only*; the *day* comes
  *     from the body copy's first `定于M月D日`. On conflict: year from the page
  *     field, day from the copy.
- *   - **Reschedules** (`延期/改期/推迟` + `至/到 M月D日` or `YYYY年M月D日`) win
- *     over the original date.
+ *   - **Reschedules** (`延期/改期/推迟/顺延/延后/调整为/改为/更改为` +
+ *     `至/到 M月D日` or `YYYY年M月D日`) win over the original date, wherever in
+ *     the copy they appear. A reschedule that is *mentioned* but whose new date
+ *     cannot be read yields `date: null, reason: 'rescheduled_unparsed'` — we
+ *     never fall back to the date that was just cancelled.
+ *     A `报名延期至…` clause is a registration deadline, not a race date, and is
+ *     ignored.
  *   - **Timezones**: nowrun emits UTC instants for CST races, so its JSON-LD is
  *     shifted into Asia/Shanghai (+08:00) before the calendar day is taken.
  *     Callers must NOT shift a second time when persisting.
@@ -59,7 +69,9 @@ export type RaceDateReason =
   /** matched editions disagree on the calendar day — refuse to pick one */
   | "ambiguous_multi_edition"
   /** field present but not a parseable date */
-  | "unparsable_date";
+  | "unparsable_date"
+  /** a reschedule is mentioned but its new date cannot be read */
+  | "rescheduled_unparsed";
 
 export interface PageDateResult {
   /** 4-digit year, or null when it could not be established. */
@@ -120,13 +132,13 @@ export function isoDate(year: number, month: number, day: number): string | null
 export function calendarDay(iso: string | null | undefined, tzOffsetMinutes = 0): string | null {
   if (!iso) return null;
   const m =
-    /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?)?\s*$/.exec(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?)?\s*$/i.exec(
       String(iso).trim(),
     );
   if (!m) return null;
   const [, y, mo, da, hh = "00", mi = "00", ss = "00", off] = m;
   // No offset, or an explicit non-UTC offset → the wall-clock date is the answer.
-  if (!off || off !== "Z") return isoDate(+y, +mo, +da);
+  if (!off || off.toUpperCase() !== "Z") return isoDate(+y, +mo, +da);
   const t = Date.UTC(+y, +mo - 1, +da, +hh, +mi, +ss) + tzOffsetMinutes * 60_000;
   const d = new Date(t);
   return isoDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
@@ -203,6 +215,32 @@ const NON_RACE_PREFIX = /(自|从|历经|始于)$/;
 const NON_RACE_BEFORE =
   /(报到|截止|关门|出发|领物|领取|签到|开放|报名|缴费|优惠|早鸟|折扣|出生|开展|首次)/;
 
+/** A race verb right after a date confirms it really is the race day. */
+const RACE_VERB_AFTER = /(开跑|起跑|鸣枪|发枪|开赛|开走|举办|举行|进行|开赛|开跑)/;
+
+/** `…领物定于…` / `…截止定于…` — the anchor belongs to a sub-event. */
+const ANCHORED_NON_RACE_BEFORE =
+  /(领物|领取|报到|签到|截止|报名|缴费|退费|开抢|优惠|早鸟|折扣|抽签|摇号)$/;
+
+/** `定于2026年9月1日9:30开启报名` / `…定于…领物` — anchored but not the race. */
+const ANCHORED_NON_RACE_AFTER =
+  /(开启报名|开放报名|开始报名|报名|领物|领取|报到|签到|缴费|退费|抽签|摇号|截止|上线|开抢|优惠|早鸟|折扣)/;
+
+/**
+ * The anchored `定于YYYY年M月D日` form is trusted in general, but it is *not*
+ * immune to the failure this module exists for: `定于2026年9月1日9:30开启报名`
+ * and `领物定于2026年11月6日` both anchor on a date that is not the race. The
+ * look-ahead window stops at the first punctuation so a legit
+ * `定于10月18日10:00-16:00举办，即日起…开放报名` is not vetoed.
+ */
+function anchoredLooksNonRace(text: string, start: number, end: number): boolean {
+  if (ANCHORED_NON_RACE_BEFORE.test(text.slice(Math.max(0, start - 6), start))) return true;
+  const after = text.slice(end);
+  const stop = /[，,。；;、\n]/.exec(after);
+  const window = after.slice(0, Math.min(stop ? stop.index : 12, 12));
+  return ANCHORED_NON_RACE_AFTER.test(window);
+}
+
 /** True when `index` sits inside the innermost open （…） / (…) at that point. */
 function insideParens(text: string, index: number): boolean {
   const before = text.slice(0, index);
@@ -235,9 +273,13 @@ function looksNonRaceContext(text: string, start: number, end: number): boolean 
   if (NON_RACE_BEFORE.test(text.slice(Math.max(0, start - 6), start))) return true;
   if (NON_RACE_PREFIX.test(text.slice(Math.max(0, start - 3), start))) return true;
   // 20-char look-ahead: enough for "…2018年4月26日出生；" and
-  // "…2025年12月19日9:30开启报名" (both real rows), while a legit race sentence
-  // is unaffected because those use the anchored `定于…` form.
-  return NON_RACE_CONTEXT.test(text.slice(end, end + 20));
+  // "…2025年12月19日9:30开启报名" (both real rows) …
+  const after = text.slice(end, end + 20);
+  // …but a race verb immediately after the date wins over a *later* registration
+  // or history mention inside the same window: "某某马拉松2026年12月6日在上海
+  // 开跑，报名截止11月20日。" is the race day, not a registration line.
+  if (RACE_VERB_AFTER.test(after.slice(0, 10))) return false;
+  return NON_RACE_CONTEXT.test(after);
 }
 
 /**
@@ -245,21 +287,82 @@ function looksNonRaceContext(text: string, start: number, end: number): boolean 
  * sources use. A clause preceded by registration wording (`报名延期至…`) is
  * rejected: that is a deadline change, not a race-date change.
  */
-const RE_RESCHEDULE =
-  /(?:延期|改期|推迟)[^。；;，,\n]{0,16}?(?:至|到)\s*(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日/;
+/**
+ * Two sentence shapes, both real:
+ *   - `延期/改期/推迟/顺延/延后 … 至/到 [YYYY年]M月D日`
+ *   - `调整为/改为/更改为 [YYYY年]M月D日`  (no 至/到 connector)
+ * `原定于11月9日举办，现调整为11月23日举行` is the second shape and used to be
+ * missed entirely, yielding the cancelled date.
+ */
+const RESCHEDULE_PATTERNS: RegExp[] = [
+  /(?:延期|改期|推迟|顺延|延后)[^。；;，,\n]{0,16}?(?:至|到)\s*(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
+  /(?:调整为|改为|更改为)\s*(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
+];
+
+/** Any reschedule wording, parseable or not. */
+const RESCHEDULE_MENTION = /(延期|改期|推迟|顺延|延后|调整为|改为|更改为)/;
+
+/**
+ * Wording that turns the same keywords into something else:
+ *   "组别调整为70公里", "起跑时间从7:30调整为8:30", "报名延期至…".
+ * Checked against the 12 characters preceding the keyword.
+ */
+const RESCHEDULE_SUB_EVENT_BEFORE =
+  /(报名|缴费|退费|早鸟|优惠|折扣|截止|报到|领物|领取|发枪|起跑|关门|里程|距离|组别|项目|费用|价格|名额|方式|积分|时间)$/;
+
+/** Verbs that show the clause really is about the race being postponed. */
+const RESCHEDULE_RACE_TAIL = /(举行|举办|主办|开赛|开跑|进行|另行|择期|待定|通知|公告|下月|下半年)/;
+
+/**
+ * True when the keyword at `index` is a *race* reschedule clause whose new date
+ * we cannot read (as opposed to a sub-event edit or a registration deadline).
+ * Used to refuse the cancelled date rather than reporting it as the race date.
+ */
+function isRaceRescheduleMention(text: string, index: number, length: number): boolean {
+  const before = text.slice(Math.max(0, index - 12), index);
+  if (RESCHEDULE_SUB_EVENT_BEFORE.test(before)) return false;
+  const after = text.slice(index + length, index + length + 12);
+  if (RESCHEDULE_RACE_TAIL.test(after)) return true;
+  // "…因故延期。" — the announcement ends right after the keyword, so nothing
+  // else can be the thing being postponed.
+  if (/^[\s，,]*[。！!？?]/.test(after)) return true;
+  // "延期至下月举行" — a 至/到 clause whose day we could not parse (a parseable
+  // one is handled by findReschedule before we ever get here).
+  return /^[\s]*(至|到)/.test(after);
+}
+
+/**
+ * Offset of the first reschedule mention that is a race postponement, or null.
+ * Real rows it must catch: "…将延期举行" / "延期主办，具体时间另行通知" /
+ * "延期至九月举办" (no parseable day).
+ */
+function firstRaceRescheduleMention(text: string): number | null {
+  const re = new RegExp(RESCHEDULE_MENTION.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (!isRaceRescheduleMention(text, m.index, m[0].length)) continue;
+    return m.index;
+  }
+  return null;
+}
 
 function evidenceAround(text: string, index: number, length: number): string {
   return text.slice(Math.max(0, index - 12), Math.min(text.length, index + length + 12)).trim();
 }
 
 function findFullYearDate(text: string): DateMatch | null {
-  const anchored = RE_ANCHORED_FULL.exec(text);
-  if (anchored && anchored.index !== undefined) {
+  // Anchored `定于/将于/拟于 YYYY年M月D日` first — but a vetoed anchored clause
+  // (registration / packet pickup / check-in) must not win, and we keep scanning
+  // for the next candidate rather than trusting the first hit.
+  const anchoredRe = new RegExp(RE_ANCHORED_FULL.source, "g");
+  let a: RegExpExecArray | null;
+  while ((a = anchoredRe.exec(text))) {
+    if (anchoredLooksNonRace(text, a.index, a.index + a[0].length)) continue;
     return {
-      year: +anchored[1],
-      month: +anchored[2],
-      day: +anchored[3],
-      evidence: evidenceAround(text, anchored.index, anchored[0].length),
+      year: +a[1],
+      month: +a[2],
+      day: +a[3],
+      evidence: evidenceAround(text, a.index, a[0].length),
     };
   }
   // Plain `YYYY年M月D日` is accepted only when its context looks like a race
@@ -280,12 +383,14 @@ function findFullYearDate(text: string): DateMatch | null {
 }
 
 function findMonthDay(text: string, anchoredOnly: boolean): DateMatch | null {
-  const anchored = RE_ANCHORED_MONTH_DAY.exec(text);
-  if (anchored && anchored.index !== undefined) {
+  const anchoredRe = new RegExp(RE_ANCHORED_MONTH_DAY.source, "g");
+  let a: RegExpExecArray | null;
+  while ((a = anchoredRe.exec(text))) {
+    if (anchoredLooksNonRace(text, a.index, a.index + a[0].length)) continue;
     return {
-      month: +anchored[1],
-      day: +anchored[2],
-      evidence: evidenceAround(text, anchored.index, anchored[0].length),
+      month: +a[1],
+      day: +a[2],
+      evidence: evidenceAround(text, a.index, a[0].length),
     };
   }
   if (anchoredOnly) return null;
@@ -307,12 +412,22 @@ interface RescheduleMatch extends DateMatch {
 }
 
 export function findReschedule(text: string): RescheduleMatch | null {
-  const re = new RegExp(RE_RESCHEDULE.source, "g");
+  for (const pattern of RESCHEDULE_PATTERNS) {
+    const hit = scanReschedule(text, pattern);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function scanReschedule(text: string, pattern: RegExp): RescheduleMatch | null {
+  const re = new RegExp(pattern.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
-    const before = text.slice(Math.max(0, m.index - 8), m.index);
-    // "报名延期至…" / "缴费截止推迟到…" are registration windows, not races.
-    if (/报名|缴费|退费|早鸟|优惠|折扣|截止/.test(before)) continue;
+    const before = text.slice(Math.max(0, m.index - 12), m.index);
+    // "报名延期至…" / "缴费截止推迟到…" are registration windows, and
+    // "起跑时间从7:30调整为8:30" / "组别调整为70公里" are sub-event edits — none of
+    // them is the race date (real rows zuicool-10497 / zuicool-70821).
+    if (RESCHEDULE_SUB_EVENT_BEFORE.test(before)) continue;
     // …and so is "延期至10月10日开放报名" (a deadline right after the clause), but
     // be strict with the window here: "延期至11月23日举行，报名通道继续开放" IS a
     // reschedule and is followed by 报名 later in the same sentence.
@@ -480,9 +595,38 @@ export interface TrackedEditionOpts {
  * event). Returns `null` plus a reason when the page cannot identify the edition
  * unambiguously.
  */
+/**
+ * Whatever is left of the longer name once the shared part is removed must be
+ * pure edition markers ("2026", "2026/04", "第10届"). A "5K"/"Relay"/"Half"
+ * sibling is a *different race*, not the same edition — the old >=60%
+ * containment rule happily picked those.
+ */
+const NAME_MARKER_ONLY = /^[\s\d届第季期年月日vⅤ\/·.\-]*$/;
+
+function isTrackedNameMatch(tracked: string, candidate: string): boolean {
+  if (!tracked || !candidate) return false;
+  if (tracked === candidate) return true;
+  const [short, long] = tracked.length <= candidate.length ? [tracked, candidate] : [candidate, tracked];
+  if (!long.includes(short)) return false;
+  const rest = long.split(short).join("");
+  if (rest && !NAME_MARKER_ONLY.test(rest)) return false;
+  return short.length / long.length >= 0.6;
+}
+
+/** Distinct calendar days among the given events (same-day UTC variants collapse). */
+function distinctDays(events: JsonLdEvent[], tzOffsetMinutes: number): string[] {
+  const set = new Set<string>();
+  for (const e of events) {
+    const d = calendarDay(e.startDate, tzOffsetMinutes);
+    if (d) set.add(d);
+  }
+  return [...set].sort();
+}
+
 function pickJsonLdEvent(
   events: JsonLdEvent[],
   opts: TrackedEditionOpts,
+  tzOffsetMinutes = 0,
 ): { event: JsonLdEvent; reason: RaceDateReason } | { event: null; reason: RaceDateReason } {
   const withDate = events.filter((e) => Boolean(e.startDate));
   if (withDate.length === 0) return { event: null, reason: "no_parseable_start_date" };
@@ -491,29 +635,32 @@ function pickJsonLdEvent(
   if (opts.eventUrl) {
     const want = normalizeUrlKey(opts.eventUrl);
     const byUrl = withDate.filter((e) => e.url && normalizeUrlKey(e.url) === want);
-    if (byUrl.length >= 1) return { event: byUrl[0], reason: "ok" };
+    if (byUrl.length >= 1) {
+      // Same URL, disagreeing days → refuse rather than take document order.
+      if (distinctDays(byUrl, tzOffsetMinutes).length > 1) {
+        return { event: null, reason: "ambiguous_multi_edition" };
+      }
+      return { event: byUrl[0], reason: "ok" };
+    }
   }
 
-  // 2) name match (exact normalized, then a >=60% containment match so a DB name
-  //    like "Boston Marathon 2026/04" still matches JSON-LD "Boston Marathon"
-  //    while a training-program/5k sibling does not).
+  // 2) name match: exact normalized first, then "same race + edition markers only".
   if (opts.trackedName) {
     const want = normalizeName(opts.trackedName);
     let matches: JsonLdEvent[] = [];
     if (want) {
       matches = withDate.filter((e) => e.name && normalizeName(e.name) === want);
       if (matches.length === 0) {
-        matches = withDate.filter((e) => {
-          if (!e.name) return false;
-          const got = normalizeName(e.name);
-          if (!got || !want) return false;
-          const [short, long] = got.length <= want.length ? [got, want] : [want, got];
-          return long.includes(short) && short.length / long.length >= 0.6;
-        });
+        matches = withDate.filter((e) => e.name && isTrackedNameMatch(want, normalizeName(e.name)));
       }
     }
     if (matches.length === 0) return { event: null, reason: "no_tracked_match" };
-    if (matches.length >= 1) return { event: matches[0], reason: "ok" };
+    // Contract: matched editions that disagree on the day are refused — taking
+    // matches[0] would be exactly the "first/min" behaviour this module bans.
+    if (distinctDays(matches, tzOffsetMinutes).length > 1) {
+      return { event: null, reason: "ambiguous_multi_edition" };
+    }
+    return { event: matches[0], reason: "ok" };
   }
 
   if (withDate.length === 1) return { event: withDate[0], reason: "ok" };
@@ -531,14 +678,21 @@ function resolveFromJsonLd(
   tzOffsetMinutes: number,
 ): PageDateResult {
   const events = collectJsonLdEvents(html);
-  const picked = pickJsonLdEvent(events, opts);
+  const picked = pickJsonLdEvent(events, opts, tzOffsetMinutes);
   if (!picked.event) {
+    const days = distinctDays(
+      events.filter((e) => Boolean(e.startDate)),
+      tzOffsetMinutes,
+    );
     return {
       year: null,
       date: null,
       source: "tba",
       reason: picked.reason,
-      evidence: `${events.length} JSON-LD event node(s) on page`,
+      evidence:
+        picked.reason === "ambiguous_multi_edition"
+          ? `${events.length} JSON-LD event node(s); matched editions disagree: ${days.join(", ")}`
+          : `${events.length} JSON-LD event node(s) on page`,
     };
   }
   const { event } = picked;
@@ -607,6 +761,20 @@ export function resolveZuicoolRaceDate(html: string): PageDateResult {
     };
   }
 
+  // A reschedule is mentioned but its new date cannot be read: refuse the old
+  // date instead of reporting the cancelled one ("…因故延期。" / "延期至下月举行").
+  const reschedMention = firstRaceRescheduleMention(desc);
+  if (reschedMention !== null && reschedMention < firstSentenceEnd(desc)) {
+    return {
+      year: null,
+      date: null,
+      source: "tba",
+      reason: "rescheduled_unparsed",
+      evidence: evidenceAround(desc, reschedMention, 8),
+      multiDay,
+    };
+  }
+
   const full = findFullYearDate(desc);
   if (full) {
     const iso = isoDate(full.year!, full.month, full.day);
@@ -620,6 +788,16 @@ export function resolveZuicoolRaceDate(html: string): PageDateResult {
         multiDay,
       };
     }
+    // The copy states an impossible day ("定于2026年2月30日举办"): say so rather
+    // than silently borrowing the page field's month/day.
+    return {
+      year: null,
+      date: null,
+      source: "tba",
+      reason: "unparsable_date",
+      evidence: full.evidence,
+      multiDay,
+    };
   }
 
   const md = findMonthDay(desc, false);
