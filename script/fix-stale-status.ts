@@ -31,11 +31,14 @@ const ONLY_IDS = (() => {
   return m ? m.split("=")[1].split(",") : null;
 })();
 
-const DB_URL = process.env.TARGET_DB_URL || process.env.DATABASE_URL;
-if (!DB_URL) {
-  console.error("DATABASE_URL not set");
-  process.exit(1);
-}
+const DB_URL: string = (() => {
+  const u = process.env.TARGET_DB_URL || process.env.DATABASE_URL;
+  if (!u) {
+    console.error("DATABASE_URL not set");
+    process.exit(1);
+  }
+  return u;
+})();
 const pool = new Pool({ connectionString: DB_URL });
 
 interface Row {
@@ -60,7 +63,14 @@ async function loadCandidates(client: PoolClient, onlyIds: string[] | null): Pro
            e.race_date::text, e.status,
            (CURRENT_DATE - e.race_date)::int AS days_past
     FROM marathon_editions e
-    LEFT JOIN marathon_sources ms ON ms.marathon_id = e.marathon_id
+    -- LATERAL + LIMIT 1: a bare LEFT JOIN duplicates the edition row as soon as a
+    -- marathon has a second source link, which would double-UPDATE it and append
+    -- the annotation twice (review P5).
+    LEFT JOIN LATERAL (
+      SELECT ms.source_id FROM marathon_sources ms
+      WHERE ms.marathon_id = e.marathon_id
+      ORDER BY ms.source_id LIMIT 1
+    ) ms ON TRUE
     WHERE e.publish_status = 'published'
       AND e.race_date < CURRENT_DATE
       AND e.status NOT IN ('ended', 'cancelled')
@@ -112,14 +122,25 @@ async function main() {
       await client.query("BEGIN");
       try {
         for (const r of rows) {
-          await client.query(
-            `UPDATE marathon_editions
-             SET status='ended', updated_at=NOW(),
-                 highlights = COALESCE(highlights,'') ||
-                   E'\n[2026-09-17 cron: date-arithmetic flip ' || $2 || '→ended (race_date < today)]'
-             WHERE id=$1`,
-            [r.id, r.status],
-          );
+          // Real timestamp — the previous revision stamped a hard-coded
+          // '2026-09-17', which made every later run look like the same day
+          // (review P4).
+          await client.query("SAVEPOINT row_sp");
+          try {
+            await client.query(
+              `UPDATE marathon_editions
+               SET status='ended', updated_at=NOW(),
+                   highlights = COALESCE(highlights,'') ||
+                     E'\n[stale-status ' || to_char(NOW(),'YYYY-MM-DD') || ': date-arithmetic flip ' ||
+                     $2 || '→ended (race_date < today)]'
+               WHERE id=$1`,
+              [r.id, r.status],
+            );
+            await client.query("RELEASE SAVEPOINT row_sp");
+          } catch (e) {
+            await client.query("ROLLBACK TO SAVEPOINT row_sp");
+            console.error(`  ! ${r.id}: ${(e as Error).message}`);
+          }
         }
         await client.query("COMMIT");
         console.log(`# committed (${rows.length} rows)`);

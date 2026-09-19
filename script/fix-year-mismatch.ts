@@ -33,6 +33,17 @@
  *   npx tsx script/fix-year-mismatch.ts --archive-stale     # 额外：把"解析出的日期
  *                                                           # 早已过去且挂在今年"的行
  *                                                           # 归档（默认关闭）
+ *   npx tsx script/fix-year-mismatch.ts --include-archived  # 把 archived 行纳入扫描
+ *                                                           # （默认只看 published；
+ *                                                           #  included 也只是报告）
+ *   npx tsx script/fix-year-mismatch.ts --fix-archived      # 允许 --apply 改 archived
+ *   npx tsx script/fix-year-mismatch.ts --max-changes=25    # 单次 --apply 的改动上限
+ *
+ * 安全边界（2026-09-20 review round 1 之后）：
+ *   - 默认 DRY-RUN；--apply 默认只作用于 zuicool（需显式 --source= 才放宽）
+ *   - YEAR_MISMATCH 只改 year，不静默改 race_date（月日不一致 → DATE_MISMATCH 只报告）
+ *   - archived 默认只报告；单次改动数受 --max-changes 限制；逐行 SAVEPOINT，
+ *     一行冲突不会让整批回滚
  *
  * Env:
  *   DATABASE_URL / TARGET_DB_URL
@@ -62,9 +73,18 @@ const CONCURRENCY = (() => {
   const m = process.argv.find((a) => a.startsWith("--concurrency="));
   return m ? Math.max(1, parseInt(m.split("=")[1], 10)) : 6;
 })();
-const ONLY_SOURCES = (() => {
+let ONLY_SOURCES: Set<string> | null = (() => {
   const m = process.argv.find((a) => a.startsWith("--source="));
   return m ? new Set(m.split("=")[1].split(",").map((s) => s.trim())) : null;
+})();
+/** Include archived editions in the scan (default off — they are historical). */
+const INCLUDE_ARCHIVED = process.argv.includes("--include-archived");
+/** Allow --apply to rewrite archived rows (default off — report only). */
+const FIX_ARCHIVED = process.argv.includes("--fix-archived");
+/** Hard ceiling on how many rows one --apply run may change. */
+const MAX_CHANGES = (() => {
+  const m = process.argv.find((a) => a.startsWith("--max-changes="));
+  return m ? Math.max(1, parseInt(m.split("=")[1], 10)) : 25;
 })();
 
 const DB_URL: string = (() => {
@@ -160,18 +180,22 @@ async function loadCandidates(client: PoolClient, onlyIds: string[] | null): Pro
         -- (3) reschedule wording
         OR e.highlights ~ '(延期|改期|推迟)[^。]{0,16}(至|到)\\s*\\d{1,2}\\s*月'
       )
-      -- archived rows must be checked too (they were invisible before)
-      AND (e.publish_status IS NULL OR e.publish_status IN ('published', 'archived'))
+      -- archived rows are historical: only scanned when --include-archived, and
+      -- even then they are report-only unless --fix-archived is also given.
+      AND (e.publish_status = 'published' OR e.publish_status = 'archived' OR e.publish_status IS NULL)
       ${idFilter}
     ORDER BY e.year DESC, e.race_date DESC NULLS LAST
   `;
   const { rows } = await client.query(sql, args);
-  return rows as Row[];
+  const all = rows as Row[];
+  // archived rows are historical: scanned only with --include-archived, and even
+  // then they stay report-only unless --fix-archived is also given.
+  return INCLUDE_ARCHIVED ? all : all.filter((r) => (r.publish_status ?? "published") === "published");
 }
 
 // ---------- 判定 ----------
 
-type Bucket = "YEAR_MISMATCH" | "DATE_MISMATCH" | "UNFETCHABLE" | "OK";
+type Bucket = "YEAR_MISMATCH" | "DATE_MISMATCH" | "UNFETCHABLE" | "ARCHIVED_MISMATCH" | "OK";
 
 interface Decision {
   row: Row;
@@ -234,6 +258,36 @@ async function decide(row: Row): Promise<Decision> {
       : undefined;
 
   if (resolved.year !== row.year) {
+    // "Fix the year" is only claimed when nothing else moved: if the month/day
+    // changed too, the page is describing a different calendar day (reschedule /
+    // re-run), which is a bigger claim than a year correction → report only.
+    const sameMonthDay =
+      row.race_date !== null && row.race_date.slice(5) === resolved.date.slice(5);
+    if (row.race_date !== null && !sameMonthDay) {
+      return {
+        row,
+        sourceKind,
+        bucket: "DATE_MISMATCH",
+        detail: resolved.source,
+        resolved,
+        httpStatus: fetched.status,
+        note: `year+day both changed (year ${row.year}→${resolved.year})${
+          note ? ` + ${note}` : ""
+        }`,
+      };
+    }
+    // Archived rows are reported, never silently rewritten (review P3).
+    if ((row.publish_status ?? "published") !== "published" && !FIX_ARCHIVED) {
+      return {
+        row,
+        sourceKind,
+        bucket: "ARCHIVED_MISMATCH",
+        detail: `${resolved.source} (archived; report only)`,
+        resolved,
+        httpStatus: fetched.status,
+        note,
+      };
+    }
     const decision: Decision = {
       row,
       sourceKind,
@@ -283,17 +337,25 @@ async function apply(client: PoolClient, d: Decision): Promise<void> {
     await client.query(
       `UPDATE marathon_editions
          SET publish_status='archived', updated_at=NOW(),
-             highlights = COALESCE(highlights,'') || E'\n[year-mismatch: ${
-               d.archiveReason ?? "stale"
-             }]'
+             highlights = COALESCE(highlights,'') || E'\n[year-mismatch ' ||
+               to_char(NOW(), 'YYYY-MM-DD') || ': ' || COALESCE($2, 'stale') || ']'
        WHERE id=$1`,
       [d.row.id],
     );
     return;
   }
+  // Only the year is rewritten (race_date keeps its month/day). When there was no
+  // date at all yet, storing the resolved one is strictly better.
+  if (d.row.race_date === null) {
+    await client.query(
+      `UPDATE marathon_editions SET year=$2, race_date=$3, updated_at=NOW() WHERE id=$1`,
+      [d.row.id, d.resolved.year, d.resolved.date],
+    );
+    return;
+  }
   await client.query(
-    `UPDATE marathon_editions SET year=$2, race_date=$3, updated_at=NOW() WHERE id=$1`,
-    [d.row.id, d.resolved.year, d.resolved.date],
+    `UPDATE marathon_editions SET year=$2, updated_at=NOW() WHERE id=$1`,
+    [d.row.id, d.resolved.year],
   );
 }
 
@@ -312,10 +374,17 @@ async function main() {
 
   const client = await pool.connect();
   try {
+    // --apply touches the live calendar: default it to the source whose adapter
+    // has real-world mileage (zuicool) and require an explicit --source= to widen.
+    if (APPLY && !ONLY_SOURCES) {
+      ONLY_SOURCES = new Set(["zuicool"]);
+      console.log("# --apply defaults to --source=zuicool (pass --source=… to widen)");
+    }
     let rows = await loadCandidates(client, ONLY_IDS);
     console.log(`# candidates: ${rows.length}`);
-    if (ONLY_SOURCES) {
-      rows = rows.filter((r) => ONLY_SOURCES.has(classifySourceKind(r.source_url)));
+    const allowedSources = ONLY_SOURCES;
+    if (allowedSources) {
+      rows = rows.filter((r) => allowedSources.has(classifySourceKind(r.source_url)));
       console.log(`# candidates after --source filter: ${rows.length}`);
     }
     if (rows.length === 0) {
@@ -353,23 +422,42 @@ async function main() {
       YEAR_MISMATCH: [],
       DATE_MISMATCH: [],
       UNFETCHABLE: [],
+      ARCHIVED_MISMATCH: [],
       OK: [],
     };
     for (const d of decisions) buckets[d.bucket].push(d);
 
     if (APPLY) {
       const fixable = buckets.YEAR_MISMATCH.filter((d) => d.resolved?.date);
+      if (fixable.length > MAX_CHANGES) {
+        console.error(
+          `\n# REFUSING to apply: ${fixable.length} row(s) exceed --max-changes=${MAX_CHANGES}.`,
+        );
+        console.error(
+          `# Review the YEAR_MISMATCH list above, then re-run with --max-changes=${fixable.length} (or a smaller --limit).`,
+        );
+        process.exit(2);
+      }
       console.log(`\n# applying ${fixable.length} YEAR_MISMATCH row(s)…`);
       await client.query("BEGIN");
-      try {
-        for (const d of fixable) await apply(client, d);
-        await client.query("COMMIT");
-        console.log("# committed");
-      } catch (e) {
-        await client.query("ROLLBACK");
-        console.error(`# ROLLBACK: ${(e as Error).message}`);
-        process.exit(1);
+      const failedRows: string[] = [];
+      let changed = 0;
+      for (const d of fixable) {
+        // Savepoint per row: one conflict (e.g. the target year is taken by
+        // another edition of the same marathon) must not roll the whole batch back.
+        await client.query("SAVEPOINT row_sp");
+        try {
+          await apply(client, d);
+          await client.query("RELEASE SAVEPOINT row_sp");
+          changed++;
+        } catch (e) {
+          await client.query("ROLLBACK TO SAVEPOINT row_sp");
+          failedRows.push(`${d.row.id}: ${(e as Error).message}`);
+        }
       }
+      await client.query("COMMIT");
+      console.log(`# committed ${changed} row(s)${failedRows.length ? `, ${failedRows.length} failed` : ""}`);
+      for (const f of failedRows) console.error(`  ! ${f}`);
     }
 
     // ---- required three-bucket report ----
@@ -377,6 +465,7 @@ async function main() {
     console.log(`  YEAR_MISMATCH : ${buckets.YEAR_MISMATCH.length}   (auto-fix candidates)`);
     console.log(`  DATE_MISMATCH : ${buckets.DATE_MISMATCH.length}   (report only — multi-day / rescheduled / page changed)`);
     console.log(`  UNFETCHABLE   : ${buckets.UNFETCHABLE.length}   (403/302/404, no source_url, or no resolvable year — skipped)`);
+    console.log(`  ARCHIVED_MIS  : ${buckets.ARCHIVED_MISMATCH.length}   (archived rows — report only unless --fix-archived)`);
     console.log(`  [aux] OK      : ${buckets.OK.length}   (page agrees with DB)`);
 
     const tally = (ds: Decision[], key: (d: Decision) => string) => {
@@ -391,6 +480,7 @@ async function main() {
     console.log(`  YEAR_MISMATCH by source : ${tally(buckets.YEAR_MISMATCH, (d) => `${d.sourceKind}/${d.detail}`) || "-"}`);
     console.log(`  DATE_MISMATCH by source : ${tally(buckets.DATE_MISMATCH, (d) => `${d.sourceKind}/${d.note ?? "date changed"}`) || "-"}`);
     console.log(`  UNFETCHABLE   by reason : ${tally(buckets.UNFETCHABLE, (d) => d.detail) || "-"}`);
+    console.log(`  ARCHIVED_MIS  by source : ${tally(buckets.ARCHIVED_MISMATCH, (d) => `${d.sourceKind}/${d.detail}`) || "-"}`);
 
     const show = (d: Decision) => {
       const r = d.resolved;

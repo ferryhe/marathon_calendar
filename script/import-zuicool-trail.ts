@@ -341,6 +341,18 @@ async function upsertEvent(
     return "skipped";
   }
 
+  // A year is REQUIRED before anything is written. The old code fell back to
+  // "current year" when extraction failed — that is how 98 zuicool rows landed on
+  // the wrong calendar year. The check must happen *before* the `marathons` write:
+  // a marathon row without any edition is a half-import, and `--skip-existing`
+  // (which keys off imported events) would then never retry it (review P1).
+  if (ev.year == null || !ev.raceDate) {
+    console.warn(
+      `  ! no_date zuicool-${ev.zuicoolId} '${ev.name}' — no resolvable year (source=${ev.dateSource}, reason=${ev.dateReason}); nothing written`,
+    );
+    return "no_date";
+  }
+
   // Compose city display: "Hangzhou (Lin'an)" style — keep Chinese for now.
   const cityDisplay = ev.district && ev.city
     ? `${ev.city}（${ev.district}）`
@@ -387,18 +399,8 @@ async function upsertEvent(
 
   if (DRY || marathonId === "dry-run") return action;
 
-  // Edition upsert (unique on marathon_id + year).
-  // A year is REQUIRED here: the previous code wrote the parsed year with a
-  // "defaults to current year when extraction failed" fallback, which is how 98
-  // rows ended up on the wrong calendar year. If the page states no year we skip
-  // the edition write entirely and keep the (correct) marathon row.
-  if (ev.year == null) {
-    console.warn(
-      `  ! no_date zuicool-${ev.zuicoolId} '${ev.name}' — no resolvable year (source=${ev.dateSource}, reason=${ev.dateReason}); edition skipped`,
-    );
-    return "no_date";
-  }
-
+  // Edition upsert (unique on marathon_id + year). `ev.year` is guaranteed
+  // non-null here (checked before the marathon write).
   const status = computeStatus(ev.raceDate);
   await pool.query(
     `INSERT INTO marathon_editions
@@ -411,7 +413,12 @@ async function upsertEvent(
         distance_options = EXCLUDED.distance_options,
         start_location = COALESCE(EXCLUDED.start_location, marathon_editions.start_location),
         highlights = COALESCE(EXCLUDED.highlights, marathon_editions.highlights),
-        publish_status = 'published',
+        -- A deliberate archival must survive a re-import: flip only rows that
+        -- are not archived (review P4 — "archived, then silently published again").
+        publish_status = CASE
+          WHEN marathon_editions.publish_status = 'archived' THEN 'archived'
+          ELSE 'published'
+        END,
         last_synced_at = now(),
         updated_at = now()`,
     [
@@ -453,8 +460,14 @@ async function main() {
   // already exist so we never even fetch their detail pages.
   let already: Set<string> | null = null;
   if (SKIP_EXISTING && !DRY) {
+    // Only events that actually produced an *edition* count as imported: a
+    // marathon row without an edition is a half-import (page had no year) and
+    // must be retried on the next run (review P1).
     const r = await pool.query<{ canonical_name: string }>(
-      `SELECT canonical_name FROM marathons WHERE canonical_name LIKE 'zuicool-%'`,
+      `SELECT m.canonical_name
+         FROM marathons m
+         JOIN marathon_editions e ON e.marathon_id = m.id
+        WHERE m.canonical_name LIKE 'zuicool-%'`,
     );
     already = new Set(r.rows.map((x) => x.canonical_name.replace(/^zuicool-/, "")));
     console.log(`Skipping ${already.size} already-imported zuicool events`);
@@ -499,6 +512,15 @@ async function main() {
 
   console.log("\n=== Summary ===");
   console.log(stats);
+  // Data gaps must be greppable, not buried in an object dump (review P1c).
+  if (stats.no_date > 0 || stats.failed > 0) {
+    console.log(
+      `\n⚠️  DATA GAPS: no_date=${stats.no_date} failed=${stats.failed} — ` +
+        `these events were not written/updated. Grep 'no_date' above for the ids; ` +
+        `a non-zero count means the calendar is missing rows until a later run can read a year.`,
+    );
+  }
+  console.log(`NO_DATE_EVENTS=${stats.no_date} FETCH_FAILURES=${stats.failed}`);
   await pool.end();
 }
 
