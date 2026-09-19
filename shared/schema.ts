@@ -82,6 +82,9 @@ export const marathonEditions = pgTable(
       .notNull(),
     year: integer("year").notNull(),
     raceDate: date("race_date"),
+    // 赛事末日：多日赛/两天赛用（2027 伦敦马拉松 = 04-24 起、04-25 止）。
+    // 约定：race_date = 赛事**首日**（沿用"多日赛存首日"惯例）；单日赛为 NULL。
+    raceEndDate: date("race_end_date"),
     registrationUrl: text("registration_url"),
     registrationOpenDate: date("registration_open_date"),
     registrationCloseDate: date("registration_close_date"),
