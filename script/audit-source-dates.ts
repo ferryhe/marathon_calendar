@@ -28,6 +28,10 @@
  *   UNRESOLVABLE          适配器读不出年份（no_year / rescheduled_unparsed / …）
  *   FETCH_FAIL            抓不到页面
  *
+ * 报表口径：`# 需处理的 N 条` 只列**需要跟进**的档；`OLD_EDITION_RETAINED`（信息档，文档写明
+ * "不是错"）单列一行、不进需处理清单 —— 否则 55 条正常态噪音会把真告警淹掉。逐条明细永远在
+ * `--out` 的 JSON 里，不因报表口径而丢。
+ *
  * 只读：只 SELECT + 抓页面，绝不写库。
  */
 import "dotenv/config";
@@ -227,12 +231,22 @@ async function main() {
     const n = results.filter((r) => r.verdict === v).length;
     if (n) console.log(`  ${v.padEnd(15)} ${String(n).padStart(4)}  (${((n / results.length) * 100).toFixed(1)}%)`);
   }
-  const bad = results.filter((r) => r.verdict !== "OK");
+  // 「需处理」= 真需要跟进的档。OLD_EDITION_RETAINED 是信息档（页面已翻届 + 新届已入库，
+  // 旧届留历史属正常态，见文件头），不要混进来 —— 55 条正常态噪音会把 15 条真告警淹掉。
+  const INFO_ONLY: Verdict[] = ["OLD_EDITION_RETAINED"];
+  const bad = results.filter((r) => r.verdict !== "OK" && !INFO_ONLY.includes(r.verdict));
+  const infoOnly = results.filter((r) => INFO_ONLY.includes(r.verdict));
   console.log(`\n# 需处理的 ${bad.length} 条（前 25）`);
   for (const r of bad.slice(0, 25)) {
     console.log(
       `  [${r.verdict}] kind=${r.kind} db=${r.db_date ?? "null"}(y${r.year}) → page=${r.resolved?.date ?? "-"} ` +
         `days=[${r.pageDays.slice(0, 4).join(",")}] '${r.race_name.slice(0, 30)}'\n      ${r.url}\n      ev=${(r.evidence ?? r.note ?? "").slice(0, 96)}`,
+    );
+  }
+  if (infoOnly.length) {
+    console.log(
+      `\n# 信息档 ${infoOnly.length} 条（不必处理）：OLD_EDITION_RETAINED —— 页面已翻届且新届已入库，\n` +
+        `#   旧届留历史属正常态；逐条明细见 ${OUT}`,
     );
   }
   console.log(`\n# 明细已存 ${OUT}`);
