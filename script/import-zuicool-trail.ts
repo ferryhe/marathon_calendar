@@ -22,6 +22,7 @@
  */
 import "dotenv/config";
 import { Pool } from "pg";
+import { metaContent, resolveZuicoolRaceDate } from "../shared/race-date.js";
 
 const DRY = process.argv.includes("--dry");
 const SKIP_EXISTING = process.argv.includes("--skip-existing");
@@ -57,8 +58,10 @@ interface ParsedEvent {
   zuicoolId: string;
   url: string;
   name: string;
-  raceDate: string | null;          // YYYY-MM-DD
-  year: number;
+  raceDate: string | null;          // YYYY-MM-DD (null when unresolvable)
+  year: number | null;              // null when the page states no year — never guessed
+  dateSource: string;               // adapter provenance, for logs
+  dateReason: string;               // adapter reason, for logs
   province: string | null;
   city: string | null;
   district: string | null;
@@ -76,69 +79,16 @@ async function fetchText(url: string): Promise<string> {
   return await res.text();
 }
 
-function metaContent(html: string, name: string): string | null {
-  // Match `<meta name="X" content="...">` OR `<meta property="X" ...>`. Content
-  // can be on either side of the attribute order; capture everything until the
-  // closing quote — descriptions span many lines (DOTALL via [\s\S]).
-  const re = new RegExp(
-    `<meta[^>]+(?:name|property)=["']${name.replace(/[.*+?^${}()|[\\]/g, "\\$&")}["'][^>]*content=["']([\\s\\S]*?)["'][^>]*/?>`,
-    "i",
-  );
-  const m = html.match(re);
-  if (m) return decodeEntities(m[1]).trim();
-  // Try reverse order: content first.
-  const re2 = new RegExp(
-    `<meta[^>]+content=["']([\\s\\S]*?)["'][^>]*(?:name|property)=["']${name}["']`,
-    "i",
-  );
-  const m2 = html.match(re2);
-  return m2 ? decodeEntities(m2[1]).trim() : null;
-}
-
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ");
-}
-
-/** Best-effort date parse from og:description.
- *  Patterns observed:
- *    "...定于2026年9月26日上午6:00..."
- *    "...定于9月26日上午6:00..."  (year missing — fall back to title or 当前/次年)
- *    "...将于12月6日..."           (verb variant)
+/** Best-effort date parse for a single race, delegated to the shared per-source
+ *  adapter (see shared/race-date.ts).
+ *
+ *  History: this file used to carry an inline `parseRaceDate(desc, title)` whose
+ *  no-year branch fell back to `new Date().getFullYear()` (+ a ">60 days in the
+ *  past → +1 year" heuristic). Measured effect: 98 of 998 zuicool rows stored a
+ *  wrong year (e.g. `天上阿里・极境征途—冈仁波齐52`真 2025-10-01 被记成 2026-10-01).
+ *  The adapter never guesses: no year resolvable → `{ year: null, date: null }`
+ *  and the caller skips the edition row.
  */
-function parseRaceDate(desc: string, title: string): { date: string | null; year: number } {
-  const fullYear = desc.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-  if (fullYear) {
-    const [, y, m, d] = fullYear;
-    return { date: iso(+y, +m, +d), year: +y };
-  }
-  const monthDay = desc.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-  // Year heuristic: leading 4-digit in title (e.g. "2026..."), otherwise use
-  // current calendar year and bump to next year if the parsed date is already
-  // > 60 days in the past.
-  const titleYear = title.match(/^\s*(20\d\d)/)?.[1];
-  let year = titleYear ? +titleYear : new Date().getFullYear();
-  if (!monthDay) return { date: null, year };
-  const month = +monthDay[1];
-  const day = +monthDay[2];
-  if (!titleYear) {
-    const candidate = new Date(year, month - 1, day);
-    const now = new Date();
-    if (candidate.getTime() < now.getTime() - 60 * 86400000) year += 1;
-  }
-  return { date: iso(year, month, day), year };
-}
-
-function iso(y: number, m: number, d: number): string {
-  const mm = String(m).padStart(2, "0");
-  const dd = String(d).padStart(2, "0");
-  return `${y}-${mm}-${dd}`;
-}
 
 /** Parse distance categories from the structured paragraphs in og:description.
  *  zuicool's organizer-authored lead paragraph follows the convention:
@@ -260,17 +210,27 @@ async function parseEvent(zuicoolId: string): Promise<ParsedEvent | null> {
     console.warn(`  ! missing meta for ${zuicoolId}`);
     return null;
   }
-  const { date, year } = parseRaceDate(description, name);
+  const resolved = resolveZuicoolRaceDate(html);
   const loc = parseLocation(keywords);
   const distances = parseDistances(description);
   const start = parseStartLocation(description);
   const highlights = description.split(/[\n。]/).slice(0, 1).join("").trim() || null;
+  if (resolved.year == null) {
+    // No year stated anywhere on the page (copy without a year + no
+    // start_datetime-loc). Skip the edition write rather than invent a year —
+    // this is exactly the branch that used to fabricate "current year" rows.
+    console.warn(
+      `  ! ${zuicoolId} '${name.trim()}' — no year resolvable (reason=${resolved.reason ?? "?"}, evidence="${resolved.evidence ?? ""}"); edition will be skipped`,
+    );
+  }
   return {
     zuicoolId,
     url,
     name: name.trim(),
-    raceDate: date,
-    year,
+    raceDate: resolved.date,
+    year: resolved.year,
+    dateSource: resolved.source,
+    dateReason: resolved.reason ?? "ok",
     province: loc.province,
     city: loc.city,
     district: loc.district,
@@ -352,7 +312,10 @@ async function ensureSourceId(): Promise<string> {
   return inserted.rows[0].id;
 }
 
-async function upsertEvent(ev: ParsedEvent, sourceId: string): Promise<"inserted" | "updated" | "skipped"> {
+async function upsertEvent(
+  ev: ParsedEvent,
+  sourceId: string,
+): Promise<"inserted" | "updated" | "skipped" | "no_date"> {
   const canonical = `zuicool-${ev.zuicoolId}`;
   // Match by canonical_name ONLY. Matching by display name would collide with
   // unrelated road-marathon rows that happen to share a name and silently
@@ -424,9 +387,18 @@ async function upsertEvent(ev: ParsedEvent, sourceId: string): Promise<"inserted
 
   if (DRY || marathonId === "dry-run") return action;
 
-  // Edition upsert (unique on marathon_id + year). Use parsed year (defaults to
-  // current year when extraction failed) so we always produce a row the UI can
-  // surface; race_date may legitimately be NULL.
+  // Edition upsert (unique on marathon_id + year).
+  // A year is REQUIRED here: the previous code wrote the parsed year with a
+  // "defaults to current year when extraction failed" fallback, which is how 98
+  // rows ended up on the wrong calendar year. If the page states no year we skip
+  // the edition write entirely and keep the (correct) marathon row.
+  if (ev.year == null) {
+    console.warn(
+      `  ! no_date zuicool-${ev.zuicoolId} '${ev.name}' — no resolvable year (source=${ev.dateSource}, reason=${ev.dateReason}); edition skipped`,
+    );
+    return "no_date";
+  }
+
   const status = computeStatus(ev.raceDate);
   await pool.query(
     `INSERT INTO marathon_editions
@@ -488,7 +460,7 @@ async function main() {
     console.log(`Skipping ${already.size} already-imported zuicool events`);
   }
 
-  const stats = { inserted: 0, updated: 0, skipped: 0, failed: 0 };
+  const stats = { inserted: 0, updated: 0, skipped: 0, no_date: 0, failed: 0 };
   // Concurrency pool — fetch up to N detail pages in parallel. zuicool tolerates
   // 5 parallel connections without throttling.
   const CONCURRENCY = 5;
