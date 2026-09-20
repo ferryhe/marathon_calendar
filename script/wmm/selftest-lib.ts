@@ -59,6 +59,36 @@ const TODAY = "2026-09-20";
   check("博览会日期仍被排除", r.chosen === null || r.chosen.date !== "2027-04-16", r.chosen?.date);
 }
 
+{
+  // 审计 D7：区间候选不得压过「宣告式单日比赛日」（原先会静默返回区间首日）
+  const t = `Race weekend runs 17–19 April 2027 with the Expo on 16 and 17 April 2027; the race will be held on 19 April 2027.`;
+  const r = pickRaceDates(t, TODAY, HINT);
+  check("D7 区间不压过宣告式单日 → 选 2027-04-19", r.chosen?.date === "2027-04-19", { chosen: r.chosen?.date, notes: r.notes });
+  check("D7 被剔除的区间在 dropped 里可见", r.droppedCandidates.some((c) => c.date === "2027-04-17"), r.droppedCandidates.map((c) => [c.date, c.dateEnd]));
+}
+
+{
+  // 审计 D3：跨月区间（日/月 写法）
+  const t = `The race will take place 30 April–1 May 2027.`;
+  const r = pickRaceDates(t, TODAY, HINT);
+  check("D3 跨月区间被识别为两天（04-30 → 05-01）", r.chosen?.date === "2027-04-30" && r.chosen?.dateEnd === "2027-05-01", r.chosen);
+  check("D3 twoDay = true", r.twoDay === true, r.twoDay);
+}
+
+{
+  // 审计 D3（月/日 写法）
+  const t = `The race will take place April 30–May 1, 2027.`;
+  const r = pickRaceDates(t, TODAY, HINT);
+  check("D3 跨月区间（月/日 写法）同样识别", r.chosen?.date === "2027-04-30" && r.chosen?.dateEnd === "2027-05-01", r.chosen);
+}
+
+{
+  // 审计 D1：日期在前、赛事名在后
+  const t = `On 19 April 2027 the 131st Boston Marathon will be held.`;
+  const r = pickRaceDates(t, TODAY, HINT);
+  check("D1 赛事名在日期之后也能读到 → 2027-04-19", r.chosen?.date === "2027-04-19", { chosen: r.chosen?.date, notes: r.notes });
+}
+
 console.log(`\n# ${pass} assertion(s) passed, ${fails.length} failed`);
 if (fails.length) {
   console.log("# FAILED:", fails.join(" | "));
