@@ -618,6 +618,7 @@ export default function MarathonDetailPage() {
                             registrationStart={edition.registrationOpenDate}
                             registrationEnd={edition.registrationCloseDate}
                             registrationStatus={edition.registrationStatus ?? null}
+                            isLottery={edition.isLottery ?? null}
                             size="md"
                           />
                         </div>

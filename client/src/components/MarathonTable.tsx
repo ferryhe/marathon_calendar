@@ -356,6 +356,7 @@ export function MarathonTable({
                             registrationStart={event.nextEdition?.registrationOpenDate ?? null}
                             registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
                             registrationStatus={event.nextEdition?.registrationStatus ?? null}
+                            isLottery={event.nextEdition?.isLottery ?? null}
                             />
                             <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                           </div>
@@ -405,6 +406,7 @@ export function MarathonTable({
                             registrationStart={event.nextEdition?.registrationOpenDate ?? null}
                             registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
                             registrationStatus={event.nextEdition?.registrationStatus ?? null}
+                            isLottery={event.nextEdition?.isLottery ?? null}
                         />
                         <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                       </div>
@@ -454,6 +456,7 @@ export function MarathonTable({
                         registrationStart={event.nextEdition?.registrationOpenDate ?? null}
                         registrationEnd={event.nextEdition?.registrationCloseDate ?? null}
                         registrationStatus={event.nextEdition?.registrationStatus ?? null}
+                        isLottery={event.nextEdition?.isLottery ?? null}
                         glow={false}
                       />
                       <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
