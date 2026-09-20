@@ -83,6 +83,11 @@ export function toText(html: string): string {
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&amp;/g, "&")
+    // HTML 实体必须先解码：开普敦官网把日期区间写成 `22&ndash;23 May 2027`，
+    // 不解码的话数字被 "&ndash;" 隔开，区间根本匹配不到。
+    .replace(/&ndash;|&#8211;|&mdash;|&#8212;/g, "–")
+    .replace(/&rsquo;|&#8217;|&#39;/g, "'")
+    .replace(/&quot;|&#34;/g, '"')
     .replace(/&#39;|&rsquo;|&#8217;/g, "'")
     .replace(/&nbsp;/g, " ")
     .replace(/[ \t\r\n\u00a0]+/g, " ")
@@ -165,6 +170,12 @@ export function extractCandidates(text: string): Candidate[] {
   // 英文：两天 —— "…on Saturday 24 and Sunday 25 April 2027"（德式星期名同样支持）
   const two = new RegExp(String.raw`(?:${DAYNAME})\s+(\d{1,2})\s*(?:,)?\s+and\s+(?:${DAYNAME})\s+(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
   for (const m of text.matchAll(two)) push(mk(+m[1], +m[2], m[3], +m[4], m.index ?? 0));
+
+  // 英文：破折号区间 —— "22–23 May 2027" / "April 24–25, 2027"（开普敦官网实测是 &ndash; 区间）
+  const dash = new RegExp(String.raw`(\d{1,2})\s*[–—−-]\s*(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
+  for (const m of text.matchAll(dash)) push(mk(+m[1], +m[2], m[3], +m[4], m.index ?? 0));
+  const usDash = new RegExp(String.raw`(${MONTH_ALT})\.?\s+(\d{1,2})\s*[–—−-]\s*(\d{1,2}),?\s+(\d{4})`, "gi");
+  for (const m of text.matchAll(usDash)) push(mk(+m[2], +m[3], m[1], +m[4], m.index ?? 0));
 
   // 英文：简写 —— "24 & 25 April 2027"
   const amp = new RegExp(String.raw`(\d{1,2})\s*(?:&|and)\s*(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
