@@ -237,10 +237,31 @@ export function resolveEditionStatus(params: {
   raceDate?: string | Date | null;
   registrationStart?: string | Date | null;
   registrationEnd?: string | Date | null;
+  /** 报名状态（来自官网采集的 registration_status）。语义比 edition status 更专一：它只说"报名"。 */
+  registrationStatus?: string | null;
   cancelled?: boolean;
   now?: Date;
 }): DisplayEditionStatus {
   const normalizedStatus = normalizeLegacyStatus(params.status);
+  const normalizedRegistration = normalizeLegacyStatus(params.registrationStatus);
+
+  // 0. 比赛已结束/进行中/取消 —— 这三类压过一切（报名状态不再有意义）。
+  const raceOnly = computeEditionStatus({
+    raceDate: params.raceDate,
+    registrationStart: null,
+    registrationEnd: null,
+    cancelled: params.cancelled ?? false,
+    now: params.now,
+  });
+  if (raceOnly === "ended" || raceOnly === "racing" || raceOnly === "cancelled") return raceOnly;
+
+  // 0.1 官网明确采集到的"报名已截止/报名中"优先于 edition 的显式 status。
+  //     为什么：edition status 常见"报名期刚过、状态还停在 upcoming"的情况 ——
+  //     实测波马 2027：报名窗口 2026-09-14~09-18 已过（官网首页 QUALIFIER REGISTRATION HAS CLOSED），
+  //     但 edition status 仍是 upcoming，页面会显示成"报名未开始"。
+  if (normalizedRegistration === "closed" || normalizedRegistration === "open") {
+    return normalizedRegistration;
+  }
 
   // 1. Special case: do not trust `upcoming` for near-future races.
   //    When an explicit upcoming is stale but the race is within 14 days,
@@ -249,11 +270,16 @@ export function resolveEditionStatus(params: {
     const now = params.now ?? new Date();
     const today = toLocalDay(now)!;
     const raceDate = toLocalDay(params.raceDate);
+    const regEndDay = toLocalDay(params.registrationEnd);
 
-    if (
-      raceDate &&
-      Math.round((raceDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) <= 14
-    ) {
+    // 不信任过期的显式 `upcoming`：① 比赛在 14 天内；② **报名截止日已经过去**（新增）。
+    // ② 之前缺失，导致"报名已截止但状态还写着 upcoming"的届次在页面上显示成"报名未开始"
+    // （实测：波马 2027 报名窗口 2026-09-18 已过、edition status 仍是 upcoming）。
+    const nearRace =
+      raceDate && Math.round((raceDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) <= 14;
+    const regWindowClosed = Boolean(regEndDay && regEndDay.getTime() < today.getTime());
+
+    if (raceDate && (nearRace || regWindowClosed)) {
       return computeEditionStatus({
         raceDate: params.raceDate,
         registrationStart: params.registrationStart,
