@@ -54,9 +54,11 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
   // 比赛日缺失（官网尚未公布）→ 显示「待定」，绝不拿 createdAt 冒充比赛日（PR #21）。
   // 单日日期按字符串切分解析，不用 new Date("YYYY-MM-DD")：后者被当成 UTC，
   // 在 UTC 以西时区（America/New_York / America/Los_Angeles）会把比赛日渲染成前一天。
-  const raceDate = event.nextEdition?.raceDate ?? "";
-  const hasRaceDate = Boolean(raceDate);
+  // 只取日期段以兼容带 T 的时间戳（与 lib/dateRange.ts 同口径）；非法串回落「待定」，不渲染 NaN-NaN-NaN。
+  const raceDate = (event.nextEdition?.raceDate ?? "").split("T")[0];
   const [year = 0, month = 0, day = 0] = raceDate.split("-").map(Number);
+  const hasRaceDate =
+    Boolean(raceDate) && Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day);
   const isFavorited = favoriteStatus?.isFavorited ?? false;
 
   const toggleFavorite = async () => {
