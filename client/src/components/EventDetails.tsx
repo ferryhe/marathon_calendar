@@ -88,6 +88,8 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
         <div className="bg-secondary/30 p-8 pb-6 sticky top-0 z-10 backdrop-blur-md">
           <div className="flex justify-between items-start mb-4">
             <StatusBadge
+              registrationStatus={event.nextEdition?.registrationStatus ?? null}
+              isLottery={event.nextEdition?.isLottery ?? null}
               status={event.nextEdition?.status}
               raceDate={event.nextEdition?.raceDate ?? null}
               registrationStart={event.nextEdition?.registrationOpenDate ?? null}

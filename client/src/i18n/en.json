@@ -73,7 +73,8 @@
     "tba": "TBA",
     "hint": "List status: lottery races show lottery wording (Lottery Open / Lottery Closed); non-lottery races show registration wording (Registration Open / Registration Closed). Other entry methods (charity, tour operators, etc.) are on the event detail page.",
     "openGeneral": "Registration Open",
-    "closedGeneral": "Registration Closed"
+    "closedGeneral": "Registration Closed",
+    "pending": "TBA"
   },
   "channel": {
     "lottery": "Lottery",
