@@ -128,7 +128,12 @@ export function sentenceAround(text: string, idx: number): string {
  * 反而被判成"含 registration/charity 的非赛事日期"而落选。
  */
 export function windowAround(text: string, idx: number, before = 110, after = 30): string {
-  return text.slice(Math.max(0, idx - before), Math.min(text.length, idx + after)).trim();
+  // after 侧：至少 after 字符，但可**延伸到本句句号**（上限 120）——
+  // 否则"日期在前、赛事名在后"的写法（`On 19 April 2027 the 131st Boston Marathon will be held.`）
+  // 会读不到赛事语义（审计 D1）。
+  const nextDot = text.indexOf(".", idx);
+  const span = nextDot !== -1 ? Math.min(Math.max(after, nextDot - idx), 120) : after;
+  return text.slice(Math.max(0, idx - before), Math.min(text.length, idx + span)).trim();
 }
 
 /**
@@ -151,10 +156,14 @@ export function nearAround(text: string, idx: number, before = 40, after = 20): 
 export function sentenceWindow(text: string, idx: number, before = 110, after = 30): string {
   const rawStart = Math.max(0, idx - before);
   const rawEnd = Math.min(text.length, idx + after);
-  const prevDot = text.lastIndexOf(".", idx);
-  const nextDot = text.indexOf(".", idx);
-  const start = prevDot >= rawStart ? prevDot + 1 : rawStart;
-  const end = nextDot !== -1 && nextDot < rawEnd ? nextDot : rawEnd;
+  // 句边界：句号 + 分号（分号也切分句段 —— 否则 "…the Expo on 16 and 17 April 2027; the race will be
+  // held on 19 April 2027." 会把 Expo 算进真比赛日那一句，导致真比赛日被判死，审计 D7 用例实测）
+  const bounds = [text.lastIndexOf(".", idx), text.lastIndexOf(";", idx)];
+  const prev = Math.max(...bounds);
+  const nexts = [text.indexOf(".", idx), text.indexOf(";", idx)].filter((i) => i !== -1);
+  const next = nexts.length ? Math.min(...nexts) : -1;
+  const start = prev >= rawStart ? prev + 1 : rawStart;
+  const end = next !== -1 && next < rawEnd ? next : rawEnd;
   return text.slice(start, end).trim();
 }
 
@@ -170,18 +179,27 @@ export function extractCandidates(text: string): Candidate[] {
     if (!hit) out.push(c);
     else if (score(c) > score(hit)) { hit.raceLike = c.raceLike; hit.announced = c.announced; hit.evidence = c.evidence; }
   };
-  const mk = (d1: number, d2: number | null, mon: string, y: number, idx: number): Candidate => {
+  const mk = (d1: number, d2: number | null, mon: string, y: number, idx: number, mon2?: string): Candidate => {
     const mo = MONTHS[mon.toLowerCase()];
+    const moEnd = mon2 ? MONTHS[mon2.toLowerCase()] : mo;
     const win = windowAround(text, idx);
     const ev = win; // 判定与展示都用小窗口（宽上下文另存 sentence）
     return {
       sentence: sentenceAround(text, idx),
       date: iso(y, mo, d1),
-      dateEnd: d2 === null ? undefined : iso(y, mo, d2),
+      dateEnd: d2 === null ? undefined : iso(y, moEnd, d2),
       year: y,
       kind: d2 === null ? "single-day" : "two-day",
       // 宽窗口判赛事语义与「事件类型」短语；报名/抽签类短语只看日期紧邻处（见 ADMIN_NEAR 注释）
-      raceLike: RACE_SEM.test(ev) && !NON_RACE.test(ev) && !ADMIN_NEAR.test(nearAround(text, idx)),
+      // 三层判据，窗口各不相同（每一层都是被实测/审计逼出来的）：
+      //   RACE_SEM   → 宽窗口：赛事名可能在日期前 110 字符内的导航/标题里（芝加哥首页即如此）
+      //   NON_RACE   → **句内窗口**：博览会/维护通知这类"事件类型"短语只在本句内才算（否则上一句提到的
+      //                Expo 会把真比赛日判死 —— 审计 D7 用例实测）
+      //   ADMIN_NEAR → **紧邻窗口**：报名/抽签短语只在日期旁才算（否则开普敦横幅 `BALLOT CLOSED 24 JUNE` 会误伤）
+      raceLike:
+        RACE_SEM.test(ev) &&
+        !NON_RACE.test(sentenceWindow(text, idx)) &&
+        !ADMIN_NEAR.test(nearAround(text, idx)),
       announced: ANNOUNCE.test(sentenceWindow(text, idx)),
       evidence: ev,
     };
@@ -190,6 +208,12 @@ export function extractCandidates(text: string): Candidate[] {
   // 英文：两天 —— "…on Saturday 24 and Sunday 25 April 2027"（德式星期名同样支持）
   const two = new RegExp(String.raw`(?:${DAYNAME})\s+(\d{1,2})\s*(?:,)?\s+and\s+(?:${DAYNAME})\s+(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
   for (const m of text.matchAll(two)) push(mk(+m[1], +m[2], m[3], +m[4], m.index ?? 0));
+
+  // 英文：**跨月**区间 —— "30 April–1 May 2027" / "April 30–May 1, 2027"（审计 D3：原先识别不到）
+  const dashX = new RegExp(String.raw`(\d{1,2})\s+(${MONTH_ALT})\s*[–—−-]\s*(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
+  for (const m of text.matchAll(dashX)) push(mk(+m[1], +m[3], m[2], +m[5], m.index ?? 0, m[4]));
+  const usDashX = new RegExp(String.raw`(${MONTH_ALT})\.?\s+(\d{1,2})\s*[–—−-]\s*(${MONTH_ALT})\.?\s+(\d{1,2}),?\s+(\d{4})`, "gi");
+  for (const m of text.matchAll(usDashX)) push(mk(+m[2], +m[4], m[1], +m[5], m.index ?? 0, m[3]));
 
   // 英文：破折号区间 —— "22–23 May 2027" / "April 24–25, 2027"（开普敦官网实测是 &ndash; 区间）
   const dash = new RegExp(String.raw`(\d{1,2})\s*[–—−-]\s*(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
@@ -279,14 +303,40 @@ export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {
           : "不是「宣告句式」（如抽签/报名/领物日期），已被同届的比赛日宣告句挤掉",
     }));
 
+
   // 主赛事优先（每站关键词）；一层都没命中就退回一般赛事语义
   const hint = opts.mainEventHint;
   const hintHit = hint ? usedPool.filter((c) => hint.test(c.evidence) || hint.test(c.sentence ?? "")) : usedPool;
   const hintMissed = Boolean(hint) && hintHit.length === 0;
   const stage1 = hintHit.length > 0 ? hintHit : usedPool;
 
-  const twoDayPool = stage1.filter((c) => c.kind === "two-day");
-  const prefer = twoDayPool.length > 0 ? twoDayPool : stage1;
+  // D7：区间候选不得压过**宣告式单日比赛日**。
+  // 反例（审计构造）：页面上"周末 17–19 April 2027"的区间句 + 真正的宣告句
+  // "the race will be held on 19 April 2027" → 原先会静默返回区间首日 17 日。
+  // 规则：同届只要存在"宣告式单日"，就把**自身不是宣告句式**的区间候选剔除（被剔除的进 dropped）。
+  const announcedSingles = stage1.filter((c) => c.announced && c.kind === "single-day");
+  const excludedByD7: Candidate[] = [];
+  let stage1b = stage1;
+  if (announcedSingles.length > 0) {
+    stage1b = stage1.filter((c) => {
+      const drop = c.kind === "two-day" && !c.announced;
+      if (drop) excludedByD7.push(c);
+      return !drop;
+    });
+    if (stage1b.length === 0) stage1b = stage1; // 兜底：别把池子清空
+  }
+  // D7 剔除的区间候选也要在 dropped 里可见（此处 excludedByD7 已初始化）
+  for (const c of excludedByD7) {
+    if (!droppedCandidates.some((d) => d.date === c.date && d.dateEnd === c.dateEnd)) {
+      droppedCandidates.push({
+        ...c,
+        dropReason: "该区间自身不是「宣告句式」，而同届存在宣告式单日比赛日 → 不予采信（审计 D7）",
+      });
+    }
+  }
+
+  const twoDayPool = stage1b.filter((c) => c.kind === "two-day");
+  const prefer = twoDayPool.length > 0 ? twoDayPool : stage1b;
   const future = prefer.filter((c) => c.date >= todayIso).sort((a, b) => a.date.localeCompare(b.date));
   let chosen = future[0] ?? prefer.sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
   let tookLastDay = false;
@@ -306,6 +356,11 @@ export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {
   } else {
     if (hintMissed) {
       notes.push("没有候选命中本站主赛事关键词，已退回一般赛事语义挑选 —— 请人工确认挑中的是主赛事而不是配套赛（退出码 0）");
+    }
+    if (excludedByD7.length > 0) {
+      notes.push(
+        `同届存在宣告式单日比赛日，${excludedByD7.length} 个"非宣告式区间"候选（${excludedByD7.map((c) => `${c.date}–${c.dateEnd}`).join("、")}）已剔除，避免区间静默压过比赛日`,
+      );
     }
     if (tookLastDay) {
       notes.push(
