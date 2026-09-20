@@ -29,12 +29,20 @@ const TODAY = "2026-09-20";
 }
 
 {
-  // 真实首页形态：实体区间 + 报名/抽签状态词
+  // 真实首页形态：实体区间（赛事周末 22–23 May）+ 报名/抽签状态词
+  // 口径（已确认）：马拉松本赛在 **23 May 2027**（SAST +02:00）→ 取末日、不设 race_end_date
   const t = `RUN FOR CHARITY MARATHON ITO TRAVEL PROGRAM PORTAL ENTER Run for Charity ENTRIES OPEN Travel Program OFFICIAL ITO'S BALLOT CLOSED 24 JUNE 22–23 May 2027 RUN FOR CHARITY TRAVEL PROGRAM 2027 BALLOT CLOSED Africa's first Abbott World Marathon Major`;
-  const r = pickRaceDates(t, TODAY, HINT);
-  check("区间识别为两天：2027-05-22 → 2027-05-23", r.chosen?.date === "2027-05-22" && r.chosen?.dateEnd === "2027-05-23", r.chosen);
-  check("twoDay = true", r.twoDay === true, r.twoDay);
-  check("notes 里提示 race_date=首日 / race_end_date=末日", r.notes.some((n) => n.includes("两天赛")), r.notes);
+  const r = pickRaceDates(t, TODAY, { ...HINT, twoDayPick: "last" });
+  check("赛事周末区间 → 取末日 2027-05-23 作比赛日", r.chosen?.date === "2027-05-23", r.chosen);
+  check("不设 race_end_date（kind = single-day）", r.chosen?.dateEnd === undefined && r.chosen?.kind === "single-day", r.chosen);
+  check("notes 说明取末日口径", r.notes.some((n) => n.includes("末日")), r.notes);
+}
+
+{
+  // 对照：伦敦那种"马拉松确实跨两天"的站点仍应取首日 + 设末日
+  const t = `For the first and only time, the TCS London Marathon will take place across two days, on Saturday 24 and Sunday 25 April 2027, welcoming 100,000 runners.`;
+  const r = pickRaceDates(t, TODAY, { mainEventHint: /London Marathon/i });
+  check("伦敦（真跨两天，默认 first）仍取首日 2027-04-24 + 末日 2027-04-25", r.chosen?.date === "2027-04-24" && r.chosen?.dateEnd === "2027-04-25", r.chosen);
 }
 
 {

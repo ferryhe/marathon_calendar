@@ -231,6 +231,16 @@ export interface PickOpts {
    * 主赛事关键词命中优先；一个都没命中时退回一般赛事语义，并在 notes 里说明。
    */
   mainEventHint?: RegExp;
+  /**
+   * 官网把日期写成区间时，取哪一天作为**本赛比赛日**（默认 `first` = 首日）。
+   *
+   * 为什么需要这个开关：区间不一定代表"比赛跨两天"。
+   * * 伦敦 2027：马拉松**确实跨两天**（Saturday 24 + Sunday 25）→ 首日首日+末日，`race_date`=首日
+   * * 开普敦 2027：官网写的是**赛事周末** `22–23 May 2027`，而马拉松本赛只在 **23 May**
+   *   （用户/官方口径确认，SAST +02:00）→ 该站应设 `twoDayPick: "last"`，
+   *   取末日作 `race_date` 且**不设** `race_end_date`
+   */
+  twoDayPick?: "first" | "last";
 }
 
 export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {}): PickResult {
@@ -278,7 +288,13 @@ export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {
   const twoDayPool = stage1.filter((c) => c.kind === "two-day");
   const prefer = twoDayPool.length > 0 ? twoDayPool : stage1;
   const future = prefer.filter((c) => c.date >= todayIso).sort((a, b) => a.date.localeCompare(b.date));
-  const chosen = future[0] ?? prefer.sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
+  let chosen = future[0] ?? prefer.sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
+  let tookLastDay = false;
+  if (chosen && chosen.kind === "two-day" && opts.twoDayPick === "last" && chosen.dateEnd) {
+    // 官网区间是「赛事周末」，本赛只在末日 → 取末日当比赛日，且不设 race_end_date
+    chosen = { ...chosen, date: chosen.dateEnd, dateEnd: undefined, kind: "single-day" };
+    tookLastDay = true;
+  }
 
   const notes: string[] = [];
   if (!chosen) {
@@ -291,7 +307,13 @@ export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {
     if (hintMissed) {
       notes.push("没有候选命中本站主赛事关键词，已退回一般赛事语义挑选 —— 请人工确认挑中的是主赛事而不是配套赛（退出码 0）");
     }
-    if (chosen.kind === "two-day") notes.push(`两天赛：首日 ${chosen.date} / 末日 ${chosen.dateEnd} → race_date=首日, race_end_date=末日`);
+    if (tookLastDay) {
+      notes.push(
+        `官网把日期写成区间（本站口径：区间是赛事周末，本赛只在末日）→ race_date=${chosen.date}，不设 race_end_date`,
+      );
+    } else if (chosen.kind === "two-day") {
+      notes.push(`两天赛：首日 ${chosen.date} / 末日 ${chosen.dateEnd} → race_date=首日, race_end_date=末日`);
+    }
     if (chosen.year !== nextYear) notes.push(`挑中的是 ${chosen.year} 届（当前年+1 = ${nextYear}），请人工确认是否要的是它`);
     if (announcedPool.length > 0 && announcedPool.length < pool.length) {
       notes.push(

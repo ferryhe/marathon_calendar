@@ -39,7 +39,9 @@ async function main() {
   }
 
   const today = arg("today") ?? new Date().toISOString().slice(0, 10);
-  const picked = pickRaceDates(texts.join(" "), today, { mainEventHint: /Cape Town Marathon/i });
+  // 官网写的是**赛事周末** `22–23 May 2027`，马拉松本赛只在 **23 May 2027**（SAST +02:00，已确认）
+  // → 取区间末日作比赛日，且不设 race_end_date（库里 2027-05-23 正确，无需改库）
+  const picked = pickRaceDates(texts.join(" "), today, { mainEventHint: /Cape Town Marathon/i, twoDayPick: "last" });
   const pageText = texts.join(" ");
   const hintMissed = picked.notes.some((n) => n.includes("主赛事关键词"));
 
@@ -57,9 +59,7 @@ async function main() {
       ...(hintMissed && /Cape Town Marathon/i.test(pageText)
         ? ["说明：该日期附近未出现主赛事关键词，但整页提到过 Cape Town Marathon"]
         : []),
-      picked.twoDay
-        ? "注意：官网把赛程写成区间（如 `22–23 May 2027`）→ 按项目口径报 race_date=首日、race_end_date=末日；库中现值是否要改需人工确认"
-        : "提示：开普敦官网首页即写比赛日期（原文用 HTML 实体区间 `22&ndash;23 May 2027`）",
+      "口径（已确认）：官网写的是**赛事周末** `22–23 May 2027`，马拉松本赛在 **23 May 2027（SAST +02:00）** → 本读取器取末日 2027-05-23 作 race_date，且不设 race_end_date；库里现值 2027-05-23 正确",
       "提示：首页新闻稿日期（如 `May 26, 2026` 署名日、`June 10, 2026` 发布日）也含 race/marathon 字样，靠届次与宣告句式层排除",
     ],
     allCandidates: picked.allCandidates,
