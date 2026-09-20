@@ -14,6 +14,13 @@ export interface StatusBadgeProps {
   registrationEnd?: string | Date | null;
   /** 官网采集的报名状态（registration_status） */
   registrationStatus?: string | null;
+  /**
+   * 是否抽签制。文案按它分口径：
+   *  抽签类（isLottery=true） → 「抽签报名中 / 抽签已截止」
+   *  非抽签类（false/undefined）→ 「报名中 / 报名已截止」
+   * 为什么不写死一套：波马是达标成绩制不是抽签，显示"抽签已截止"会误导；反之抽签赛事（纽约）说"报名已截止"也不准。
+   */
+  isLottery?: boolean | null;
   // When true, the "open" badge gets the attention glow effect.
   glow?: boolean;
   className?: string;
@@ -29,6 +36,7 @@ export function StatusBadge({
   registrationStart,
   registrationEnd,
   registrationStatus,
+  isLottery,
   glow = true,
   className,
   size = "sm",
@@ -42,7 +50,18 @@ export function StatusBadge({
     registrationStatus,
   });
 
-  const label = t(STATUS_I18N_KEY[resolved]);
+  // 抽签/报名两种口径的文案分流（见 isLottery 注释）
+  const labelKey =
+    resolved === "closed"
+      ? isLottery
+        ? STATUS_I18N_KEY.closed
+        : "status.closedGeneral"
+      : resolved === "open"
+        ? isLottery
+          ? STATUS_I18N_KEY.open
+          : "status.openGeneral"
+        : STATUS_I18N_KEY[resolved];
+  const label = t(labelKey);
   const colorClasses = STATUS_COLOR_CLASSES[resolved];
   const sizeClasses =
     size === "md"

@@ -71,7 +71,9 @@
     "ended": "Ended",
     "cancelled": "Cancelled",
     "tba": "TBA",
-    "hint": "List status reflects lottery / ballot only. Other entry methods (charity, tour operators, qualifier paths, etc.) are listed in the event detail page."
+    "hint": "List status: lottery races show lottery wording (Lottery Open / Lottery Closed); non-lottery races show registration wording (Registration Open / Registration Closed). Other entry methods (charity, tour operators, etc.) are on the event detail page.",
+    "openGeneral": "Registration Open",
+    "closedGeneral": "Registration Closed"
   },
   "channel": {
     "lottery": "Lottery",
@@ -105,7 +107,15 @@
     "tbdHint": "Official site collected, but the race date is not yet confirmed",
     "tbdShort": "TBD",
     "weekdayPrefix": "",
-    "weekdays": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    "weekdays": [
+      "Sun",
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat"
+    ],
     "openSite": "Open official site",
     "locationFallback": "TBD",
     "monthYear": "{{month}}/{{year}}"
