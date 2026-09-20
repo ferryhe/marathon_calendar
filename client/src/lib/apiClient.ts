@@ -20,6 +20,8 @@ export interface MarathonEditionDTO {
   marathonId: string;
   year: number;
   raceDate: string | null;
+  /** 多日赛末日（如伦敦 2027：raceDate=2027-04-24、raceEndDate=2027-04-25）。单日赛为 null。 */
+  raceEndDate?: string | null;
   registrationUrl: string | null;
   registrationOpenDate: string | null;
   registrationCloseDate: string | null;
