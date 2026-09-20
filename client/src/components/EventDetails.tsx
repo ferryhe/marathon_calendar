@@ -51,8 +51,11 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
 
   if (!event) return null;
 
-  const displayDate = event.nextEdition?.raceDate
-    ? new Date(event.nextEdition.raceDate)
+  // 比赛日缺失（官网尚未公布）时不要拿 createdAt 充当比赛日 —— 那会把"建档日期"伪装成比赛日。
+  // 统一走 list.tbdShort（待定/TBD），与列表「待确认日期」分组、详情页 status.pending 口径一致。
+  const hasRaceDate = Boolean(event.nextEdition?.raceDate);
+  const displayDate = hasRaceDate
+    ? new Date(event.nextEdition!.raceDate!)
     : new Date(event.createdAt);
   const year = displayDate.getFullYear();
   const month = displayDate.getMonth() + 1;
@@ -104,9 +107,11 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
             <div className="flex items-center gap-1">
               <Calendar className="w-4 h-4" />
               <span>
-                {event.nextEdition?.raceEndDate && event.nextEdition.raceEndDate !== event.nextEdition.raceDate
-                  ? formatDateRange(event.nextEdition.raceDate, event.nextEdition.raceEndDate, i18n.language)
-                  : `${year}-${month}-${day}`}
+                {!hasRaceDate
+                  ? t("list.tbdShort")
+                  : event.nextEdition?.raceEndDate && event.nextEdition.raceEndDate !== event.nextEdition.raceDate
+                    ? formatDateRange(event.nextEdition.raceDate, event.nextEdition.raceEndDate, i18n.language)
+                    : `${year}-${month}-${day}`}
               </span>
             </div>
             <div className="flex items-center gap-1">
