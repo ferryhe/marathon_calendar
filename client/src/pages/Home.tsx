@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { Footprints, Heart, MessageSquare, Mountain, RefreshCw, Search, SlidersHorizontal, User, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
+import { rollingWindowEndDate } from "@/lib/dateWindow";
 import { useTranslation } from "react-i18next";
 import { MarathonTable } from "@/components/MarathonTable";
 import { Footer } from "@/components/Footer";
@@ -139,8 +140,6 @@ export default function Home() {
     [favorites],
   );
 
-  const currentYear = new Date().getFullYear();
-
   const hasActiveFilters =
     monthFilter !== "all" ||
     statusFilter !== "all" ||
@@ -151,7 +150,9 @@ export default function Home() {
 
   const { data: countriesResp } = useQuery({
     queryKey: ["/api/marathons/countries", region, kind],
-    queryFn: () => apiClient.getMarathonCountries({ region, kind }),
+    // 传与列表同一个滚动窗右端，保证「下拉里有的国家，列表里确实有赛事」（见 lib/dateWindow）。
+    queryFn: () =>
+      apiClient.getMarathonCountries({ region, kind, untilDate: rollingWindowEndDate() }),
     staleTime: 5 * 60_000,
     enabled: region !== "China",
   });
@@ -588,7 +589,7 @@ export default function Home() {
           region={region}
           searchQuery={searchQuery}
           filters={{
-            year: currentYear,
+            // year 已废弃（2026-09-21）：三个 tab 都不再锁年，见 MarathonTable 的 useMarathons 注释
             month: monthFilter === "all" ? undefined : Number(monthFilter),
             status: statusFilter === "all" ? undefined : statusFilter,
             country: countryFilter === "all" ? undefined : countryFilter,

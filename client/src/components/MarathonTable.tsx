@@ -16,6 +16,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import type { MarathonListItem } from "@/lib/apiClient";
+import { rollingWindowEndDate } from "@/lib/dateWindow";
 import { isChinaCountry } from "@shared/utils";
 import { pickLocalizedCity, pickLocalizedName, useLocale } from "@/lib/locale";
 import { StatusBadge } from "./StatusBadge";
@@ -50,7 +51,9 @@ interface MarathonTableProps {
   region: "China" | "Overseas" | "WMM";
   searchQuery: string;
   filters: {
-    year: number;
+    /** 已废弃（2026-09-21）：年份不再参与筛选——三个 tab 都不锁年，见下方 useMarathons 注释。
+     *  保留仅为 TBD 条目的兜底年份，以及调用方向后兼容。 */
+    year?: number;
     month?: number;
     status?: string;
     country?: string;
@@ -108,12 +111,10 @@ export function MarathonTable({
     // WMM region: month filter doesn't make sense without year pinning — let the
     // year filter drive the grouping.
     month: region === "WMM" ? undefined : filters.month,
-    // 未来 12 个月滚动窗（原 WMM 专有，现三个 tab 统一）：race_date 超过 today+365d 的
-    // 届次不进列表，避免「2028 年的赛事」提前挤进日历；TBD（race_date 为空）不受影响
-    // (e.g. when today's date crosses past 2027-05-23, Cape Town 2028 takes over).
-    untilDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10),
+    // 未来 12 个月滚动窗（原 WMM 专有，现三个 tab 统一）：race_date 超过窗口右端的届次
+    // 不进列表，避免「2028 年的赛事」提前挤进日历；TBD（race_date 为空）不受影响。
+    // 右端由 lib/dateWindow 按**本地日历日**统一计算，国家下拉复用同一字符串（审计建议）。
+    untilDate: rollingWindowEndDate(),
     status: filters.status,
     country: filters.country,
     kind: filters.kind,
@@ -196,7 +197,9 @@ export function MarathonTable({
             acc.tbd.push({
               ...marathon,
               displayDate: null,
-              year: filters.year,
+              // TBD 现在指「最近一届未开赛」，其届次年份通常在下一年（如武汉 2027），
+              // 不能再拿「当前年份」当默认值——否则将来谁在 TBD 行渲染年份就会显示错的。
+              year: marathon.nextEdition?.year ?? filters.year ?? 0,
               month: 0,
               day: 0,
               localizedName,

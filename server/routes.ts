@@ -1174,6 +1174,11 @@ export async function registerRoutes(
       const schema = z.object({
         region: z.enum(["China", "Overseas", "WMM"]).optional(),
         kind: z.enum(["marathon", "trail"]).optional().default("marathon"),
+        // 与 /api/marathons 列表同一个滚动窗右端；不传则回落到服务端 CURRENT_DATE + 365。
+        untilDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "untilDate must be YYYY-MM-DD")
+          .optional(),
       });
       const params = schema.parse(req.query);
 
@@ -1199,15 +1204,17 @@ export async function registerRoutes(
       conditions.push(sql`${marathons.country} IS NOT NULL`);
       // Match the homepage list filter (which no longer pins a year — see MarathonTable):
       // the country must have a published edition inside the same rolling window the list
-      // uses — race_date in [today, today+365d], or TBD. Otherwise the dropdown could miss
-      // countries the list now shows (e.g. a race whose only upcoming edition is next year),
-      // or list countries that produce 0 visible events.
+      // uses — race_date in [today, windowEnd], or TBD. windowEnd 由前端传入（与列表同一个
+      // 字符串），不传则回落 CURRENT_DATE + 365，避免「列表里有、下拉里没有」。
+      const windowEnd = params.untilDate
+        ? sql`${params.untilDate}::date`
+        : sql`CURRENT_DATE + 365`;
       conditions.push(sql`EXISTS (
         SELECT 1 FROM ${marathonEditions} e
         WHERE e.marathon_id = ${marathons.id}
           AND e.publish_status = 'published'
           AND (e.race_date IS NULL
-               OR (e.race_date >= CURRENT_DATE AND e.race_date <= CURRENT_DATE + 365))
+               OR (e.race_date >= CURRENT_DATE AND e.race_date <= ${windowEnd}))
       )`);
 
       const rows = await database

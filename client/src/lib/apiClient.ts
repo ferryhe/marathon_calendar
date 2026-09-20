@@ -250,10 +250,13 @@ class ApiClient {
   async getMarathonCountries(params?: {
     region?: 'China' | 'Overseas' | 'WMM';
     kind?: 'marathon' | 'trail';
+    /** 滚动时间窗右端（YYYY-MM-DD）。首页传与列表同一个值，避免下拉与列表口径错位。 */
+    untilDate?: string;
   }): Promise<{ data: Array<{ country: string; count: number }> }> {
     const queryParams = new URLSearchParams();
     if (params?.region) queryParams.append('region', params.region);
     if (params?.kind) queryParams.append('kind', params.kind);
+    if (params?.untilDate) queryParams.append('untilDate', params.untilDate);
     const query = queryParams.toString();
     return this.request(`/marathons/countries${query ? `?${query}` : ''}`);
   }
