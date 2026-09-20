@@ -24,6 +24,18 @@ const DAYNAME = "(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day|(?:Sonntag|Samsta
 
 /** 句子必须带赛事语义才算比赛日。 */
 const RACE_SEM = /\b(marathon|race|run|lauf|marathonlauf)\b/i;
+
+/**
+ * 「宣告句式」：官网宣告下一届**比赛日**时的常用说法
+ * （`will take place` / `will be held` / `to be run` / `is on` / `findet … statt`）。
+ *
+ * 为什么单独认这一层：同一页里还有**抽签/报名/领物**的日期，它们句子里也含 "race"，
+ * 只按「赛事语义 + 最接近的未来日期」会挑到抽签日 —— 纽约实测：
+ *   "The drawing for the 2027 race opens on Tuesday, January 5, 2027."（抽签）
+ * 会顶掉真正的比赛日。所以**同届里优先取「宣告句式」的日期**，其余进 dropped（全量可见）。
+ */
+const ANNOUNCE =
+  /\b(?:will (?:be (?:held|run|staged|hosted)|take place|return|kick off)|is (?:on|set for|scheduled)|takes place|to be (?:held|run|staged)|race day|will run|findet (?:am|statt))\b/i;
 /**
  * 这些**短语**说明该日期不是比赛日（博览会/领物/报名窗口/抽签窗口…）。
  *
@@ -43,6 +55,8 @@ export interface Candidate {
   year: number;
   kind: "two-day" | "single-day";
   raceLike: boolean;
+  /** 是否用了「宣告句式」（`will take place`…）—— 同届内优先取它，避免抽签/报名日顶掉比赛日 */
+  announced: boolean;
   /** 判定与展示用：日期前后的小窗口 */
   evidence: string;
   /** 宽上下文（整句），仅供人工复核 */
@@ -98,17 +112,39 @@ export function windowAround(text: string, idx: number, before = 110, after = 30
   return text.slice(Math.max(0, idx - before), Math.min(text.length, idx + after)).trim();
 }
 
+/**
+ * **句内**窗口（按句号截断）—— 专门用来判「宣告句式」。
+ *
+ * 为什么不能用上面的宽窗口：宽窗口会跨进上一句，把上一句的 `will be held on <比赛日>`
+ * 算成当前日期的宣告句。纽约实测踩到：抽签句
+ *   "...will be held on Sunday, November 1, 2026. The drawing for the 2027 race opens on Tuesday, January 5, 2027."
+ * 里的抽签日期因为跨句被误判成"比赛日宣告"，于是顶掉了真正的比赛日。
+ *
+ * 注意：**赛事语义（raceLike）仍用宽窗口**。芝加哥首页实测：
+ *   "Volunteer for the Chicago Marathon by joining a race weekend! … October 11, 2026 …"
+ * 比赛日紧邻的是导航文字，句内窗口里没有 race 语义，靠宽窗口才认得出。
+ */
+export function sentenceWindow(text: string, idx: number, before = 110, after = 30): string {
+  const rawStart = Math.max(0, idx - before);
+  const rawEnd = Math.min(text.length, idx + after);
+  const prevDot = text.lastIndexOf(".", idx);
+  const nextDot = text.indexOf(".", idx);
+  const start = prevDot >= rawStart ? prevDot + 1 : rawStart;
+  const end = nextDot !== -1 && nextDot < rawEnd ? nextDot : rawEnd;
+  return text.slice(start, end).trim();
+}
+
 /** 抓出页面正文里的**全部**日期候选，不做丢弃。 */
 export function extractCandidates(text: string): Candidate[] {
   const out: Candidate[] = [];
   // 同一组日期在页面上可能出现多次（导航块 / 票券说明 / 正文），证据句质量差很多。
   // 取"最好"的那句：raceLike 优先；都 raceLike 时优先含 marathon 的。
   const score = (c: Candidate) =>
-    (c.raceLike ? 2 : 0) + (/(?:marathon|lauf)/i.test(c.evidence) ? 1 : 0);
+    (c.raceLike ? 2 : 0) + (c.announced ? 2 : 0) + (/(?:marathon|lauf)/i.test(c.evidence) ? 1 : 0);
   const push = (c: Candidate) => {
     const hit = out.find((x) => x.date === c.date && (x.dateEnd ?? "") === (c.dateEnd ?? ""));
     if (!hit) out.push(c);
-    else if (score(c) > score(hit)) { hit.raceLike = c.raceLike; hit.evidence = c.evidence; }
+    else if (score(c) > score(hit)) { hit.raceLike = c.raceLike; hit.announced = c.announced; hit.evidence = c.evidence; }
   };
   const mk = (d1: number, d2: number | null, mon: string, y: number, idx: number): Candidate => {
     const mo = MONTHS[mon.toLowerCase()];
@@ -121,6 +157,7 @@ export function extractCandidates(text: string): Candidate[] {
       year: y,
       kind: d2 === null ? "single-day" : "two-day",
       raceLike: RACE_SEM.test(ev) && !NON_RACE.test(ev),
+      announced: ANNOUNCE.test(sentenceWindow(text, idx)),
       evidence: ev,
     };
   };
@@ -170,24 +207,35 @@ export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {
   const thisYear = Number(todayIso.slice(0, 4));
   const nextYear = thisYear + 1;
 
-  const years = [...new Set(candidates.map((c) => c.year))].sort((a, b) => b - a);
+  // 届次基准：**有「宣告句式」的比赛日**优先。
+  // 否则抽签/报名句会把年份带偏 —— 纽约实测：2026 届比赛日还没跑，页面上的抽签句已经在写 2027，
+  // 按"所有候选的年份"取下一届就会挑到 2027 的抽签日。
+  const raceLikeCands = candidates.filter((c) => c.raceLike);
+  const announcedCands = raceLikeCands.filter((c) => c.announced);
+  const yearBasis = announcedCands.length > 0 ? announcedCands : raceLikeCands;
+  const years = [...new Set(yearBasis.map((c) => c.year))].sort((a, b) => b - a);
   const targetYear = years.includes(nextYear) ? nextYear : (years[0] ?? nextYear);
 
   const pool = candidates.filter((c) => c.raceLike && c.year === targetYear);
+  // 同届里若有「宣告句式」，就只在这些里面挑（防止抽签/报名/领物日期顶掉比赛日）
+  const announcedPool = pool.filter((c) => c.announced);
+  const usedPool = announcedPool.length > 0 ? announcedPool : pool;
   const droppedCandidates = candidates
-    .filter((c) => !pool.includes(c))
+    .filter((c) => !usedPool.includes(c))
     .map((c) => ({
       ...c,
       dropReason: !c.raceLike
-        ? "句子不含赛事语义或含 expo/ballot/registration 等词"
-        : `不是目标届（目标 ${targetYear}，它是 ${c.year}）`,
+        ? "句子不含赛事语义或含 expo/participant 等词"
+        : c.year !== targetYear
+          ? `不是目标届（目标 ${targetYear}，它是 ${c.year}）`
+          : "不是「宣告句式」（如抽签/报名/领物日期），已被同届的比赛日宣告句挤掉",
     }));
 
   // 主赛事优先（每站关键词）；一层都没命中就退回一般赛事语义
   const hint = opts.mainEventHint;
-  const hintHit = hint ? pool.filter((c) => hint.test(c.evidence) || hint.test(c.sentence ?? "")) : pool;
+  const hintHit = hint ? usedPool.filter((c) => hint.test(c.evidence) || hint.test(c.sentence ?? "")) : usedPool;
   const hintMissed = Boolean(hint) && hintHit.length === 0;
-  const stage1 = hintHit.length > 0 ? hintHit : pool;
+  const stage1 = hintHit.length > 0 ? hintHit : usedPool;
 
   const twoDayPool = stage1.filter((c) => c.kind === "two-day");
   const prefer = twoDayPool.length > 0 ? twoDayPool : stage1;
@@ -207,7 +255,12 @@ export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {
     }
     if (chosen.kind === "two-day") notes.push(`两天赛：首日 ${chosen.date} / 末日 ${chosen.dateEnd} → race_date=首日, race_end_date=末日`);
     if (chosen.year !== nextYear) notes.push(`挑中的是 ${chosen.year} 届（当前年+1 = ${nextYear}），请人工确认是否要的是它`);
-    const sameYear = pool.filter((c) => c.year === chosen.year);
+    if (announcedPool.length > 0 && announcedPool.length < pool.length) {
+      notes.push(
+        `同届有 ${pool.length} 个候选，其中 ${pool.length - announcedPool.length} 个不是「宣告句式」（抽签/报名/领物等）已被排除，仅在 ${announcedPool.length} 个比赛日宣告句中挑选`,
+      );
+    }
+    const sameYear = usedPool.filter((c) => c.year === chosen.year);
     if (sameYear.length > 1) {
       const dates = sameYear.map((c) => c.date).sort();
       notes.push(`目标届有 ${sameYear.length} 个候选（最早 ${dates[0]} / 最晚 ${dates[dates.length - 1]}），已取最接近的未来日期 ${chosen.date}，建议人工复核`);
