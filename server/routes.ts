@@ -1197,16 +1197,17 @@ export async function registerRoutes(
         conditions.push(inArray(marathons.id, WMM_IDS));
       }
       conditions.push(sql`${marathons.country} IS NOT NULL`);
-      // Match the homepage default filter: only count marathons that have a published
-      // edition for the current year with race_date >= today (or TBD). Otherwise
-      // dropdown could list countries that produce 0 visible events.
-      const currentYear = new Date().getFullYear();
+      // Match the homepage list filter (which no longer pins a year — see MarathonTable):
+      // the country must have a published edition inside the same rolling window the list
+      // uses — race_date in [today, today+365d], or TBD. Otherwise the dropdown could miss
+      // countries the list now shows (e.g. a race whose only upcoming edition is next year),
+      // or list countries that produce 0 visible events.
       conditions.push(sql`EXISTS (
         SELECT 1 FROM ${marathonEditions} e
         WHERE e.marathon_id = ${marathons.id}
           AND e.publish_status = 'published'
-          AND e.year = ${currentYear}
-          AND (e.race_date IS NULL OR e.race_date >= CURRENT_DATE)
+          AND (e.race_date IS NULL
+               OR (e.race_date >= CURRENT_DATE AND e.race_date <= CURRENT_DATE + 365))
       )`);
 
       const rows = await database

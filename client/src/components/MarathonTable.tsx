@@ -101,20 +101,19 @@ export function MarathonTable({
     search: searchQuery || undefined,
     limit: 100,
     page: currentPage,
-    // WMM region: don't pin to a specific year — let server pick the closest future
-    // race per marathon (e.g. Tokyo's 2027 edition even when current year is 2026).
-    year: region === "WMM" ? undefined : filters.year,
+    // 不锁年（2026-09-21 起，三个 tab 统一口径）：让服务端为每场赛事挑「最近一届未开赛」
+    // 的届次。以前只有 WMM 这么做，中国/海外被钉在「当前年份」，导致下一年度的届次
+    // （如厦门 2027-01-10、武汉/无锡「待定」）在列表里既看不到也搜不到。
+    year: undefined,
     // WMM region: month filter doesn't make sense without year pinning — let the
     // year filter drive the grouping.
     month: region === "WMM" ? undefined : filters.month,
-    // WMM region: rolling 1-year window from today — beyond that, the marathon hides
+    // 未来 12 个月滚动窗（原 WMM 专有，现三个 tab 统一）：race_date 超过 today+365d 的
+    // 届次不进列表，避免「2028 年的赛事」提前挤进日历；TBD（race_date 为空）不受影响
     // (e.g. when today's date crosses past 2027-05-23, Cape Town 2028 takes over).
-    untilDate:
-      region === "WMM"
-        ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .slice(0, 10)
-        : undefined,
+    untilDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10),
     status: filters.status,
     country: filters.country,
     kind: filters.kind,

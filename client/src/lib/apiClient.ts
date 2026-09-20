@@ -177,6 +177,10 @@ export interface MarathonQueryParams {
   includePast?: boolean;
   roadTag?: string;
   trailTag?: string;
+  // 滚动时间窗：只在 race_date <= untilDate 的届次里挑（YYYY-MM-DD）。
+  // 首页三个 tab 都传 today+365d（见 MarathonTable）；此前这个参数没进类型定义，
+  // 运行时靠 Object.entries 透传才生效，tsc 一直在报 TS2353。
+  untilDate?: string;
 }
 
 export interface CreateReviewPayload {
