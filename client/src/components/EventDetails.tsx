@@ -51,15 +51,12 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
 
   if (!event) return null;
 
-  // 比赛日缺失（官网尚未公布）时不要拿 createdAt 充当比赛日 —— 那会把"建档日期"伪装成比赛日。
-  // 统一走 list.tbdShort（待定/TBD），与列表「待确认日期」分组、详情页 status.pending 口径一致。
-  const hasRaceDate = Boolean(event.nextEdition?.raceDate);
-  const displayDate = hasRaceDate
-    ? new Date(event.nextEdition!.raceDate!)
-    : new Date(event.createdAt);
-  const year = displayDate.getFullYear();
-  const month = displayDate.getMonth() + 1;
-  const day = displayDate.getDate();
+  // 比赛日缺失（官网尚未公布）→ 显示「待定」，绝不拿 createdAt 冒充比赛日（PR #21）。
+  // 单日日期按字符串切分解析，不用 new Date("YYYY-MM-DD")：后者被当成 UTC，
+  // 在 UTC 以西时区（America/New_York / America/Los_Angeles）会把比赛日渲染成前一天。
+  const raceDate = event.nextEdition?.raceDate ?? "";
+  const hasRaceDate = Boolean(raceDate);
+  const [year = 0, month = 0, day = 0] = raceDate.split("-").map(Number);
   const isFavorited = favoriteStatus?.isFavorited ?? false;
 
   const toggleFavorite = async () => {
