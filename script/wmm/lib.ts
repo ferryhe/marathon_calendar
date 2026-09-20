@@ -47,7 +47,7 @@ const ANNOUNCE =
  * 并且判定窗口以日期**前面**为主（赛事名一般在日期之前）。
  */
 const NON_RACE =
-  /\b(expo|exhibition|running show|packet (?:pickup|collection)|number (?:pickup|collection)|registration (?:opens|closes|window|is open|will open|period)|ballot (?:window|opens|closes|results)|lottery (?:window|opens|closes|draw)|losverfahren|mini|kids|youth|charity (?:program|places|places? only)|press conference|conference|setup|teardown|after[- ]?party)\b/i;
+  /\b(expo|exhibition|running show|packet (?:pickup|collection)|number (?:pickup|collection)|registration (?:opens|closes|window|is open|will open|period)|ballot (?:window|opens|closes|results)|lottery (?:window|opens|closes|draw)|losverfahren|mini|kids|youth|charity (?:program|places|places? only)|press conference|conference|setup|teardown|after[- ]?party|system maintenance|maintenance|site notice)\b/i;
 
 export interface Candidate {
   date: string;
