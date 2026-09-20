@@ -86,6 +86,8 @@ export const marathonEditions = pgTable(
     // 约定：race_date = 赛事**首日**（沿用"多日赛存首日"惯例）；单日赛为 NULL。
     raceEndDate: date("race_end_date"),
     registrationUrl: text("registration_url"),
+    /** 报名状态（open/closed/…，由官网数据线采集；NULL=未知）。旧字段，此前未在 schema 登记 → API 不返回。 */
+    registrationStatus: text("registration_status"),
     registrationOpenDate: date("registration_open_date"),
     registrationCloseDate: date("registration_close_date"),
     // New nowrun-aligned status taxonomy: upcoming|open|closed|imminent|racing|ended|cancelled.

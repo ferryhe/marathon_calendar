@@ -23,6 +23,8 @@ export interface MarathonEditionDTO {
   /** 多日赛末日（如伦敦 2027：raceDate=2027-04-24、raceEndDate=2027-04-25）。单日赛为 null。 */
   raceEndDate?: string | null;
   registrationUrl: string | null;
+  /** 官网采集的报名状态（open/closed/…；NULL=未知） */
+  registrationStatus?: string | null;
   registrationOpenDate: string | null;
   registrationCloseDate: string | null;
   // New nowrun-aligned status taxonomy. Nullable while migration is in progress —

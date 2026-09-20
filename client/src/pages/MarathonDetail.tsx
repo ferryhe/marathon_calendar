@@ -617,6 +617,7 @@ export default function MarathonDetailPage() {
                             raceDate={edition.raceDate}
                             registrationStart={edition.registrationOpenDate}
                             registrationEnd={edition.registrationCloseDate}
+                            registrationStatus={edition.registrationStatus ?? null}
                             size="md"
                           />
                         </div>

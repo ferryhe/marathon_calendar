@@ -12,6 +12,8 @@ export interface StatusBadgeProps {
   raceDate?: string | Date | null;
   registrationStart?: string | Date | null;
   registrationEnd?: string | Date | null;
+  /** 官网采集的报名状态（registration_status） */
+  registrationStatus?: string | null;
   // When true, the "open" badge gets the attention glow effect.
   glow?: boolean;
   className?: string;
@@ -26,6 +28,7 @@ export function StatusBadge({
   raceDate,
   registrationStart,
   registrationEnd,
+  registrationStatus,
   glow = true,
   className,
   size = "sm",
@@ -36,6 +39,7 @@ export function StatusBadge({
     raceDate,
     registrationStart,
     registrationEnd,
+    registrationStatus,
   });
 
   const label = t(STATUS_I18N_KEY[resolved]);
