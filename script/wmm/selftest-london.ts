@@ -5,7 +5,7 @@
  *
  * 用例来自独立复核（2026-09-20）构造的场景：博览会两天日、措辞不在白名单、抽签窗口混入。
  */
-import { pickRaceDates } from "./01-london.js";
+import { pickRaceDates } from "./lib.js";
 
 let pass = 0;
 const fails: string[] = [];
