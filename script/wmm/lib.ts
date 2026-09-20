@@ -17,13 +17,25 @@ export const MONTHS: Record<string, number> = {
   januar: 1, februar: 2, märz: 3, maerz: 3, mai: 5, juni: 6, juli: 7, oktober: 10, dezember: 12,
 };
 const MONTH_ALT = Object.keys(MONTHS).join("|");
-const DAYNAME = "(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day|(?:Sonntag|Samstag|Freitag|Donnerstag|Mittwoch|Dienstag|Montag)";
+// 注意：这里必须自带外层括号。否则 `(?:${DAYNAME},?\s+)?` 的 `,?\s+` 只会作用在最后一个分支上，
+// 导致 "Monday, April 19, 2027" 这种美国式写法匹配不上（实测踩到）。
+// 必须「非捕获」外层括号：捕获组会让 m[1]/m[2]/m[3] 下标整体错位（刚踩过）。
+const DAYNAME = "(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day|(?:Sonntag|Samstag|Freitag|Donnerstag|Mittwoch|Dienstag|Montag))";
 
 /** 句子必须带赛事语义才算比赛日。 */
 const RACE_SEM = /\b(marathon|race|run|lauf|marathonlauf)\b/i;
-/** 这些词说明该日期不是比赛日（博览会/抽签/报名/领物…）。 */
+/**
+ * 这些**短语**说明该日期不是比赛日（博览会/领物/报名窗口/抽签窗口…）。
+ *
+ * 注意：不能只看孤立词。实测踩到两次：
+ *   - 波士顿 "…will be held on Monday, April 19, 2027. **Registration** will open on September 15, 2026."
+ *     → 孤立的 registration 会把真正的比赛日判死；
+ *   - 柏林正文前无句号的导航串里有 "Registration/Lottery/Charity" → 同理。
+ * 所以这里只匹配"事件短语"（registration opens/window、packet pickup、expo…），
+ * 并且判定窗口以日期**前面**为主（赛事名一般在日期之前）。
+ */
 const NON_RACE =
-  /\b(expo|exhibition|running show|registration|ballot|draw|lottery|losverfahren|mini|kids|youth|charity|conference|packet|pickup|collection|press|expo)\b/i;
+  /\b(expo|exhibition|running show|packet (?:pickup|collection)|number (?:pickup|collection)|registration (?:opens|closes|window|is open|will open|period)|ballot (?:window|opens|closes|results)|lottery (?:window|opens|closes|draw)|losverfahren|mini|kids|youth|charity (?:program|places|places? only)|press conference|conference|setup|teardown|after[- ]?party)\b/i;
 
 export interface Candidate {
   date: string;
@@ -82,8 +94,8 @@ export function sentenceAround(text: string, idx: number): string {
  * （`The BMW BERLIN-MARATHON 2026 will take place on 27 September 2026.`）
  * 反而被判成"含 registration/charity 的非赛事日期"而落选。
  */
-export function windowAround(text: string, idx: number, span = 80): string {
-  return text.slice(Math.max(0, idx - span), Math.min(text.length, idx + span)).trim();
+export function windowAround(text: string, idx: number, before = 110, after = 30): string {
+  return text.slice(Math.max(0, idx - before), Math.min(text.length, idx + after)).trim();
 }
 
 /** 抓出页面正文里的**全部**日期候选，不做丢弃。 */
@@ -121,9 +133,17 @@ export function extractCandidates(text: string): Candidate[] {
   const amp = new RegExp(String.raw`(\d{1,2})\s*(?:&|and)\s*(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
   for (const m of text.matchAll(amp)) push(mk(+m[1], +m[2], m[3], +m[4], m.index ?? 0));
 
-  // 英文/德文：单日 —— "27 September 2026" / "27. September 2026"
+  // 英文/德文：单日「日在前」—— "27 September 2026" / "27. September 2026"
   const one = new RegExp(String.raw`(?:${DAYNAME}\s+)?(\d{1,2})\.?\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
   for (const m of text.matchAll(one)) push(mk(+m[1], null, m[2], +m[3], m.index ?? 0));
+
+  // 英文：美国式「月在前」—— "Monday, April 19, 2027" / "April 19, 2027"（美国站全是这种）
+  const us = new RegExp(String.raw`(?:${DAYNAME},?\s+)?(${MONTH_ALT})\.?\s+(\d{1,2}),?\s+(\d{4})`, "gi");
+  for (const m of text.matchAll(us)) push(mk(+m[2], null, m[1], +m[3], m.index ?? 0));
+
+  // 英文：美国式两天 —— "April 24 and 25, 2027" / "April 24 & 25, 2027"
+  const usTwo = new RegExp(String.raw`(${MONTH_ALT})\.?\s+(\d{1,2})\s*(?:&|and|-)\s*(\d{1,2}),?\s+(\d{4})`, "gi");
+  for (const m of text.matchAll(usTwo)) push(mk(+m[2], +m[3], m[1], +m[4], m.index ?? 0));
 
   // 数字式 —— "27.09.2026"
   const numeric = /(\d{1,2})\.(\d{1,2})\.(\d{4})/g;
@@ -196,6 +216,25 @@ export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {
   return { chosen, targetYear, twoDay: chosen?.kind === "two-day", notes, allCandidates: candidates, droppedCandidates };
 }
 
+/**
+ * 读入一个**已保存的页面文件**（当成一次抓取结果）。
+ *
+ * 为什么需要：有的站点对命令行抓取返回反爬挑战页（实测 baa.org 只回 ~3KB 挑战页，
+ * fetch 与 curl 都一样）。此时用真实浏览器打开页面、存成 HTML，再喂给读取器解析：
+ *   03-boston.ts --html=/tmp/baa.html
+ */
+export async function pageFromFile(path: string): Promise<FetchedPage> {
+  const { readFileSync } = await import("node:fs");
+  try {
+    const html = readFileSync(path, "utf8");
+    const text = toText(html);
+    return { url: `file://${path}`, status: 200, bytes: html.length, textChars: text.length, error: null, text };
+  } catch (e) {
+    const error = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    return { url: `file://${path}`, status: 0, bytes: 0, textChars: 0, error, text: "" };
+  }
+}
+
 export interface FetchedPage {
   url: string;
   status: number;
@@ -205,9 +244,43 @@ export interface FetchedPage {
   text: string;
 }
 
+/**
+ * 用系统 curl 取页（同样返回 FetchedPage）。
+ *
+ * 为什么需要：个别站点对 Node 内置 fetch 只回拦截页 —— 实测 baa.org 用 fetch 只拿到 ~3KB，
+ * 同一 URL 用 curl 拿到 67KB（TLS/HTTP 指纹差异）。这类站点的读取器改用本函数。
+ */
+export async function fetchWithCurl(url: string, ua: string = DEFAULT_UA): Promise<FetchedPage> {
+  const { execFileSync } = await import("node:child_process");
+  try {
+    const html = execFileSync(
+      "curl",
+      ["-sSL", "--max-time", "30", "-A", ua, "-H", "Accept-Language: en-US,en;q=0.9", url],
+      { maxBuffer: 32 * 1024 * 1024 },
+    ).toString();
+    const text = toText(html);
+    return { url, status: html.length > 0 ? 200 : 0, bytes: html.length, textChars: text.length, error: null, text };
+  } catch (e) {
+    const error = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    return { url, status: 0, bytes: 0, textChars: 0, error, text: "" };
+  }
+}
+
 export async function fetchHtml(url: string, ua: string = DEFAULT_UA): Promise<FetchedPage> {
   try {
-    const res = await fetch(url, { headers: { "User-Agent": ua }, redirect: "follow", signal: AbortSignal.timeout(30_000) });
+    // 只给 User-Agent 时部分站点（实测 baa.org）会回一个 3KB 的拦截页而不是正文
+    //（同一 URL 用 curl 能拿到 67KB）→ 补常规浏览器请求头。
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": ua,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(30_000),
+    });
     const html = await res.text();
     const text = toText(html);
     return { url, status: res.status, bytes: html.length, textChars: text.length, error: null, text };
