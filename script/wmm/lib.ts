@@ -47,7 +47,21 @@ const ANNOUNCE =
  * 并且判定窗口以日期**前面**为主（赛事名一般在日期之前）。
  */
 const NON_RACE =
-  /\b(expo|exhibition|running show|packet (?:pickup|collection)|number (?:pickup|collection)|registration (?:opens|closes|window|is open|will open|period)|ballot (?:window|opens|closes|results)|lottery (?:window|opens|closes|draw)|losverfahren|mini|kids|youth|charity (?:program|places|places? only)|press conference|conference|setup|teardown|after[- ]?party|system maintenance|maintenance|site notice)\b/i;
+  /\b(expo|exhibition|running show|mini|kids|youth|charity (?:program|places|places? only)|press conference|conference|setup|teardown|after[- ]?party|system maintenance|maintenance|site notice)\b/i;
+
+/**
+ * **报名/抽签/领物类**短语 —— 只有**紧贴日期**时才算"这个日期不是比赛日"。
+ *
+ * 为什么必须"紧贴"（而不是扫整个宽窗口）：上一句很可能就写着报名开放日
+ *   "Registration opens on 1 September 2026 for the 2027 Boston Marathon."
+ * 宽窗口（日期前 110 字符）会把它扫进来，于是**同一段里的真比赛日**
+ * （"The Boston Marathon will be held on 19 April 2027."）被判死 —— 独立审计实测：
+ * `Registration opens on 1 September 2026 for the 2027 Boston Marathon. The Boston Marathon
+ *  will be held on 19 April 2027.` → 修复前 chosen=null（相对基线 666dbba 能力倒退），
+ * 修复后 chosen=2027-04-19。见 `selftest-lib.ts` 场景 4b。
+ */
+const ADMIN_NEAR =
+  /\b(?:registration|ballot|drawing|draw|lottery|losverfahren|packet|entries?|entry)\s+(?:opens?|closes?|begins?|starts?|window|period|deadline)\b/i;
 
 export interface Candidate {
   date: string;
@@ -129,6 +143,11 @@ export function windowAround(text: string, idx: number, before = 110, after = 30
  *   "Volunteer for the Chicago Marathon by joining a race weekend! … October 11, 2026 …"
  * 比赛日紧邻的是导航文字，句内窗口里没有 race 语义，靠宽窗口才认得出。
  */
+/** 日期**紧邻**小窗口（判"报名/抽签"这类短语；不能扫宽窗口，理由见 ADMIN_NEAR 注释） */
+export function nearAround(text: string, idx: number, before = 40, after = 20): string {
+  return text.slice(Math.max(0, idx - before), Math.min(text.length, idx + after)).trim();
+}
+
 export function sentenceWindow(text: string, idx: number, before = 110, after = 30): string {
   const rawStart = Math.max(0, idx - before);
   const rawEnd = Math.min(text.length, idx + after);
@@ -161,7 +180,8 @@ export function extractCandidates(text: string): Candidate[] {
       dateEnd: d2 === null ? undefined : iso(y, mo, d2),
       year: y,
       kind: d2 === null ? "single-day" : "two-day",
-      raceLike: RACE_SEM.test(ev) && !NON_RACE.test(ev),
+      // 宽窗口判赛事语义与「事件类型」短语；报名/抽签类短语只看日期紧邻处（见 ADMIN_NEAR 注释）
+      raceLike: RACE_SEM.test(ev) && !NON_RACE.test(ev) && !ADMIN_NEAR.test(nearAround(text, idx)),
       announced: ANNOUNCE.test(sentenceWindow(text, idx)),
       evidence: ev,
     };
@@ -221,10 +241,17 @@ export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {
   // 届次基准：**有「宣告句式」的比赛日**优先。
   // 否则抽签/报名句会把年份带偏 —— 纽约实测：2026 届比赛日还没跑，页面上的抽签句已经在写 2027，
   // 按"所有候选的年份"取下一届就会挑到 2027 的抽签日。
+  // 页面里"赛事名 + 年份"的写法（如 `the 2027 Boston Marathon` / `Tokyo Marathon 2027`）也要算作届次依据。
+  // 为什么：有的页面只写"下一届的报名在某日开"，比赛日本身还没公布；若不认这个年份，
+  // 就会把**报名日**当成比赛日静默返回（审计指出的同类风险）。认了之后宁可报"读不到"（退出码 2）。
+  const editionYearHints = new Set<number>();
+  for (const m of text.matchAll(/\b(20\d{2})\s+[A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,2}\s+[Mm]arathon\b/g)) editionYearHints.add(+m[1]);
+  for (const m of text.matchAll(/\b[A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,2}\s+[Mm]arathon\s+(20\d{2})\b/g)) editionYearHints.add(+m[1]);
+
   const raceLikeCands = candidates.filter((c) => c.raceLike);
   const announcedCands = raceLikeCands.filter((c) => c.announced);
   const yearBasis = announcedCands.length > 0 ? announcedCands : raceLikeCands;
-  const years = [...new Set(yearBasis.map((c) => c.year))].sort((a, b) => b - a);
+  const years = [...new Set([...yearBasis.map((c) => c.year), ...editionYearHints])].sort((a, b) => b - a);
   const targetYear = years.includes(nextYear) ? nextYear : (years[0] ?? nextYear);
 
   const pool = candidates.filter((c) => c.raceLike && c.year === targetYear);
