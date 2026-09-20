@@ -75,6 +75,15 @@ export interface Candidate {
   evidence: string;
   /** 宽上下文（整句），仅供人工复核 */
   sentence?: string;
+  /**
+   * **句内窗口**（句号/分号截断）—— 供主赛事关键词判定用。
+   *
+   * 为什么关键词不能拿 `evidence`（±110/30 宽窗口）判：邻句里另一场比赛名会渗进来，
+   * 导致两条候选都"命中关键词"，退化成按最近未来日期挑（独立审计 X3 实测：
+   * `Berlin Road Race … will be held on 23 August 2027. The Berlin Marathon will take place on 26 September 2027.`
+   * + hint `/BERLIN[- ]?MARATHON/i` → 原先挑到配套赛 08-23）。
+   */
+  clause?: string;
 }
 
 export interface PickResult {
@@ -179,15 +188,24 @@ export function extractCandidates(text: string): Candidate[] {
     if (!hit) out.push(c);
     else if (score(c) > score(hit)) { hit.raceLike = c.raceLike; hit.announced = c.announced; hit.evidence = c.evidence; }
   };
-  const mk = (d1: number, d2: number | null, mon: string, y: number, idx: number, mon2?: string): Candidate => {
+  const mk = (
+    d1: number,
+    d2: number | null,
+    mon: string,
+    y: number,
+    idx: number,
+    mon2?: string,
+    y2?: number,
+  ): Candidate => {
     const mo = MONTHS[mon.toLowerCase()];
     const moEnd = mon2 ? MONTHS[mon2.toLowerCase()] : mo;
     const win = windowAround(text, idx);
     const ev = win; // 判定与展示都用小窗口（宽上下文另存 sentence）
     return {
       sentence: sentenceAround(text, idx),
+      clause: sentenceWindow(text, idx),
       date: iso(y, mo, d1),
-      dateEnd: d2 === null ? undefined : iso(y, moEnd, d2),
+      dateEnd: d2 === null ? undefined : iso(y2 ?? y, moEnd, d2),
       year: y,
       kind: d2 === null ? "single-day" : "two-day",
       // 宽窗口判赛事语义与「事件类型」短语；报名/抽签类短语只看日期紧邻处（见 ADMIN_NEAR 注释）
@@ -208,6 +226,12 @@ export function extractCandidates(text: string): Candidate[] {
   // 英文：两天 —— "…on Saturday 24 and Sunday 25 April 2027"（德式星期名同样支持）
   const two = new RegExp(String.raw`(?:${DAYNAME})\s+(\d{1,2})\s*(?:,)?\s+and\s+(?:${DAYNAME})\s+(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
   for (const m of text.matchAll(two)) push(mk(+m[1], +m[2], m[3], +m[4], m.index ?? 0));
+
+  // 英文：**跨年**区间 —— "30 December 2027–2 January 2028" / "December 30, 2027–January 2, 2028"（审计 X2）
+  const dashY = new RegExp(String.raw`(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})\s*[–—−-]\s*(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
+  for (const m of text.matchAll(dashY)) push(mk(+m[1], +m[4], m[2], +m[3], m.index ?? 0, m[5], +m[6]));
+  const usDashY = new RegExp(String.raw`(${MONTH_ALT})\.?\s+(\d{1,2}),?\s+(\d{4})\s*[–—−-]\s*(${MONTH_ALT})\.?\s+(\d{1,2}),?\s+(\d{4})`, "gi");
+  for (const m of text.matchAll(usDashY)) push(mk(+m[2], +m[5], m[1], +m[3], m.index ?? 0, m[4], +m[6]));
 
   // 英文：**跨月**区间 —— "30 April–1 May 2027" / "April 30–May 1, 2027"（审计 D3：原先识别不到）
   const dashX = new RegExp(String.raw`(\d{1,2})\s+(${MONTH_ALT})\s*[–—−-]\s*(\d{1,2})\s+(${MONTH_ALT})\s+(\d{4})`, "gi");
@@ -306,7 +330,8 @@ export function pickRaceDates(text: string, todayIso: string, opts: PickOpts = {
 
   // 主赛事优先（每站关键词）；一层都没命中就退回一般赛事语义
   const hint = opts.mainEventHint;
-  const hintHit = hint ? usedPool.filter((c) => hint.test(c.evidence) || hint.test(c.sentence ?? "")) : usedPool;
+  // 关键词只在**本日期的句内窗口**里找（外部窗口会把邻句别的赛事名卷进来 —— 审计 X3）
+  const hintHit = hint ? usedPool.filter((c) => hint.test(c.clause ?? c.evidence)) : usedPool;
   const hintMissed = Boolean(hint) && hintHit.length === 0;
   const stage1 = hintHit.length > 0 ? hintHit : usedPool;
 

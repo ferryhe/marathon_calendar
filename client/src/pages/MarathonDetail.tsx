@@ -48,6 +48,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useTranslation } from "react-i18next";
 
 import { ROAD_TAG_LABELS, TRAIL_TAG_LABELS } from "@/lib/tagLabels";
+import { formatDateRange } from "@/lib/dateRange";
 
 function formatDate(dateValue: string | null | undefined, lang = "zh", fallback = "—") {
   if (!dateValue) return fallback;
@@ -258,7 +259,7 @@ export default function MarathonDetailPage() {
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <Calendar className="w-4 h-4" />
-                    {t("detail.latestRaceLabel")}{formatDate(latest?.raceDate, i18n.language, t("list.locationFallback"))}
+                    {t("detail.latestRaceLabel")}{formatDateRange(latest?.raceDate, latest?.raceEndDate, i18n.language, t("list.locationFallback"))}
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <Star className="w-4 h-4" />
@@ -408,7 +409,7 @@ export default function MarathonDetailPage() {
                         </div>
                         <p className="text-xs text-muted-foreground leading-tight">{t("detail.raceDay")}</p>
                         <p className="text-sm font-semibold text-green-500">
-                          {formatDate(latest.raceDate, i18n.language)}
+                          {formatDateRange(latest.raceDate, latest.raceEndDate, i18n.language)}
                         </p>
                       </div>
                     )}
@@ -608,7 +609,7 @@ export default function MarathonDetailPage() {
                           <div className="space-y-1">
                             <p className="text-sm font-medium">{edition.year}{t("detail.yearSuffix")}</p>
                             <p className="text-xs text-muted-foreground">
-                              {t("detail.raceDateLabel")}{formatDate(edition.raceDate, i18n.language, t("status.pending"))}
+                              {t("detail.raceDateLabel")}{formatDateRange(edition.raceDate, edition.raceEndDate, i18n.language, t("status.pending"))}
                             </p>
                           </div>
                           <StatusBadge

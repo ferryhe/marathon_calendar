@@ -31,6 +31,8 @@ import {
   useRemoveFavorite,
 } from "@/hooks/useAuth";
 
+import { formatDateRange } from "@/lib/dateRange";
+
 interface EventDetailsProps {
   event: MarathonListItem | null;
   open: boolean;
@@ -38,7 +40,7 @@ interface EventDetailsProps {
 }
 
 export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { toast } = useToast();
   const { data: currentUser } = useCurrentUser();
   const { data: favoriteStatus } = useFavoriteStatus(event?.id ?? "", open && !!event);
@@ -100,7 +102,9 @@ export function EventDetails({ event, open, onOpenChange }: EventDetailsProps) {
             <div className="flex items-center gap-1">
               <Calendar className="w-4 h-4" />
               <span>
-                {year}-{month}-{day}
+                {event.nextEdition?.raceEndDate && event.nextEdition.raceEndDate !== event.nextEdition.raceDate
+                  ? formatDateRange(event.nextEdition.raceDate, event.nextEdition.raceEndDate, i18n.language)
+                  : `${year}-${month}-${day}`}
               </span>
             </div>
             <div className="flex items-center gap-1">

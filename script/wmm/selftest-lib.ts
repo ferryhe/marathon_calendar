@@ -89,6 +89,20 @@ const TODAY = "2026-09-20";
   check("D1 赛事名在日期之后也能读到 → 2027-04-19", r.chosen?.date === "2027-04-19", { chosen: r.chosen?.date, notes: r.notes });
 }
 
+{
+  // 审计 X3：同一段文本里有两场比赛时，主赛事关键词必须真的起作用（不能被邻句干扰）
+  const t = `Berlin Road Race - Die Generalprobe will be held on 23 August 2027. The Berlin Marathon will take place on 26 September 2027.`;
+  const r = pickRaceDates(t, TODAY, { mainEventHint: /BERLIN[- ]?MARATHON/i });
+  check("X3 关键词命中正赛 → 不挑配套赛（选 2027-09-26）", r.chosen?.date === "2027-09-26", { chosen: r.chosen?.date, notes: r.notes });
+}
+
+{
+  // 审计 X2：跨年区间
+  const t = `The race will be held 30 December 2027–2 January 2028.`;
+  const r = pickRaceDates(t, TODAY, HINT);
+  check("X2 跨年区间识别为两天（2027-12-30 → 2028-01-02）", r.chosen?.date === "2027-12-30" && r.chosen?.dateEnd === "2028-01-02", r.chosen);
+}
+
 console.log(`\n# ${pass} assertion(s) passed, ${fails.length} failed`);
 if (fails.length) {
   console.log("# FAILED:", fails.join(" | "));
